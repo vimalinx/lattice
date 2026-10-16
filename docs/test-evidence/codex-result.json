@@ -1,0 +1,10 @@
+{
+  "path": "/tmp/lattice-codex-e2e-5uhjddm6",
+  "checks": [
+    "Actual Codex reply through teaching bridge",
+    "Real model structured course/card/cell parsed",
+    "Explicit acceptance persisted proposed material",
+    "Actual accepted Codex experiment executed to 42"
+  ],
+  "reply": "在 Python 里，`+` 可以把两个数字相加，例如 `40 + 2` 表示把 40 和 2 合在一起。对数字使用加法时，结果是一个新的数字；这行表达式本身不会改变原来的数。\n\n```lattice\n{\n  \"version\": 1,\n  \"summary\": \"从简单的加法开始观察 Python 如何计算表达式，为之后理解程序如何根据样本调整判断做准备。\",\n  \"lessons\": [\n    {\n      \"title\": \"让 Python 算出一个和\",\n      \"objective\": \"理解两个数字相加后，表达式会得到一个结果。\",\n      \"body\": \"先看表达式 `40 + 2`：Python 会把两个数字相加，并得到一个结果。试着把其中一个数字换掉，看看表达式的结果如何变化。下一步可以把结果保存到变量里，观察计算结果如何在程序中继续使用。\"\n    }\n  ],\n  \"cards\": [\n    {\n      \"title\": \"ACP验收加法\",\n      \"body\": \"在 Python 中，`+` 可以对数字执行加法。例如 `40 + 2` 表示计算两个数字的和。\",\n      \"question\": \"如果把 `40 + 2` 改成 `40 + 3`，你预计结果会怎样变化？\",\n      \"tags\": [\"Python\", \"加法\"]\n    }\n  ],\n  \"cells\": [\n    {\n      \"kind\": \"code\",\n      \"source\": \"40 + 2\"\n    }\n  ]\n}\n```"
+}

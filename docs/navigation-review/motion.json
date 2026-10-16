@@ -1,0 +1,214 @@
+{
+  "checks": [
+    "toggle keeps navigation DOM",
+    "toggle keeps editor DOM and text",
+    "keyboard focus survives toggle",
+    "collapsed width reaches 64",
+    "content edge tracks sidebar continuously",
+    "icons do not jump vertically",
+    "multiple intermediate animation frames",
+    "labels fade rather than disappear",
+    "expanded width restores",
+    "rapid reversals settle to last click",
+    "collapsed accessible state",
+    "page render preserves animated shell",
+    "page render does not jump to final width",
+    "route updates preserve sidebar and active state"
+  ],
+  "frames": [
+    {
+      "t": 3511.800000011921,
+      "width": 208,
+      "mainX": 208,
+      "iconX": 25,
+      "iconY": 155,
+      "labelOpacity": 1
+    },
+    {
+      "t": 3517.800000011921,
+      "width": 208,
+      "mainX": 208,
+      "iconX": 25,
+      "iconY": 155,
+      "labelOpacity": 1
+    },
+    {
+      "t": 3531.300000011921,
+      "width": 167.703125,
+      "mainX": 167.703125,
+      "iconX": 24.140625,
+      "iconY": 155,
+      "labelOpacity": 0.738676
+    },
+    {
+      "t": 3547.899999976158,
+      "width": 131.984375,
+      "mainX": 131.984375,
+      "iconX": 23.390625,
+      "iconY": 155,
+      "labelOpacity": 0.361566
+    },
+    {
+      "t": 3564.300000011921,
+      "width": 107.5,
+      "mainX": 107.5,
+      "iconX": 22.890625,
+      "iconY": 155,
+      "labelOpacity": 0.14813
+    },
+    {
+      "t": 3581.100000023842,
+      "width": 92.328125,
+      "mainX": 92.328125,
+      "iconX": 22.578125,
+      "iconY": 155,
+      "labelOpacity": 0.0428811
+    },
+    {
+      "t": 3597.800000011921,
+      "width": 82.828125,
+      "mainX": 82.828125,
+      "iconX": 22.375,
+      "iconY": 155,
+      "labelOpacity": 0.00304645
+    },
+    {
+      "t": 3614.5,
+      "width": 76.65625,
+      "mainX": 76.65625,
+      "iconX": 22.25,
+      "iconY": 155,
+      "labelOpacity": 0
+    },
+    {
+      "t": 3632.300000011921,
+      "width": 72.4375,
+      "mainX": 72.4375,
+      "iconX": 22.171875,
+      "iconY": 155,
+      "labelOpacity": 0
+    },
+    {
+      "t": 3651.699999988079,
+      "width": 69.515625,
+      "mainX": 69.515625,
+      "iconX": 22.09375,
+      "iconY": 155,
+      "labelOpacity": 0
+    },
+    {
+      "t": 3670.600000023842,
+      "width": 67.46875,
+      "mainX": 67.46875,
+      "iconX": 22.0625,
+      "iconY": 155,
+      "labelOpacity": 0
+    },
+    {
+      "t": 3689.5,
+      "width": 66.0625,
+      "mainX": 66.0625,
+      "iconX": 22.03125,
+      "iconY": 155,
+      "labelOpacity": 0
+    },
+    {
+      "t": 3709.100000023842,
+      "width": 65.109375,
+      "mainX": 65.109375,
+      "iconX": 22,
+      "iconY": 155,
+      "labelOpacity": 0
+    },
+    {
+      "t": 3714.899999976158,
+      "width": 64.5,
+      "mainX": 64.5,
+      "iconX": 21.984375,
+      "iconY": 155,
+      "labelOpacity": 0
+    },
+    {
+      "t": 3734.199999988079,
+      "width": 64.15625,
+      "mainX": 64.15625,
+      "iconX": 21.984375,
+      "iconY": 155,
+      "labelOpacity": 0
+    },
+    {
+      "t": 3754.800000011921,
+      "width": 64,
+      "mainX": 64,
+      "iconX": 21.984375,
+      "iconY": 155,
+      "labelOpacity": 0
+    },
+    {
+      "t": 3774.199999988079,
+      "width": 64,
+      "mainX": 64,
+      "iconX": 22,
+      "iconY": 155,
+      "labelOpacity": 0
+    },
+    {
+      "t": 3793.199999988079,
+      "width": 64,
+      "mainX": 64,
+      "iconX": 22,
+      "iconY": 155,
+      "labelOpacity": 0
+    },
+    {
+      "t": 3813,
+      "width": 64,
+      "mainX": 64,
+      "iconX": 22,
+      "iconY": 155,
+      "labelOpacity": 0
+    },
+    {
+      "t": 3814.600000023842,
+      "width": 64,
+      "mainX": 64,
+      "iconX": 22,
+      "iconY": 155,
+      "labelOpacity": 0
+    },
+    {
+      "t": 3831.300000011921,
+      "width": 64,
+      "mainX": 64,
+      "iconX": 22,
+      "iconY": 155,
+      "labelOpacity": 0
+    },
+    {
+      "t": 3847.899999976158,
+      "width": 64,
+      "mainX": 64,
+      "iconX": 22,
+      "iconY": 155,
+      "labelOpacity": 0
+    },
+    {
+      "t": 3864.300000011921,
+      "width": 64,
+      "mainX": 64,
+      "iconX": 22,
+      "iconY": 155,
+      "labelOpacity": 0
+    },
+    {
+      "t": 3881.100000023842,
+      "width": 64,
+      "mainX": 64,
+      "iconX": 22,
+      "iconY": 155,
+      "labelOpacity": 0
+    }
+  ],
+  "done": true,
+  "reduced": false
+}

@@ -1,0 +1,37 @@
+{
+  "notes": {
+    "original_rows": 4,
+    "current_rows": 4,
+    "all_original_rows_preserved": true
+  },
+  "revisions": {
+    "original_rows": 1,
+    "current_rows": 1,
+    "all_original_rows_preserved": true
+  },
+  "projects": {
+    "original_rows": 1,
+    "current_rows": 1,
+    "all_original_rows_preserved": true
+  },
+  "experiments": {
+    "original_rows": 1,
+    "current_rows": 1,
+    "all_original_rows_preserved": true
+  },
+  "experiment_runs": {
+    "original_rows": 1,
+    "current_rows": 1,
+    "all_original_rows_preserved": true
+  },
+  "messages": {
+    "original_rows": 0,
+    "current_rows": 0,
+    "all_original_rows_preserved": true
+  },
+  "tasks": {
+    "original_rows": 2,
+    "current_rows": 2,
+    "all_original_rows_preserved": true
+  }
+}

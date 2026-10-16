@@ -1,0 +1,16 @@
+PASS real Jupyter execute_result
+PASS persistent variables across cells
+PASS actual inline PNG figure
+PASS real Python exception
+PASS run-all stops after error
+PASS interrupt infinite loop
+PASS restart clears live variables
+PASS Flash Unicode SSE assembly
+PASS truncated SSE preserves partial, reports error
+PASS HTTP errors redact credentials
+PASS Flash cancellation interrupts pending network read
+PASS API settings connection test reads /models
+RUNTIME_RESULT {"passed": 12, "checks": ["real Jupyter execute_result", "persistent variables across cells", "actual inline PNG figure", "real Python exception", "run-all stops after error", "interrupt infinite loop", "restart clears live variables", "Flash Unicode SSE assembly", "truncated SSE preserves partial, reports error", "HTTP errors redact credentials", "Flash cancellation interrupts pending network read", "API settings connection test reads /models"]}
+
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.

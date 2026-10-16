@@ -1,0 +1,36 @@
+{
+  "checks": [
+    "classroom renders",
+    "fast-answer hidden by default",
+    "fast-answer toggles without losing state",
+    "fast-answer composer opens as overlay drawer",
+    "drawer closes",
+    "table of contents opens as overlay",
+    "toc scrim closes the drawer",
+    "interest branch navigation",
+    "knowledge card CRUD",
+    "global search indexes learning cards",
+    "search result opens the card editor",
+    "learning sessions stay out of agent results",
+    "typed knowledge tree",
+    "graph shows real card nodes",
+    "ACP and API settings",
+    "saved key never returned to frontend",
+    "notebook cell editor",
+    "editor persists code",
+    "real Python result through UI",
+    "actual output visible"
+  ],
+  "errors": [],
+  "screenshots": [
+    "/tmp/lattice-qa-shell5/learning-classroom.png",
+    "/tmp/lattice-qa-shell5/learning-notebook.png",
+    "/tmp/lattice-qa-shell5/learning-dialogue.png",
+    "/tmp/lattice-qa-shell5/knowledge-cards.png",
+    "/tmp/lattice-qa-shell5/knowledge-tree.png",
+    "/tmp/lattice-qa-shell5/knowledge-graph.png",
+    "/tmp/lattice-qa-shell5/connections-main.png",
+    "/tmp/lattice-qa-shell5/notes-main.png",
+    "/tmp/lattice-qa-shell5/learning-small.png"
+  ]
+}
