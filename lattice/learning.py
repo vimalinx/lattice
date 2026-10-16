@@ -615,6 +615,7 @@ class LearningStore:
         cards = [self.card(r["id"]) for r in self.rows("SELECT id FROM learn_cards ORDER BY updated_at DESC")]
         result = {"version": VERSION, "topics": topics, "active_topic": topic_id, "cards": cards,
                   "all_lessons": self.rows("SELECT * FROM learn_lessons ORDER BY topic_id, position"),
+                  "all_notebooks": self.rows("SELECT id,title,topic_id FROM learn_notebooks ORDER BY updated_at DESC"),
                   "relations": self.rows("SELECT * FROM learn_relations ORDER BY created_at"),
                   # Topic-scoped keys always exist so the frontend never has to
                   # distinguish "no topic yet" from "missing field".

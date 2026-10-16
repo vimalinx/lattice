@@ -1,4 +1,4 @@
-"""Lattice local-first SQLite model: notes, knowledge, experiments, agents and revisions."""
+"""Lattice local-first SQLite model: notes, revisions, mounted folders and AI sessions."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -59,19 +59,6 @@ class Store:
           id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE,
           created_at TEXT NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS experiments(
-          id TEXT PRIMARY KEY, title TEXT NOT NULL, question TEXT NOT NULL DEFAULT '',
-          hypothesis TEXT NOT NULL DEFAULT '', code TEXT NOT NULL DEFAULT '',
-          output TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'draft',
-          project_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS experiment_runs(
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          experiment_id TEXT NOT NULL, code TEXT NOT NULL,
-          output TEXT NOT NULL, exit_code INTEGER NOT NULL,
-          ended_at TEXT NOT NULL,
-          FOREIGN KEY(experiment_id) REFERENCES experiments(id) ON DELETE CASCADE
-        );
         CREATE TABLE IF NOT EXISTS sessions(
           id TEXT PRIMARY KEY, agent TEXT NOT NULL, title TEXT NOT NULL,
           project_id TEXT, remote_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -80,10 +67,6 @@ class Store:
           id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
           role TEXT NOT NULL, content TEXT NOT NULL, meta TEXT NOT NULL DEFAULT '{}',
           created_at TEXT NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
-        );
-        CREATE TABLE IF NOT EXISTS tasks(
-          id TEXT PRIMARY KEY, label TEXT NOT NULL,
-          done INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated_at DESC);
         CREATE INDEX IF NOT EXISTS idx_revision_note ON revisions(note_id, id DESC);
@@ -105,15 +88,13 @@ class Store:
 这是你的本地 AI 学习与创造工作台。这里连接**理解、实验、行动与历史**。
 
 ### 一种工作的节奏
-从真实困惑出发，先形成直觉和可证伪的猜测，再构造一个足够小的实验。让 Codex 或 Devin 协助实现，把真实结果带回自己的理解里。
+从真实困惑出发，先形成直觉和可证伪的猜测，再在实验笔记里构造一个足够小的实验，把真实结果带回自己的理解里。
 
 - **笔记**留住想法，而不是复制大段答案。
-- **实验**留下可运行的代码、输入与结果。
-- **Agent**协助探索与执行，聊天记录在本地留痕。
-- **时光机**让你比较从前的理解与现在的判断。
+- **版本历史**让你比较从前的理解与现在的判断。
 - **知识网络**由 `[[双向链接]]` 自动组织。
 
-试试在笔记中输入 `[[Attention]]`，然后在「知识图谱」里观察连接。
+试试在笔记中输入 `[[Attention]]`，然后在「知识网络」里观察连接。
 
 > 这些是示例内容，不代表你已经完成了相关学习。
 """,
@@ -159,8 +140,6 @@ class Store:
         study = Path.home() / "Projects" / "StudyLab"
         if study.is_dir():
             self.add_project("StudyLab · 既有学习目录", str(study))
-        self.create_task("在笔记中写下一个真正想弄明白的问题")
-        self.create_task("构造第一个可以复现的小实验")
 
     def emit(self, kind, title, detail="", target=""):
         self.db.execute("INSERT INTO events(kind,title,detail,target,at) VALUES(?,?,?,?,?)",
@@ -270,37 +249,6 @@ class Store:
         return [{"id":x["id"],"title":x["title"]} for x in self.list_notes(limit=1000)
                 if x["id"] != note_id and title in [w.casefold() for w in words(x["body"])]]
 
-    def stats(self):
-        c = self.db
-        return {
-            "notes":c.execute("SELECT count(*) FROM notes").fetchone()[0],
-            "experiments":c.execute("SELECT count(*) FROM experiments").fetchone()[0],
-            "sessions":c.execute("SELECT count(*) FROM sessions").fetchone()[0],
-            "relations":len(self.graph()["edges"]),
-            "tasks":c.execute("SELECT count(*) FROM tasks WHERE done=0").fetchone()[0],
-        }
-
-    def events(self, limit=150):
-        return records(self.db.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?",(min(limit,500),)))
-
-    def create_task(self, label):
-        now = stamp()
-        ident = identifier()
-        self.db.execute("INSERT INTO tasks VALUES(?,?,0,?)",(ident, label.strip()[:300],now))
-        self.db.commit()
-        return ident
-
-    def tasks(self):
-        return records(self.db.execute("SELECT * FROM tasks ORDER BY done,created_at DESC"))
-
-    def toggle_task(self, ident, done):
-        self.db.execute("UPDATE tasks SET done=? WHERE id=?",(int(bool(done)),ident))
-        self.db.commit()
-
-    def delete_task(self, ident):
-        self.db.execute("DELETE FROM tasks WHERE id=?", (ident,))
-        self.db.commit()
-
     def add_project(self, name, path):
         p = Path(path).expanduser().resolve()
         if not p.is_dir():
@@ -396,58 +344,10 @@ class Store:
             self.emit("file", f"编辑文件 · {path.name}",str(path))
         return True
 
-    def new_experiment(self, title,project_id=None):
-        ident=identifier()
-        now=stamp()
-        self.db.execute(
-            "INSERT INTO experiments(id,title,project_id,created_at,updated_at) VALUES(?,?,?,?,?)",
-            (ident, title[:180] or "未命名实验", project_id, now,now))
-        self.db.commit()
-        self.emit("experiment",f"新实验 · {title}","待设计",ident)
-        return self.experiment(ident)
-
-    def experiment(self, ident):
-        row=self.db.execute("SELECT * FROM experiments WHERE id=?",(ident,)).fetchone()
-        return dict(row) if row else None
-
-    def experiments(self):
-        return records(self.db.execute("SELECT * FROM experiments ORDER BY updated_at DESC LIMIT 200"))
-
-    def save_experiment(self, data):
-        ident=data.get("id")
-        if not self.experiment(ident):
-            raise ValueError("实验不存在")
-        attrs=["title","question","hypothesis","code","status","output"]
-        old=self.experiment(ident)
-        items=[str(data.get(k,old[k])) for k in attrs]
-        self.db.execute(
-            "UPDATE experiments SET title=?,question=?,hypothesis=?,code=?,status=?,output=?,updated_at=? WHERE id=?",
-            (*items,stamp(),ident))
-        self.db.commit()
-        return self.experiment(ident)
-
-    def experiment_history(self, ident):
-        return records(self.db.execute(
-            "SELECT id,experiment_id,exit_code,ended_at,substr(output,1,140) AS preview "
-            "FROM experiment_runs WHERE experiment_id=? ORDER BY id DESC LIMIT 70",(ident,)))
-
-    def experiment_run(self, run_id):
-        row=self.db.execute("SELECT * FROM experiment_runs WHERE id=?",(run_id,)).fetchone()
-        return dict(row) if row else None
-
-    def record_experiment_run(self, ident, exit_code, output):
-        exp=self.experiment(ident)
-        if not exp:
-            raise ValueError("实验不存在")
-        self.db.execute(
-            "INSERT INTO experiment_runs(experiment_id,code,output,exit_code,ended_at) VALUES(?,?,?,?,?)",
-            (ident,exp["code"],output,int(exit_code),stamp()))
-        self.db.commit()
-
     def new_session(self, agent, project_id=None, title=None):
         ident=identifier()
         t=stamp()
-        title=title or ("与 Codex 探索" if agent=="codex" else "与 Devin SWE-2 协作")
+        title=title or ("与 "+agent+" 探索")
         self.db.execute(
             "INSERT INTO sessions(id,agent,title,project_id,created_at,updated_at) VALUES(?,?,?,?,?,?)",
             (ident, agent,title,project_id,t,t))
@@ -458,9 +358,6 @@ class Store:
     def session(self, ident):
         row=self.db.execute("SELECT * FROM sessions WHERE id=?",(ident,)).fetchone()
         return dict(row) if row else None
-
-    def sessions(self):
-        return records(self.db.execute("SELECT * FROM sessions ORDER BY updated_at DESC"))
 
     def set_remote_id(self, ident, remote_id):
         self.db.execute("UPDATE sessions SET remote_id=? WHERE id=?",(remote_id,ident))
@@ -479,10 +376,6 @@ class Store:
             "SELECT * FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 1500",(session_id,)))
         rows.reverse()
         return rows
-
-    def rename_session(self, ident, title):
-        self.db.execute("UPDATE sessions SET title=? WHERE id=?",(title[:180],ident))
-        self.db.commit()
 
     def export_markdown(self, dest):
         target=Path(dest).expanduser().resolve()

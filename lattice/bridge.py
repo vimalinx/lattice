@@ -1,4 +1,4 @@
-"""Qt 6 bridge: native OS integrations, local persistence, ACP and live lab processes."""
+"""Qt 6 bridge: native OS integrations and local persistence for notes and mounted folders."""
 from __future__ import annotations
 
 import json
@@ -7,18 +7,14 @@ from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
 import re
-import subprocess
-import sys
 
-from PySide6.QtCore import QObject, Signal, Slot, QProcess, QProcessEnvironment, QTimer, QUrl
+from PySide6.QtCore import QObject, Signal, Slot, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QFileDialog
 
 from .store import Store, APP_HOME
-from .acp import AgentWorker
 
 LOG = logging.getLogger("lattice")
-LAB_TIMEOUT_MS = 10 * 60 * 1000
 
 
 def compact(items):
@@ -33,13 +29,6 @@ class Bridge(QObject):
         self._init_log()
         self.store = store or Store()
         self.workers = {}
-        self.processes = {}
-        self.output = {}
-        self.lab_timers = {}
-        self.workspace = APP_HOME / "workspace"
-        self.workspace.mkdir(parents=True,exist_ok=True)
-        self.lab_home = APP_HOME / "experiments"
-        self.lab_home.mkdir(parents=True,exist_ok=True)
 
     @staticmethod
     def _init_log():
@@ -70,11 +59,6 @@ class Bridge(QObject):
         return {
             "notes":self.store.list_notes(limit=300),
             "projects":self.store.projects(),
-            "experiments":self.store.experiments(),
-            "sessions":self.store.sessions(),
-            "tasks":self.store.tasks(),
-            "stats":self.store.stats(),
-            "events":self.store.events(100),
             "graph":self.store.graph(),
         }
 
@@ -113,20 +97,6 @@ class Bridge(QObject):
             return d.backlinks(args["id"])
         if method=="graph":
             return d.graph()
-        if method=="stats":
-            return d.stats()
-        if method=="events":
-            return d.events(args.get("limit",150))
-        if method=="tasks":
-            return d.tasks()
-        if method=="task_add":
-            return d.create_task(args["label"])
-        if method=="task_toggle":
-            d.toggle_task(args["id"],args["done"])
-            return d.tasks()
-        if method=="task_delete":
-            d.delete_task(args["id"])
-            return d.tasks()
         if method=="project_add":
             path=args.get("path") or self._folder_picker("选择本地代码或笔记目录")
             if not path:
@@ -143,45 +113,6 @@ class Bridge(QObject):
         if method=="file_open_external":
             path,_=d._safe_path(args["id"],args["path"])
             return QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
-        if method=="experiments":
-            return d.experiments()
-        if method=="experiment_create":
-            return d.new_experiment(args.get("title","新实验"),args.get("project_id"))
-        if method=="experiment_get":
-            return d.experiment(args["id"])
-        if method=="experiment_dir":
-            ident = args["id"]
-            if not d.experiment(ident):
-                raise ValueError("实验不存在")
-            path = self.lab_home / ident
-            path.mkdir(parents=True, exist_ok=True)
-            return str(path)
-        if method=="experiment_history":
-            return d.experiment_history(args["id"])
-        if method=="experiment_run_get":
-            return d.experiment_run(args["id"])
-        if method=="experiment_save":
-            return d.save_experiment(args["experiment"])
-        if method=="experiment_run":
-            return self.run_experiment(args["id"])
-        if method=="experiment_stop":
-            return self.stop_experiment(args["id"])
-        if method=="sessions":
-            return d.sessions()
-        if method=="session_create":
-            return d.new_session(args.get("agent","codex"),args.get("project_id"),args.get("title"))
-        if method=="session_messages":
-            return d.messages(args["id"])
-        if method=="session_rename":
-            d.rename_session(args["id"],args["title"])
-            return True
-        if method=="agent_send":
-            return self.send_agent(args["id"],args["text"])
-        if method=="agent_cancel":
-            w=self.workers.get(args["id"])
-            if w:
-                w.post("cancel")
-            return True
         if method=="agent_permission":
             w=self.workers.get(args["id"])
             if w:
@@ -195,11 +126,10 @@ class Bridge(QObject):
             return self.import_markdown(folder) if folder else None
         if method=="open_folder":
             requested=Path(args.get("path") or str(APP_HOME)).resolve()
-            allowed={APP_HOME.resolve(),self.lab_home.resolve()}
+            allowed={APP_HOME.resolve()}
             allowed|={Path(p["path"]).resolve() for p in self.store.projects()}
-            allowed|={self.lab_home.resolve()/e["id"] for e in self.store.experiments()}
             if requested not in allowed:
-                raise ValueError("只能打开应用数据目录、实验目录或已挂载的项目目录")
+                raise ValueError("只能打开应用数据目录或已挂载的项目目录")
             return QDesktopServices.openUrl(QUrl.fromLocalFile(str(requested)))
         if method=="open_url":
             url=QUrl(args["url"])
@@ -243,152 +173,7 @@ class Bridge(QObject):
             self.store.emit("import",f"导入 {count} 篇 Markdown 笔记",str(root))
         return {"count":count}
 
-    def _agent_cwd(self, session):
-        p=self.store.project(session.get("project_id"))
-        return p["path"] if p else str(self.workspace)
-
-    def send_agent(self, ident, text):
-        message=text.strip()
-        if not message:
-            raise ValueError("请输入问题")
-        session=self.store.session(ident)
-        if not session:
-            raise ValueError("会话不存在")
-        w=self.workers.get(ident)
-        if w and w.busy:
-            raise ValueError("Agent 正在处理上一个任务")
-        self.store.append_message(ident,"user",message)
-        if not w or not w.isRunning():
-            w=AgentWorker(ident,session["agent"],self._agent_cwd(session),session.get("remote_id"))
-            providers=getattr(self,"providers",None)
-            if providers:
-                w.agent_config=providers.read()
-            w.event.connect(self.agent_event)
-            self.workers[ident]=w
-            w.post("prompt",text=message)
-            w.start()
-        else:
-            w.post("prompt",text=message)
-        return True
-
-    @Slot(dict)
-    def agent_event(self, evt):
-        ident=evt["session_id"]
-        kind=evt["kind"]
-        if kind=="ready":
-            self.store.set_remote_id(ident,evt.get("remote_id"))
-        if kind=="finished":
-            body=evt.get("text","")
-            if body.strip():
-                self.store.append_message(ident,"assistant",body,
-                    {"stop_reason":evt.get("stop_reason","end_turn")})
-                self.store.emit("agent","Agent 完成回复",self.store.session(ident)["title"],ident)
-        self.announce({"type":"agent",**evt})
-
-    def run_experiment(self, ident):
-        data=self.store.experiment(ident)
-        if not data:
-            raise ValueError("实验不存在")
-        if ident in self.processes and self.processes[ident].state()!=QProcess.ProcessState.NotRunning:
-            raise ValueError("实验已经在运行")
-        directory=self.lab_home/ident
-        directory.mkdir(parents=True,exist_ok=True)
-        code=str(data["code"] or "print('从这里写下第一段验证代码')")
-        source=directory/"main.py"
-        source.write_text(code,encoding="utf-8")
-        proc=QProcess(self)
-        proc.setProgram(sys.executable)
-        proc.setArguments(["-u",str(source)])
-        proc.setWorkingDirectory(str(directory))
-        env=QProcessEnvironment.systemEnvironment()
-        project=self.store.project(data.get("project_id"))
-        if project:
-            prev=env.value("PYTHONPATH","")
-            env.insert("PYTHONPATH",project["path"] + (os.pathsep+prev if prev else ""))
-        proc.setProcessEnvironment(env)
-        self.processes[ident]=proc
-        self.output[ident]=""
-        self.store.save_experiment({**data,"status":"running","output":""})
-        proc.readyReadStandardOutput.connect(lambda lab=ident: self._lab_output(lab,False))
-        proc.readyReadStandardError.connect(lambda lab=ident: self._lab_output(lab,True))
-        proc.finished.connect(lambda code,status,lab=ident:self._lab_finished(lab,code,status))
-        proc.errorOccurred.connect(lambda _error,lab=ident:self._lab_error(lab))
-        proc.start()
-        timer=QTimer(self)
-        timer.setSingleShot(True)
-        timer.timeout.connect(lambda lab=ident:self._lab_timeout(lab))
-        timer.start(LAB_TIMEOUT_MS)
-        self.lab_timers[ident]=timer
-        self.announce({"type":"lab","kind":"status","id":ident,"status":"running"})
-        return {"status":"running","path":str(source)}
-
-    def _lab_output(self, ident, error):
-        proc=self.processes.get(ident)
-        if not proc:
-            return
-        raw=proc.readAllStandardError() if error else proc.readAllStandardOutput()
-        text=bytes(raw).decode("utf-8","replace")
-        if not text:
-            return
-        self.output[ident]=(self.output.get(ident,"")+text)[-220000:]
-        self.announce({"type":"lab","kind":"output","id":ident,"text":text,"stream":"stderr" if error else "stdout"})
-
-    def _lab_timeout(self, ident):
-        proc=self.processes.get(ident)
-        if not proc or proc.state()==QProcess.ProcessState.NotRunning:
-            return
-        LOG.warning("实验 %s 超过 %s 分钟，已停止", ident, LAB_TIMEOUT_MS//60000)
-        self.output[ident]=(self.output.get(ident,"")+
-            f"\n[Lattice] 执行超过 {LAB_TIMEOUT_MS//60000} 分钟，已自动停止。\n")[-220000:]
-        proc.kill()
-
-    def _lab_finished(self, ident, code, status):
-        timer=self.lab_timers.pop(ident,None)
-        if timer:
-            timer.stop()
-        proc=self.processes.get(ident)
-        if not proc:
-            return
-        self._lab_output(ident,False)
-        self._lab_output(ident,True)
-        current=self.store.experiment(ident)
-        if current:
-            outcome="completed" if code==0 and status==QProcess.ExitStatus.NormalExit else "failed"
-            self.store.save_experiment({**current,"status":outcome,"output":self.output.get(ident,"")})
-            self.store.record_experiment_run(ident, code, self.output.get(ident,""))
-            self.store.emit("experiment",f"实验{('完成' if outcome=='completed' else '异常')} · {current['title']}",
-                            f"退出码 {code}",ident)
-            self.announce({"type":"lab","kind":"status","id":ident,"status":outcome,"exit_code":code})
-
-    def _lab_error(self, ident):
-        proc=self.processes.get(ident)
-        if not proc:
-            return
-        self.announce({"type":"lab","kind":"error","id":ident,"message":proc.errorString()})
-        if proc.error()==QProcess.ProcessError.FailedToStart:
-            # finished may never fire on a failed start; clean up eagerly or the
-            # experiment stays "running" forever with a dead timer.
-            timer=self.lab_timers.pop(ident,None)
-            if timer:
-                timer.stop()
-            self.processes.pop(ident,None)
-            current=self.store.experiment(ident)
-            if current:
-                self.store.save_experiment({**current,"status":"failed","output":self.output.get(ident,"") or proc.errorString()})
-            self.announce({"type":"lab","kind":"status","id":ident,"status":"failed"})
-
-    def stop_experiment(self, ident):
-        proc=self.processes.get(ident)
-        if not proc or proc.state()==QProcess.ProcessState.NotRunning:
-            return False
-        proc.kill()
-        return True
-
     def shutdown(self):
-        for proc in self.processes.values():
-            if proc.state()!=QProcess.ProcessState.NotRunning:
-                proc.kill()
-                proc.waitForFinished(1500)
         for w in self.workers.values():
             if w.isRunning():
                 w.post("stop")

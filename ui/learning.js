@@ -526,6 +526,7 @@ action=async function(target){
   await rpc('agent_permission',{id:p.session_id,request_id:p.request_id,option_id:kind==='permission-select'?a.dataset.choice:undefined});
   S.permission=null;closeModal();if(L.permissions.length)permissionModal(L.permissions.shift());return;
  }
+ if(S.commandOpen&&a.closest('#palette-list'))closeModal();
  if(!kind.startsWith('l-')&&!kind.startsWith('nb-'))return originalAction(target);
  switch(kind){
  case 'l-content-toggle':return toggleContent(a.dataset.kind,id);

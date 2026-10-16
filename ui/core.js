@@ -4,9 +4,7 @@ const S = {
   bridge:null, data:null, view:"learning", theme:localStorage.getItem("lattice-theme")||"dark",
   noteId:null, note:null, noteMode:"split", noteFilter:"", noteFolder:"All", sidebarCollapsed:localStorage.getItem("lattice-sidebar-collapsed")==="true",
   noteDirty:false,noteTimer:null,
-  labId:null, lab:null, labDirty:false,
-  sessionId:null, streaming:"",agentBusy:false,agentStatus:"ready",
-  agentTools:[], projectId:null,treePath:"",filePath:null,fileContent:"",fileDirty:false,
+  projectId:null,treePath:"",filePath:null,fileContent:"",fileDirty:false,
   graphFilter:"All", graphZoom:1,
   toastTimer:null, commandOpen:false, permission:null, permissionQueue:[], modalSnap:null
 };
@@ -20,7 +18,6 @@ function fmtDate(iso,full=false){
   return full ? date.toLocaleString("zh-CN",{year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) :
     date.toLocaleDateString("zh-CN",{month:"short",day:"numeric"});
 }
-function dateToday(){return new Date().toLocaleDateString("zh-CN",{year:"numeric",month:"long",day:"numeric",weekday:"long"});}
 function shorten(text,len=70){text=String(text||"").replace(/\s+/g," ");return text.length>len?text.slice(0,len)+"…":text;}
 function svg(name,size=18){
  const paths={
@@ -183,7 +180,7 @@ function nav(name,label,icon){
  const active=S.view===name;
  return '<button class="nav-link'+(active?' active':'')+'" data-action="nav" data-view="'+esc(name)+'" title="'+esc(label)+'" aria-label="'+esc(label)+'"'+(active?' aria-current="page"':'')+'>'+svg(icon,18)+'<span>'+esc(label)+'</span></button>';
 }
-const PAGES={home:"概览",notes:"知识笔记",graph:"知识网络",labs:"实验室",agents:"AI 协作",projects:"代码工作区",timeline:"时间线",settings:"设置与数据",...Object.fromEntries(NAV_ITEMS.map(([id,label])=>[id,label]))};
+const PAGES={settings:"设置与数据",...Object.fromEntries(NAV_ITEMS.map(([id,label])=>[id,label]))};
 function sidebar(){
  return '<aside class="sidebar" aria-label="主导航"><div class="brand"><div class="brand-icon">'+logo()+'</div><div class="brand-text"><div class="brand-name">lattice<span style="color:var(--accent)">.</span></div></div></div>'+
  '<button class="sidebar-toggle" data-action="sidebar-toggle" title="'+(S.sidebarCollapsed?'展开导航':'折叠导航')+'" aria-label="'+(S.sidebarCollapsed?'展开导航':'折叠导航')+'" aria-expanded="'+!S.sidebarCollapsed+'">'+svg('sidebar',18)+'<span>折叠导航</span></button>'+
@@ -195,7 +192,7 @@ function header(){
  return '<header class="topbar"><div class="breadcrumb"><span class="rootcrumb">工作空间</span>'+
  '<span class="chevron">'+svg("chevron",12)+'</span><strong>'+esc(title)+'</strong></div>'+
  '<div class="toolbar">'+
- '<button class="top-search" data-action="search">'+svg("search",15)+'<span>搜索笔记、实验、历史</span><span class="kbd">Ctrl K</span></button>'+
+ '<button class="top-search" data-action="search">'+svg("search",15)+'<span>搜索笔记、知识卡、课程</span><span class="kbd">Ctrl K</span></button>'+
  '<button class="icon-btn" title="切换明暗主题" data-action="theme">'+svg(S.theme==="dark"?"sun":"moon")+'</button>'+
  
  '</div></header>';

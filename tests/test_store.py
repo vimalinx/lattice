@@ -1,4 +1,4 @@
-"""Unit tests for local note history, graph, safe files and experiment persistence."""
+"""Unit tests for local note history, graph, safe files and Markdown export."""
 from pathlib import Path
 import tempfile
 import unittest
@@ -44,14 +44,6 @@ class StoreTests(unittest.TestCase):
         (project_dir/".env").write_text("SECRET=1")
         with self.assertRaises(ValueError):
             self.store.file_read(p["id"],".env")
-
-    def test_experiment_run_history(self):
-        lab=self.store.new_experiment("softmax",None)
-        self.store.save_experiment({**lab,"code":"print(1+2)","output":"3"})
-        self.store.record_experiment_run(lab["id"],0,"3\n")
-        items=self.store.experiment_history(lab["id"])
-        self.assertEqual(len(items),1)
-        self.assertEqual(self.store.experiment_run(items[0]["id"])["output"],"3\n")
 
     def test_export(self):
         note=self.store.save_note({"title":"记录","folder":"Daily","body":"# 今天"})

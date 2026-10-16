@@ -368,16 +368,6 @@ class LearningBridge(Bridge):
         worker.start()
         return {"state": "testing"}
 
-    def send_agent(self, ident, message):
-        """Avoid sending DeepSeek history to the legacy Devin ACP route."""
-        session = self.store.session(ident)
-        if session and session["agent"] == "deepseek":
-            row = self.store.db.execute("SELECT topic_id FROM learn_threads WHERE flash_session=?", (ident,)).fetchone()
-            if not row:
-                raise ValueError("这是历史快答会话，请到学习空间继续答疑")
-            return self.learning_send(row[0], "flash", message)
-        return super().send_agent(ident, message)
-
     def _kernel(self, notebook_id):
         self.learning.one("learn_notebooks", notebook_id)
         worker = self.notebook_workers.get(notebook_id)
