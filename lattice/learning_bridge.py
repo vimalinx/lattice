@@ -52,11 +52,14 @@ class LearningBridge(Bridge):
 
     def state(self):
         result = super().state()
+        result["graph"] = self.learning.graph()
         result["learning"] = self.learning_state()
         return result
 
     def dispatch(self, method, args):
         l = self.learning
+        if method == "graph":
+            return l.graph()
         if method == "learn_snapshot":
             return self.learning_state(args.get("topic_id"))
         if method == "learn_topic_save":

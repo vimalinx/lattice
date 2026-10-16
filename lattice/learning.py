@@ -11,6 +11,8 @@ import json
 import re
 import uuid
 
+from .store import words
+
 VERSION = 1
 SCHEMA_VERSION = 1
 STAGES = {"suggested", "seen", "explained", "applied"}
@@ -634,6 +636,39 @@ class LearningStore:
             for p in result["proposals"]:
                 p["payload"] = json.loads(p["payload"])
         return result
+
+    def graph(self):
+        """One graph for notes and cards: typed card relations plus [[links]].
+
+        A [[name]] resolves to a note first, then to a card with that title. A
+        link between two cards that already share a typed relation is dropped
+        so the typed edge carries the meaning."""
+        notes = self.store.list_notes(limit=1000)
+        cards = self.rows("SELECT id,title,canonical,body,understanding,stage,topic_id FROM learn_cards")
+        relations = self.rows("SELECT id,source,target,kind,reason FROM learn_relations")
+        note_by = {n["title"].casefold(): n["id"] for n in notes}
+        card_by = {c["canonical"]: c["id"] for c in cards}
+        typed = {frozenset((r["source"], r["target"])) for r in relations}
+        sources = [(n["id"], n["body"]) for n in notes] + [(c["id"], c["body"] + "\n" + c["understanding"]) for c in cards]
+        links, seen = [], set(typed)
+        for source, body in sources:
+            for name in words(body):
+                key = name.strip().casefold()
+                target = note_by.get(key) or card_by.get(key)
+                pair = frozenset((source, target))
+                # [[links]] are undirected; mutual links draw one edge.
+                if target and target != source and pair not in seen:
+                    seen.add(pair)
+                    links.append((source, target))
+        edges = [{"id": "r:" + r["id"], "source": r["source"], "target": r["target"], "kind": r["kind"], "reason": r["reason"]} for r in relations]
+        edges += [{"id": "l:" + a + ":" + b, "source": a, "target": b, "kind": "link", "reason": ""} for a, b in links]
+        degree = {}
+        for e in edges:
+            degree[e["source"]] = degree.get(e["source"], 0) + 1
+            degree[e["target"]] = degree.get(e["target"], 0) + 1
+        nodes = [{"id": n["id"], "kind": "note", "title": n["title"], "folder": n["folder"], "degree": degree.get(n["id"], 0)} for n in notes]
+        nodes += [{"id": c["id"], "kind": "card", "title": c["title"], "stage": c["stage"], "topic_id": c["topic_id"], "degree": degree.get(c["id"], 0)} for c in cards]
+        return {"nodes": nodes, "edges": edges}
 
     def context(self, topic_id, lane="tutor", selection="", notebook_id=None):
         if not isinstance(selection, str):

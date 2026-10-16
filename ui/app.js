@@ -281,9 +281,12 @@ function initInteractions(){
   const wik=e.target.closest("a[data-wiki]");
   if(wik){e.preventDefault();safe(async()=>{
    const title=wik.dataset.wiki;
-   const n=S.data.notes.find(x=>x.title.toLowerCase()===title.toLowerCase());
-   if(n)await openNote(n.id);
-   else if(confirm("知识卡「"+title+"」尚不存在，要为它创建一篇新笔记吗？"))await createNote(title);
+   const key=title.trim().toLowerCase();
+   const n=S.data.notes.find(x=>x.title.toLowerCase()===key);
+   if(n)return await openNote(n.id);
+   const card=typeof ld==="function"&&ld()?.cards.find(c=>c.title.toLowerCase()===key);
+   if(card)return await openContent("card",card.id);
+   if(confirm("「"+title+"」还没有对应的笔记或知识卡，要新建一篇笔记吗？"))await createNote(title);
   });return;}
   const modalBg=e.target.closest("[data-dismiss]");
   if(modalBg&&e.target===modalBg){if(!S.permission)requestCloseModal();return;}

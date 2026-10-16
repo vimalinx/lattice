@@ -168,11 +168,11 @@ select.field{appearance:auto}
 .terminal{background:#090e13;border:1px solid #2a3640;border-radius:11px;min-height:165px;max-height:330px;overflow:auto;padding:18px;color:#add9c8;font:11.3px/1.8 "JetBrains Mono",monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 .terminal .err{color:#f6aa9e}
 /* Graph */
-.graph-toolbar{display:flex;align-items:center;justify-content:space-between;padding:19px 28px;border-bottom:1px solid var(--line-soft)}
+.graph-toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:19px 28px;border-bottom:1px solid var(--line-soft)}
 .graph-stage{min-height:610px;height:calc(100% - 75px);background:radial-gradient(ellipse at center,#1d363124,transparent 64%),var(--bg);position:relative;overflow:hidden}
 .graph-stage svg{width:100%;height:100%;cursor:grab}
 .graph-stage svg:active{cursor:grabbing}
-.main-cy{position:absolute;inset:0;background:radial-gradient(circle,rgba(140,170,200,.05) 1px,transparent 1px);background-size:24px 24px;cursor:grab}
+.main-cy{position:absolute;inset:0 0 40px 0;background:radial-gradient(circle,rgba(140,170,200,.05) 1px,transparent 1px);background-size:24px 24px;cursor:grab}
 .main-cy:active{cursor:grabbing}
 .graph-guide{position:absolute;bottom:17px;left:20px;color:var(--subtle);font-size:11px}
 /* Projects */

@@ -239,8 +239,8 @@ function visibleCards(){
 }
 function knowledgeView(){
  const d=ld(),cards=visibleCards(),due=d.cards.filter(c=>c.stage!=='suggested'&&(!c.due_at||new Date(c.due_at)<=new Date()));
- return '<section class="knowledge-workspace"><div class="knowledge-heading"><div class="learn-title-row"><h1>知识卡与图谱</h1>'+lbutton(svg("plus",14)+' 知识卡','l-card-new','','primary sm')+'</div><p class="learn-question">'+d.stats.cards+' 张知识卡 · '+d.relations.length+' 条关联 · '+d.stats.evidence+' 条学习证据。树与图谱，共用一份知识数据。</p></div>'+
- '<div class="knowledge-toolbar"><div class="knowledge-view-tabs">'+[['cards','卡片'],['tree','知识树'],['graph','关系图']].map(([v,t])=>'<button data-action="l-card-view" data-mode="'+esc(v)+'" class="'+esc((L.cardView===v?'active':''))+'">'+t+'</button>').join('')+'</div>'+
+ return '<section class="knowledge-workspace"><div class="knowledge-heading"><div class="learn-title-row"><h1>知识卡</h1>'+lbutton(svg("plus",14)+' 知识卡','l-card-new','','primary sm')+'</div><p class="learn-question">'+d.stats.cards+' 张知识卡 · '+d.relations.length+' 条关联 · '+d.stats.evidence+' 条学习证据。关系图与笔记一起放在「知识网络」里。</p></div>'+
+ '<div class="knowledge-toolbar"><div class="knowledge-view-tabs">'+[['cards','卡片'],['tree','知识树']].map(([v,t])=>'<button data-action="l-card-view" data-mode="'+esc(v)+'" class="'+esc((L.cardView===v?'active':''))+'">'+t+'</button>').join('')+'<button data-action="nav" data-view="graph" title="在知识网络中查看卡片、笔记与它们的连接">知识网络 '+svg('arrow',12)+'</button></div>'+
  '<input id="knowledge-search" value="'+esc(L.search)+'" placeholder="搜索概念、自己的理解…" aria-label="搜索知识卡"/>'+
  '<select id="knowledge-stage" aria-label="按理解阶段筛选"><option value="">所有阶段</option>'+Object.entries(stageName).map(([v,t])=>'<option value="'+esc(v)+'" '+(L.stage===v?'selected':'')+'>'+t+'</option>').join('')+'</select>'+
  '<select id="knowledge-topic" aria-label="按主题筛选">'+topicOptions(L.scope)+'</select></div>'+
@@ -251,7 +251,6 @@ function knowledgeView(){
 function knowledgeBody(cards){
  if(!cards.length&&currentDetail()?.ref!=='new')return '<div class="learn-empty"><h3>这里还没有符合条件的知识卡。</h3><p>你可以新建一张，或在主讲对话中提炼已经讨论过的概念。</p></div>';
  if(L.cardView==='tree')return knowledgeTree(cards)+knowledgeDetail();
- if(L.cardView==='graph')return knowledgeGraph(cards)+knowledgeDetail();
  const current=currentDetail();
  return '<div class="flat-grid knowledge-grid">'+
  (current?.ref==='new'?detailCard('card','new','新知识卡','填写后保存',cardPageBody):'')+
@@ -279,34 +278,6 @@ function knowledgeTree(cards){
 }
 const relationShort={prerequisite:"前置",part_of:"分解",related:"关联",applies_to:"应用",contrasts:"对比"};
 const stageColor={suggested:"#5b6675",seen:"#e0be88",explained:"#b5a8fa",applied:"#83e2c7"};
-function knowledgeGraph(cards){
- return '<div class="knowledge-graph-wrap"><div class="knowledge-graph-tools"><span>滚轮缩放 · 拖动节点整理 · 点击节点开卡</span>'+lbutton('+','l-graph-zoom','data-factor="1.25"','ghost sm')+
- lbutton('−','l-graph-zoom','data-factor="0.8"','ghost sm')+lbutton('复位','l-graph-reset','','ghost sm')+lbutton('重排','l-graph-relayout','','ghost sm')+'</div>'+
- '<div class="knowledge-cy" role="img" aria-label="知识关系图"></div>'+
- '<div class="graph-legend"><span>实线：前置 / 分解</span><span>虚线：关联 / 应用 / 对比</span><span>悬停高亮邻域</span></div></div>';
-}
-function mountCardGraph(){
- all(".knowledge-cy").forEach(c=>{
-  const cards=visibleCards(),ids=new Set(cards.map(x=>x.id));
-  const edges=ld().relations.filter(r=>ids.has(r.source)&&ids.has(r.target));
-  const prev=c.__cy,pos={};
-  if(prev)prev.nodes().forEach(n=>pos[n.id()]=n.position());
-  const fresh=Object.keys(pos).length&&cards.filter(n=>!pos[n.id]).length<=1;
-  mountCytoscape(c,{
-   elements:[
-    ...cards.map(n=>({data:{id:n.id,label:n.title,sub:stageName[n.stage]+" · "+n.evidence.length+" 条证据",stage:n.stage,stageCol:stageColor[n.stage]||"#5b6675"}})),
-    ...edges.map(e=>({data:{id:e.id,source:e.source,target:e.target,kind:e.kind,label:relationShort[e.kind]||e.kind,reason:e.reason||""}}))],
-   style:[
-    {selector:"node",style:{"shape":"round-rectangle","background-color":"#141b25","border-width":1.6,"border-color":"#2c3a4c","label":"data(label)","color":"#dbe7f3","font-size":12,"font-family":"inherit","font-weight":600,"text-valign":"center","text-halign":"center","text-wrap":"wrap","text-max-width":"120px","width":"label","height":"label","padding":"12px","text-events":"yes"}},
-    {selector:"node[stage]",style:{"border-color":"data(stageCol)"}},
-    {selector:"edge",style:{"width":1.5,"line-color":"#4a5b70","curve-style":"bezier","target-arrow-shape":"triangle","target-arrow-color":"#4a5b70","arrow-scale":.9,"label":"data(label)","font-size":9,"color":"#7f8ea1","text-rotation":"autorotate","text-margin-y":-6}},
-    {selector:'edge[kind="related"],edge[kind="applies_to"],edge[kind="contrasts"]',style:{"line-style":"dashed","line-color":"#55637a","target-arrow-color":"#55637a"}},
-    {selector:".faded",style:{"opacity":.15}}],
-   layout:fresh?{name:"preset",positions:pos,fit:true,padding:30}:{name:"cose",animate:true,animationDuration:650,idealEdgeLength:150,nodeRepulsion:9000,gravity:.3,padding:30},
-   onTapNode:n=>openContent("card",n.id()),
-   onTapEdge:e=>{const a=ld().cards.find(x=>x.id===e.data("source")),b=ld().cards.find(x=>x.id===e.data("target"));toast((a?.title||"")+" "+(relationName[e.data("kind")]||"")+" "+(b?.title||"")+(e.data("reason")?"："+e.data("reason"):""));}});
- });
-}
 function connectionsBody(){
  const c=ld().providers;
  return '<div class="connection-page">'+
@@ -663,9 +634,9 @@ action=async function(target){
   L.notebookId=nb.id;await learnRefresh();await openContent('notebook');return toast('代码已加入实验笔记，尚未运行');
  }
  case 'l-escalate':{const m=ld().flash_messages.find(m=>String(m.id)===String(id));if(m)return sendLearning('tutor','我刚才和快答助手讨论了下面的内容。请检查它是否准确，再帮我深入理解，并接回主线：\n\n'+m.content);return;}
- case 'l-graph-zoom':{const cy=cardCy(a);if(!cy)return;const r=cy.container().getBoundingClientRect();cy.zoom({level:cy.zoom()*Number(a.dataset.factor),renderedPosition:{x:r.width/2,y:r.height/2}});return;}
- case 'l-graph-reset':{const cy=cardCy(a);if(cy)cy.animate({fit:{padding:30}},{duration:300});return;}
- case 'l-graph-relayout':{const cy=cardCy(a);if(cy)cy.layout({name:"cose",animate:true,animationDuration:650,idealEdgeLength:150,nodeRepulsion:9000,gravity:.3,padding:30}).run();return;}
+ case 'l-graph-zoom':{const cy=graphCy();if(!cy)return;const r=cy.container().getBoundingClientRect();cy.zoom({level:cy.zoom()*Number(a.dataset.factor),renderedPosition:{x:r.width/2,y:r.height/2}});return;}
+ case 'l-graph-reset':{const cy=graphCy();if(cy)cy.animate({fit:{padding:30}},{duration:300});return;}
+ case 'l-graph-relayout':{const cy=graphCy();if(cy)cy.layout(GRAPH_LAYOUT).run();return;}
  case 'l-settings-save':await settingsSave();return render();
  case 'l-test-flash':await settingsSave();L.testResult='正在读取 API 模型列表…';render();await rpc('learn_test_flash');return;
  case 'l-test-codex':await settingsSave();L.testResult='正在进行 ACP 握手与会话创建…';render();await rpc('learn_connect',{topic_id:lt().id});return;
@@ -715,7 +686,7 @@ onInput=async function(e){
   t.style.height='auto';t.style.height=Math.max(74,Math.min(560,t.scrollHeight))+'px';
   clearTimeout(L.timers.get(id));L.timers.set(id,setTimeout(()=>safe(()=>saveCell(id)),750));return;
  }
- if(t.id==='knowledge-search'){L.search=t.value;el('#knowledge-body').innerHTML=knowledgeBody(visibleCards());mountCardGraph();return;}
+ if(t.id==='knowledge-search'){L.search=t.value;el('#knowledge-body').innerHTML=knowledgeBody(visibleCards());return;}
  return originalOnInput(e);
 };
 const originalOnChange=onChange;
@@ -724,8 +695,8 @@ onChange=async function(e){
  if(t.id==='learn-topic-select')return focusTopic(t.value);
  if(t.id==='cfg-tutor-agent'){all('.agent-fields').forEach(d=>d.hidden=d.dataset.agent!==t.value);return;}
  if(t.id==='notebook-select'){await flushCells();L.notebookId=t.value;return render();}
- if(t.id==='knowledge-stage'){L.stage=t.value;el('#knowledge-body').innerHTML=knowledgeBody(visibleCards());mountCardGraph();return;}
- if(t.id==='knowledge-topic'){L.scope=t.value;el('#knowledge-body').innerHTML=knowledgeBody(visibleCards());mountCardGraph();return;}
+ if(t.id==='knowledge-stage'){L.stage=t.value;el('#knowledge-body').innerHTML=knowledgeBody(visibleCards());return;}
+ if(t.id==='knowledge-topic'){L.scope=t.value;el('#knowledge-body').innerHTML=knowledgeBody(visibleCards());return;}
  return originalOnChange(e);
 };
 const originalOnEvent=onEvent;
@@ -764,7 +735,7 @@ onEvent=async function(evt){
  }
  return originalOnEvent(evt);
 };
-function cardCy(a){const slot=a?.closest?a.closest(".content-detail"):null;const c=(slot||document).querySelector(".knowledge-cy");return c?c.__cy:null;}
+function graphCy(){return document.getElementById("main-cy")?.__cy||null;}
 async function saveFocused(){
  if(S.view==='notes'){await saveNote(false);return;}
  if(currentDetail()?.kind==='card'&&!currentDetail().collapsed){

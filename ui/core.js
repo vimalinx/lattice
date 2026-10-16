@@ -5,7 +5,7 @@ const S = {
   noteId:null, note:null, noteMode:"split", noteFilter:"", noteFolder:"All", sidebarCollapsed:localStorage.getItem("lattice-sidebar-collapsed")==="true",
   noteDirty:false,noteTimer:null,
   projectId:null,treePath:"",filePath:null,fileContent:"",fileDirty:false,
-  graphFilter:"All", graphZoom:1,
+  graphFilter:"all",
   toastTimer:null, commandOpen:false, permission:null, permissionQueue:[], modalSnap:null
 };
 const el=(s)=>document.querySelector(s);
@@ -133,8 +133,7 @@ function mountCytoscape(container,{elements,style,layout,onTapNode,onTapEdge}){
 }
 /* Post-render mounts for views that embed live widgets. */
 function runAfterRender(){
- if(typeof mountNoteGraph==="function")mountNoteGraph();
- if(typeof mountCardGraph==="function")mountCardGraph();
+ if(typeof mountKnowledgeGraph==="function")mountKnowledgeGraph();
  scheduleMermaid();
 }
 function markdown(text){
