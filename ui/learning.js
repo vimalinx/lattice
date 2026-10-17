@@ -348,7 +348,7 @@ async function sendLearning(lane,message=null,task=''){
  if(laneBusy(lane))return toast('这个通道正在回答，另一位助手仍可提问。');
  await flushCells();
  const value=(message??L.inputs[lane]).trim();if(!value&&!task)return;
- const actual=value||({plan:'请根据我的兴趣，设计一个现在就能开始的小课程。',continue:'请根据我目前的理解，继续教我下一步。',bridge:'请先补上当前真正需要的基础，再带我返回原问题。',capture:'请把已经讨论的知识提炼为知识卡，并建立有依据的连接。',experiment:'请为当前问题设计一个我可以亲手修改的小实验。'}[task]||'');
+ const actual=value||({plan:'我想从这个主题开始学。',continue:'接着上次的地方继续。',bridge:'我好像卡在某个前置知识上了。',capture:'把我们讨论过的内容整理成知识卡。',experiment:'给我设计一个能亲手改的小实验。'}[task]||'');
  const key=lk(lt().id,lane);L.localBusy.add(key);L.streams[key]='';L.errors[key]='';
  /* Snapshot-and-clear the composer and selection up front: anything typed while
     the bridge call is in flight must survive the send. */
