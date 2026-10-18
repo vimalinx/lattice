@@ -9,7 +9,7 @@ cd ~/Projects/Lattice
 python3 run.py
 ```
 
-桌面依赖：Python 3.11+、PySide6（含 QtWebEngine）、jupyter_client、ipykernel、httpx、numpy、matplotlib。ACP 适配器在 `runtime` 中，通过 `npm ci --prefix runtime` 安装已锁定依赖；应用读取现有本机 Codex 登录，教学连接默认 read-only。程序运行后，打开「设置与数据」设置 DeepSeek 的 Base URL / 模型 ID / API Key，可接自己的 OpenAI 兼容网关。附加参数不被网关支持时可改为空对象 `{}`。
+桌面依赖：Python 3.11+、PySide6（含 QtWebEngine）、jupyter_client、ipykernel、httpx、numpy、matplotlib。ACP 适配器在 `runtime` 中，通过 `npm ci --prefix runtime` 安装已锁定依赖；主讲和快答默认都走 OpenAI 兼容 API：「设置与数据」里有 DeepSeek、CommandCode、OpenCode Go 和一个自定义连接，每个连接各存一份 Key，快答和主讲各自选连接和模型（默认 CommandCode 的 `deepseek/deepseek-v4.1-flash-fast` 和 `deepseek/deepseek-v4.1-flash`）。主讲也可以改用 ACP 智能体（Codex、Devin 或自定义），此时读取本机登录，教学连接默认 read-only。思考型模型的思考内容计入回复上限；只思考没回答时会自动重试一次。OpenCode Go 要求 `x-opencode-session` 请求头，默认用会话 ID 填入。附加参数不被网关支持时可改为空对象 `{}`。
 
 ## 日常学习
 
@@ -17,7 +17,7 @@ python3 run.py
 
 全局搜索（Ctrl+K 或左栏「全局搜索」）同时检索知识卡、笔记、课程、主题与所有主题下的实验笔记，标题命中优先，正文命中显示匹配片段；↑↓ 选择，Enter 打开。打开其他主题的实验笔记会先切换到该主题。
 
-用兴趣主题管理课程、实验笔记与主讲对话。当前主题可以开兴趣分支并返回主线。课程支持自己编写，或由 Codex 给出结构化建议后预览、显式采纳。「即时答疑」不占用主讲通道；选中文字/代码后可直接询问。双方的下一轮问题会带上共享主题、相关卡片、真实实验输出与另一个通道的最近讨论。
+用兴趣主题管理课程、实验笔记与主讲对话。当前主题可以开兴趣分支并返回主线。课程支持自己编写，或由主讲给出结构化建议后预览、显式采纳。主讲只为已经讲过、你也回应过的内容提建议。「即时答疑」不占用主讲通道；选中文字/代码后可直接询问。双方的下一轮问题会带上共享主题、相关卡片、真实实验输出与另一个通道的最近讨论。
 
 实验笔记是真实 Jupyter Python 内核，不是模拟输出。每份 Notebook 独立保持变量，支持 Markdown/Python 格、自动保存、单格/全部执行、中断、重启、图片/表格/错误输出、运行源码快照与标准 `.ipynb` 导入导出。按 Shift+Enter 运行当前格，Tab 插入四空格；Ctrl+S 保存。代码在你的用户权限下运行，**不是操作系统安全沙箱**。导入 Notebook 不执行代码，也不把外部输出标成已验证；需本机重跑。
 
@@ -29,11 +29,11 @@ python3 run.py
 
 模型接口：`learn_settings[_save]`、`learn_connect`、`learn_new_tutor`、`learn_send`、`learn_cancel`、`learn_test_flash`。课程：`learn_topic_save`、`learn_focus`、`learn_lesson_save`、`learn_context`。卡片：`learn_card_save/delete`、`learn_evidence`、`learn_completed_runs`、`learn_relation/delete`、`learn_review`。候选：`learn_proposal_apply/dismiss`。Notebook：`nb_create/get`、`nb_cell_save/delete/move`、`nb_run`、`nb_interrupt/restart`、`nb_history/import/export`。整体快照 `learn_snapshot`，档案导出 `learn_export`。
 
-Codex 的课程建议使用 fenced `lattice` JSON（version=1），允许 lessons/cards/relations/cells。模型没有直写数据库工具，未知字段和不合法关系会拒绝；采纳为事务操作，可重复点击而不重复插入；不会自动执行 AI 生成的 Python。
+主讲的课程建议使用 fenced `lattice` JSON（version=1），允许 lessons/cards/relations/cells。模型没有直写数据库工具，未知字段和不合法关系会拒绝；采纳为事务操作，可重复点击而不重复插入；不会自动执行 AI 生成的 Python。
 
 ## 数据、凭据和备份
 
-默认数据：`~/.local/share/lattice/lattice.db`（支持 XDG_DATA_HOME）；学习实验工作目录在同目录 `learning/`。模型配置：`~/.config/lattice/providers.json`（支持 XDG_CONFIG_HOME），权限 0600；界面只知道是否有 Key，不接收已保存密钥；环境变量 `DEEPSEEK_API_KEY` 也可用。导出 ZIP 包含数据库、知识结构 JSON、知识卡 Markdown 与 `.ipynb`，不包含凭据配置或 Codex 登录文件。实际使用模型时，所需学习上下文会发给你配置的模型服务，不能理解为“数据永不出网”。
+默认数据：`~/.local/share/lattice/lattice.db`（支持 XDG_DATA_HOME）；学习实验工作目录在同目录 `learning/`。模型配置：`~/.config/lattice/providers.json`（支持 XDG_CONFIG_HOME），权限 0600；界面只知道是否有 Key，不接收已保存密钥；Key 也可以用环境变量 `DEEPSEEK_API_KEY`、`COMMANDCODE_API_KEY`、`OPENCODE_GO_API_KEY` 提供。导出 ZIP 包含数据库、知识结构 JSON、知识卡 Markdown 与 `.ipynb`，不包含凭据配置或 Codex 登录文件。实际使用模型时，所需学习上下文会发给你配置的模型服务，不能理解为“数据永不出网”。
 
 恢复档案前退出所有 Lattice 窗口，备份整个数据目录，再把 ZIP 中的 lattice.db 放入新的空白 Lattice 数据目录。建议先用独立 XDG_DATA_HOME 启动验证，而非覆盖正在使用的 SQLite/WAL 文件。
 

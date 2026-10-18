@@ -24,7 +24,7 @@ function adoptLearning(data){
 }
 async function learnRefresh(redraw=true){adoptLearning(await rpc("learn_snapshot",{topic_id:ld()?.active_topic}));if(redraw)render();}
 function laneBusy(lane){return L.localBusy.has(lk(lt()?.id,lane))||(ld()?.runtime?.busy||[]).some(x=>x[0]===lt()?.id&&x[1]===lane);}
-function laneStatus(lane){const key=lane==="tutor"?"tutor_session":"flash_session";const id=ld()?.threads?.[key];return ld()?.runtime?.agents?.[id]||"offline";}
+function laneStatus(lane){const key=lane==="tutor"?"tutor_session":"flash_session";const id=ld()?.threads?.[key];const api=lane==="flash"||ld()?.providers?.tutor_agent==="api";return ld()?.runtime?.agents?.[id]||(api?(lane==="flash"?ld()?.providers?.has_key:ld()?.providers?.tutor_ready)?"ready":"offline":"offline");}
 function lbutton(label,action,attrs="",variant=""){return button(label,action,attrs,variant);}
 /* Each navigation entry owns one page. Detail cards expand in that page only. */
 const CONTENT_ROUTES={dialogue:'learning',classroom:'classroom',lesson:'classroom',notebook:'notebook',flash:'flash',knowledge:'knowledge',card:'knowledge',note:'notes'};
@@ -105,9 +105,12 @@ function learningHeader(){
  lbutton(svg("settings",15),'nav','data-view="settings" title="设置"','ghost sm')+'</div></header>';
 }
 function d_topics(){return ld()?.topics||[];}
-function tutorLabel(){const c=ld()?.providers||{};return (c.acp_agents||[]).find(a=>a.id===(c.tutor_agent||'codex'))?.label||'ACP';}
+function tutorLabel(){return ld()?.providers?.tutor_label||'主讲';}
+function flashLabel(){return ld()?.providers?.flash_label||'快答';}
+/* A card never reviewed comes due one day after it was saved. */
+function isDue(c){return c.stage!=='suggested'&&(c.due_at?new Date(c.due_at)<=new Date():Date.now()-new Date(c.created_at)>=864e5);}
 function lessonReading(lesson,actions=true){
- return '<div class="lesson-origin">'+(lesson.origin==='builtin'?'内置起点 · 可编辑':lesson.origin==='manual'?'你的课程笔记':'由 '+esc(lesson.origin==='tutor'?'Codex':'AI')+' 提议，已采纳')+'</div>'+
+ return '<div class="lesson-origin">'+(lesson.origin==='builtin'?'内置起点 · 可编辑':lesson.origin==='manual'?'你的课程笔记':'由 '+esc(lesson.origin==='tutor'?tutorLabel():'AI')+' 提议，已采纳')+'</div>'+
  '<div class="lesson-objective">'+svg("bulb",17)+'<span>'+esc(lesson.objective||'记录这个问题如何一步步变得清楚。')+'</span></div>'+
  '<div class="markdown learning-prose" id="lesson-content">'+markdown(lesson.body)+'</div>'+
  (actions?'<div class="lesson-reading-footer">'+lbutton(svg("edit",14)+' 修改内容',"l-lesson-edit","","ghost sm")+
@@ -183,9 +186,9 @@ const convCache={};
 function conversationHtml(lane){
  const d=ld(),messages=lane==='tutor'?d.tutor_messages:d.flash_messages,key=lk(lt()?.id,lane),stream=L.streams[key]||'';
  const last=messages?.[messages.length-1];
- const ck=(lt()?.id||'')+'|'+(messages?.length||0)+'|'+(last?.id||'')+'|'+(last?.meta||'')+'|'+stream.length+'|'+(laneBusy(lane)?1:0)+'|'+(L.errors[key]||'')+'|'+tutorLabel();
+ const ck=(lt()?.id||'')+'|'+(messages?.length||0)+'|'+(last?.id||'')+'|'+(last?.meta||'')+'|'+stream.length+'|'+(laneBusy(lane)?1:0)+'|'+(L.errors[key]||'')+'|'+tutorLabel()+'|'+flashLabel();
  if(convCache[lane]?.key===ck)return convCache[lane].html;
- const who=lane==='tutor'?tutorLabel()+' · 主讲':'DeepSeek · 快答';
+ const who=(lane==='tutor'?tutorLabel():flashLabel())+(lane==='tutor'?' · 主讲':' · 快答');
  let html=(messages||[]).map(m=>{
   let meta={};try{meta=JSON.parse(m.meta||'{}');}catch(_){}
   const incomplete=m.role==='assistant'&&meta.stop_reason&&meta.stop_reason!=='end_turn';
@@ -204,21 +207,21 @@ function conversationHtml(lane){
 }
 function tutorChatView(){
  const messages=ld()?.tutor_messages||[];
- return '<div class="tutor-dialogue"><div class="tutor-dialogue-tools"><span>'+svg("bot",15)+' 主讲负责：讲清机制、安排实验、串联知识</span>'+lbutton(svg("link",14)+' 连接 ACP','l-connect','','ghost sm')+
+ return '<div class="tutor-dialogue"><div class="tutor-dialogue-tools"><span>'+svg("bot",15)+' 主讲负责：讲清机制、安排实验、串联知识</span>'+(ld()?.providers?.tutor_agent==='api'?'':lbutton(svg("link",14)+' 连接 ACP','l-connect','','ghost sm'))+
  lbutton(svg("plus",14)+' 新会话','l-tutor-new','','ghost sm')+lbutton(svg("book",14)+' 提炼知识卡','l-tutor-task','data-task="capture"','ghost sm')+'</div><div class="learn-chat-scroll" id="learn-chat-tutor" data-scroll="chat-tutor" data-scroll-ns="'+esc(lt()?.id||'')+'">'+
  (messages.length||laneBusy('tutor')?conversationHtml('tutor'):'<div class="tutor-welcome"><div class="learn-empty-icon">'+svg("spark",30)+'</div><h2>不是从目录开始，<br>是从你想知道的事开始。</h2><p>'+esc(tutorLabel())+' 会参考当前课程、实验输出、快答讨论和知识卡。你不需要每次重新说明自己学到了哪里。</p><div>'+lbutton('为当前兴趣规划起点','l-tutor-task','data-task="plan"','primary')+'</div></div>')+
  '</div>'+composer('tutor')+'</div>';
 }
 function composer(lane){
- const busy=laneBusy(lane),ready=!!lt()&&(lane!=='flash'||ld()?.providers?.has_key);
+ const busy=laneBusy(lane),ready=!!lt()&&(lane==='flash'?ld()?.providers?.has_key:ld()?.providers?.tutor_ready);
  return '<div class="learn-composer '+lane+'"><textarea id="learn-input-'+lane+'" rows="'+esc((lane==='flash'?3:2))+'" placeholder="'+(lane==='flash'?'这个词是什么意思？这行代码为什么这样写？':'告诉 '+esc(tutorLabel())+'：你观察到了什么，又想继续追问什么？')+'" aria-label="'+esc((lane==='flash'?'快速答疑问题':'主讲问题'))+'" '+(lt()?'':'disabled')+'>'+esc(L.inputs[lane])+'</textarea>'+
  '<div class="composer-bottom"><span>'+ (lane==='flash'?'当前主题与选中内容会随问题传入':'Ctrl + Enter 发送 · 课程建议需点击采纳')+'</span>'+
  (busy?lbutton(svg("stop",14)+' 停止','l-cancel','data-lane="'+esc(lane)+'"','ghost sm'):lbutton(svg("arrowup",15)+(lane==='flash'?' 提问':' 发送'),'l-send','data-lane="'+esc(lane)+'" '+(!ready?'disabled':''),'primary sm'))+'</div></div>';
 }
 function flashPanel(){
  const d=ld(),config=d?.providers||{};
- return '<aside class="flash-panel"><div class="flash-heading"><div class="flash-avatar">'+svg("spark",20)+'</div><div><h3>随问随答</h3><p>DeepSeek · 基础知识与即时解释</p></div>'+lbutton(svg("settings",15),'nav','data-view="settings" title="配置 DeepSeek API"','ghost sm')+'</div>'+
- '<div class="flash-status"><i class="'+esc((config.has_key?'configured':''))+'"></i>'+esc(config.has_key?(laneBusy('flash')?'正在回答':config.model+' · 已配置'):'API 尚未接入')+'<span>FAST LANE</span></div>'+
+ return '<aside class="flash-panel"><div class="flash-heading"><div class="flash-avatar">'+svg("spark",20)+'</div><div><h3>随问随答</h3><p>'+esc(flashLabel())+' · 基础知识与即时解释</p></div>'+lbutton(svg("settings",15),'nav','data-view="settings" title="配置快答模型"','ghost sm')+'</div>'+
+ '<div class="flash-status"><i class="'+esc((config.has_key?'configured':''))+'"></i>'+esc(config.has_key?(laneBusy('flash')?'正在回答':config.flash_model+' · 已配置'):'API 尚未接入')+'<span>FAST LANE</span></div>'+
  '<div class="flash-selection '+(L.selection?'has-selection':'')+'" id="flash-selection">'+selectionHtml()+'</div>'+
  '<div class="learn-chat-scroll flash-chat" id="learn-chat-flash" data-scroll="chat-flash" data-scroll-ns="'+esc(lt()?.id||'')+'">'+(d?.flash_messages?.length||laneBusy('flash')?conversationHtml('flash'):
  '<div class="flash-welcome"><div class="flash-decor">'+svg("quote",28)+'</div><h4>小问题，不必打断大思路。</h4><p>选中课堂里的词语或代码，再在这里提问。主讲下一次会看到这段答疑。</p>'+
@@ -238,7 +241,7 @@ function visibleCards(){
  return (ld()?.cards||[]).filter(c=>(!L.stage||c.stage===L.stage)&&(!L.scope||c.topic_id===L.scope)&&(!q||[c.title,c.body,c.understanding,c.question,...c.tags].join(' ').toLocaleLowerCase().includes(q)));
 }
 function knowledgeView(){
- const d=ld(),cards=visibleCards(),due=d.cards.filter(c=>c.stage!=='suggested'&&(!c.due_at||new Date(c.due_at)<=new Date()));
+ const d=ld(),cards=visibleCards(),due=d.cards.filter(isDue);
  return '<section class="knowledge-workspace"><div class="knowledge-heading"><div class="learn-title-row"><h1>知识卡</h1>'+lbutton(svg("plus",14)+' 知识卡','l-card-new','','primary sm')+'</div><p class="learn-question">'+d.stats.cards+' 张知识卡 · '+d.relations.length+' 条关联 · '+d.stats.evidence+' 条学习证据。关系图与笔记一起放在「知识网络」里。</p></div>'+
  '<div class="knowledge-toolbar"><div class="knowledge-view-tabs">'+[['cards','卡片'],['tree','知识树']].map(([v,t])=>'<button data-action="l-card-view" data-mode="'+esc(v)+'" class="'+esc((L.cardView===v?'active':''))+'">'+t+'</button>').join('')+'<button data-action="nav" data-view="graph" title="在知识网络中查看卡片、笔记与它们的连接">知识网络 '+svg('arrow',12)+'</button></div>'+
  '<input id="knowledge-search" value="'+esc(L.search)+'" placeholder="搜索概念、自己的理解…" aria-label="搜索知识卡"/>'+
@@ -278,18 +281,29 @@ function knowledgeTree(cards){
 }
 const relationShort={prerequisite:"前置",part_of:"分解",related:"关联",applies_to:"应用",contrasts:"对比"};
 const stageColor={suggested:"#5b6675",seen:"#e0be88",explained:"#b5a8fa",applied:"#83e2c7"};
+function apiOptions(selected){return (ld().providers.apis||[]).map(a=>'<option value="'+esc(a.id)+'" '+(a.id===selected?'selected':'')+'>'+esc(a.label)+(a.has_key?'':' · 未填 Key')+'</option>').join('');}
+function laneFields(lane,c){
+ return '<label>API 连接<select class="field" id="cfg-'+lane+'-api" data-lane="'+lane+'">'+apiOptions(c[lane+'_api'])+'</select></label>'+
+ '<label>模型名 <span class="learn-caption">换连接时会填入它的常用模型</span><input class="field" id="cfg-'+lane+'-model" value="'+esc(c[lane+'_model'])+'" placeholder="填写网关实际支持的模型 ID"/></label>'+
+ '<label>回复上限 <span class="learn-caption">思考内容也计入这个上限</span><input class="field" type="number" id="cfg-'+lane+'-tokens" min="256" max="64000" value="'+esc(c[lane+'_max_tokens'])+'"/></label>'+
+ '<div class="connection-buttons">'+lbutton('保存并测试','l-test-api','data-lane="'+lane+'"','primary sm')+'</div>';
+}
+function apiBlock(a){
+ return '<details class="api-connection" '+([ld().providers.flash_api,ld().providers.tutor_api].includes(a.id)?'open':'')+'><summary><b>'+esc(a.label)+'</b><span class="learn-caption">'+esc(a.base_url||'尚未填写地址')+' · Key：'+esc(a.key_source)+'</span></summary>'+
+ '<label>Base URL<input class="field" id="cfg-api-'+a.id+'-base" value="'+esc(a.base_url)+'" placeholder="https://…/v1"/></label>'+
+ '<label>API Key <span class="learn-caption">留空不改现有 Key</span><input type="password" autocomplete="new-password" class="field" id="cfg-api-'+a.id+'-key" placeholder="'+esc((a.has_key?'已保存，后端不回传密钥':'sk-…'))+'"/></label>'+
+ '<div class="connection-inline"><label>请求头 <span class="learn-caption">{session} 会换成会话 ID</span><textarea class="field config-json" rows="2" id="cfg-api-'+a.id+'-headers">'+esc(JSON.stringify(a.headers))+'</textarea></label>'+
+ '<label>附加参数 <span class="learn-caption">网关不支持时改为 {}</span><textarea class="field config-json" rows="2" id="cfg-api-'+a.id+'-extra">'+esc(JSON.stringify(a.extra_body))+'</textarea></label></div>'+
+ '<div class="connection-buttons">'+lbutton('清除本机 Key','l-clear-key','data-api="'+esc(a.id)+'"','ghost sm')+'</div></details>';
+}
 function connectionsBody(){
- const c=ld().providers;
+ const c=ld().providers,acp=c.acp_agents||[];
  return '<div class="connection-page">'+
- '<div class="connection-grid"><section class="connection-card"><div class="connection-title"><span class="connection-symbol">'+svg("spark",22)+'</span><div><h2>DeepSeek · 快速答疑</h2><p>OpenAI 兼容 Chat Completions / SSE</p></div><span class="learn-stage">'+esc(c.has_key?'已保存凭据':'等待接入')+'</span></div>'+
- '<label>Base URL<input class="field" id="cfg-base" value="'+esc(c.base_url)+'" placeholder="https://api.deepseek.com"/></label>'+
- '<label>模型名<input class="field" id="cfg-model" value="'+esc(c.model)+'" placeholder="填写网关实际支持的模型 ID"/></label>'+
- '<label>API Key <span class="learn-caption">'+esc(c.key_source)+' · 留空不改现有 Key</span><input type="password" autocomplete="new-password" class="field" id="cfg-key" placeholder="'+esc((c.has_key?'已保存，后端不回传密钥':'sk-…'))+'"/></label>'+
- '<div class="connection-inline"><label>回复上限<input class="field" type="number" id="cfg-tokens" min="64" max="16000" value="'+esc(c.max_tokens)+'"/></label><label>超时 / 秒<input class="field" type="number" id="cfg-timeout" min="5" max="300" value="'+esc(c.timeout)+'"/></label></div>'+
- '<label>附加 API 参数 <span class="learn-caption">兼容网关不支持时可改为 {}</span><textarea class="field config-json" rows="3" id="cfg-extra">'+esc(JSON.stringify(c.extra_body,null,2))+'</textarea></label>'+
- '<div class="connection-buttons">'+lbutton('保存并测试 API','l-test-flash','','primary sm')+lbutton('清除本机 Key','l-clear-key','','ghost sm')+'</div><p class="connection-foot">测试只读取模型列表，不生成回答。密钥保存在本机 0600 权限文件中，不进入学习档案导出。</p></section>'+
- '<section class="connection-card"><div class="connection-title"><span class="connection-symbol codex">'+svg("bot",22)+'</span><div><h2>ACP 主讲</h2><p>JSON-RPC / stdio · 复用本机 Agent 登录</p></div><span class="learn-stage">'+esc((c.acp_agents||[]).find(a=>a.id===c.tutor_agent)?.installed?'适配器已安装':'路径待配置')+'</span></div>'+
- '<label>主讲适配器<select class="field" id="cfg-tutor-agent">'+(c.acp_agents||[]).map(a=>'<option value="'+esc(a.id)+'" '+(c.tutor_agent===a.id?'selected':'')+'>'+esc(a.label)+(a.installed?'':' · 未安装')+'</option>').join('')+'</select></label>'+
+ '<div class="connection-grid"><section class="connection-card"><div class="connection-title"><span class="connection-symbol">'+svg("spark",22)+'</span><div><h2>快答</h2><p>'+esc(c.flash_label)+' · OpenAI 兼容 Chat Completions / SSE</p></div><span class="learn-stage">'+esc(c.has_key?'已保存凭据':'等待接入')+'</span></div>'+
+ laneFields('flash',c)+'<p class="connection-foot">测试只读取模型列表，不生成回答。</p></section>'+
+ '<section class="connection-card"><div class="connection-title"><span class="connection-symbol codex">'+svg("bot",22)+'</span><div><h2>主讲</h2><p>'+esc(c.tutor_label)+'</p></div><span class="learn-stage">'+esc(c.tutor_agent==='api'?(c.tutor_ready?'已保存凭据':'等待接入'):acp.find(a=>a.id===c.tutor_agent)?.installed?'适配器已安装':'路径待配置')+'</span></div>'+
+ '<label>主讲方式<select class="field" id="cfg-tutor-agent"><option value="api" '+(c.tutor_agent==='api'?'selected':'')+'>OpenAI 兼容 API</option>'+acp.map(a=>'<option value="'+esc(a.id)+'" '+(c.tutor_agent===a.id?'selected':'')+'>'+esc(a.label)+' · ACP'+(a.installed?'':' · 未安装')+'</option>').join('')+'</select></label>'+
+ '<div class="agent-fields" data-agent="api"'+(c.tutor_agent==='api'?'':' hidden')+'>'+laneFields('tutor',c)+'<p class="connection-foot">每轮发送教学规则、学习状态和最近 24 条主讲对话。</p></div>'+
  '<div class="agent-fields" data-agent="codex"'+(c.tutor_agent==='codex'?'':' hidden')+'>'+
  '<label>ACP 可执行文件<input class="field config-path" id="cfg-codex" value="'+esc(c.codex_command)+'"/></label>'+
  '<label>启动参数 <span class="learn-caption">JSON 字符串数组，不经 Shell 执行</span><input class="field config-json" id="cfg-codex-args" value="'+esc(JSON.stringify(c.codex_args))+'"/></label>'+
@@ -301,8 +315,12 @@ function connectionsBody(){
  '<div class="agent-fields" data-agent="custom"'+(c.tutor_agent==='custom'?'':' hidden')+'>'+
  '<label>ACP 可执行文件 <span class="learn-caption">任何实现了 ACP 协议的 Agent</span><input class="field config-path" id="cfg-custom" value="'+esc(c.custom_command)+'" placeholder="/path/to/agent-acp"/></label>'+
  '<label>启动参数 <span class="learn-caption">JSON 字符串数组，不经 Shell 执行</span><input class="field config-json" id="cfg-custom-args" value="'+esc(JSON.stringify(c.custom_args))+'"/></label></div>'+
- '<div class="connection-buttons">'+lbutton('保存并连接 ACP','l-test-codex','','primary sm')+'</div><p class="connection-foot">登录凭据由所选 Agent 自行管理。支持会话恢复、流式回复、停止与权限确认。模型设置在新连接 / 新会话生效。</p>'+
- '<div class="kernel-settings"><h3>'+svg("terminal",16)+' 本地 Jupyter 内核</h3><div class="connection-inline"><label>Kernel 名称<input class="field" id="cfg-kernel" value="'+esc(c.kernel_name)+'"/></label><label>单格时限 / 秒<input class="field" type="number" id="cfg-kernel-timeout" min="3" max="3600" value="'+esc(c.kernel_timeout)+'"/></label></div></div></section></div>'+
+ '<div class="agent-fields" data-agent="acp"'+(c.tutor_agent==='api'?' hidden':'')+'><div class="connection-buttons">'+lbutton('保存并连接 ACP','l-test-codex','','primary sm')+'</div><p class="connection-foot">登录凭据由所选 Agent 自行管理。支持会话恢复、流式回复、停止与权限确认。模型设置在新连接 / 新会话生效。</p></div></section></div>'+
+ '<section class="connection-card api-connections"><div class="connection-title"><span class="connection-symbol">'+svg("link",22)+'</span><div><h2>API 连接</h2><p>每个连接各存一份 Key，快答和主讲可以选同一个</p></div></div>'+
+ (c.apis||[]).map(apiBlock).join('')+
+ '<div class="connection-inline"><label>超时 / 秒<input class="field" type="number" id="cfg-timeout" min="5" max="600" value="'+esc(c.timeout)+'"/></label><label>Temperature<input class="field" type="number" step="0.05" id="cfg-temperature" min="0" max="2" value="'+esc(c.temperature)+'"/></label></div>'+
+ '<p class="connection-foot">密钥保存在本机 0600 权限文件中，不进入学习档案导出。也可以用环境变量提供 Key。</p>'+
+ '<div class="kernel-settings"><h3>'+svg("terminal",16)+' 本地 Jupyter 内核</h3><div class="connection-inline"><label>Kernel 名称<input class="field" id="cfg-kernel" value="'+esc(c.kernel_name)+'"/></label><label>单格时限 / 秒<input class="field" type="number" id="cfg-kernel-timeout" min="3" max="3600" value="'+esc(c.kernel_timeout)+'"/></label></div></div></section>'+
  '<div class="connection-save-row"><div class="connection-test-result" id="connection-test-result">'+esc(L.testResult||'尚未执行连接测试。其他本地功能不依赖 API 配置。')+'</div>'+lbutton(svg("save",15)+' 保存全部设置','l-settings-save','','primary')+'</div>'+
  '<section class="connection-data"><div><h3>可以带走的学习档案</h3><p>SQLite 全量记录、知识卡 Markdown、关系 JSON 和标准 .ipynb。API Key 与 Codex 凭据不包含在内。</p></div>'+lbutton(svg("download",15)+' 导出学习档案','l-export','','ghost')+'</section></div>';
 }
@@ -473,13 +491,16 @@ function proposalsModal(){
  '<div class="modal-actions">'+lbutton('先略过','l-proposal-dismiss','data-id="'+esc(p.id)+'"','ghost sm')+lbutton('采纳这一份','l-proposal-apply','data-id="'+esc(p.id)+'"','primary sm')+'</div></section>';}).join(''),'large');
 }
 async function settingsSave(){
- const cfg={base_url:el('#cfg-base').value,model:el('#cfg-model').value,api_key:el('#cfg-key').value,max_tokens:Number(el('#cfg-tokens').value),timeout:Number(el('#cfg-timeout').value),
- extra_body:JSON.parse(el('#cfg-extra').value),tutor_agent:el('#cfg-tutor-agent').value,
+ const apis={};
+ for(const a of ld().providers.apis){const v=k=>el('#cfg-api-'+a.id+'-'+k).value;apis[a.id]={base_url:v('base'),api_key:v('key'),headers:JSON.parse(v('headers')||'{}'),extra_body:JSON.parse(v('extra')||'{}')};}
+ const cfg={apis,timeout:Number(el('#cfg-timeout').value),temperature:Number(el('#cfg-temperature').value),tutor_agent:el('#cfg-tutor-agent').value,
+ flash_api:el('#cfg-flash-api').value,flash_model:el('#cfg-flash-model').value,flash_max_tokens:Number(el('#cfg-flash-tokens').value),
+ tutor_api:el('#cfg-tutor-api').value,tutor_model:el('#cfg-tutor-model').value,tutor_max_tokens:Number(el('#cfg-tutor-tokens').value),
  codex_command:el('#cfg-codex').value,codex_args:JSON.parse(el('#cfg-codex-args').value),codex_model:el('#cfg-codex-model').value,
  codex_effort:el('#cfg-effort').value,devin_command:el('#cfg-devin').value,devin_model:el('#cfg-devin-model').value,
  custom_command:el('#cfg-custom').value,custom_args:JSON.parse(el('#cfg-custom-args').value||'[]'),
  kernel_name:el('#cfg-kernel').value,kernel_timeout:Number(el('#cfg-kernel-timeout').value)};
- ld().providers=await rpc('learn_settings_save',{config:cfg});el('#cfg-key').value='';toast('模型设置已保存');
+ ld().providers=await rpc('learn_settings_save',{config:cfg});all('[id^="cfg-api-"][id$="-key"]').forEach(x=>x.value='');toast('模型设置已保存');
 }
 const originalGo=go;
 go=async function(view){
@@ -616,8 +637,9 @@ action=async function(target){
   await rpc('learn_review',{card_id:card.id,reflection,again:a.dataset.again==='true'});closeModal();await learnRefresh();return toast('回顾已记录；不会自动提升理解阶段');
  }
  case 'l-review-next':{
-  const cards=ld().cards.filter(c=>c.stage!=='suggested').sort((a,b)=>(a.due_at||'').localeCompare(b.due_at||''));
-  if(!cards.length)return toast('先把实际接触过的卡片从「待探索」改为「接触过」，再开始回顾。');
+  if(!ld().cards.some(c=>c.stage!=='suggested'))return toast('先把实际接触过的卡片从「待探索」改为「接触过」，再开始回顾。');
+  const cards=ld().cards.filter(isDue).sort((a,b)=>(a.due_at||a.created_at).localeCompare(b.due_at||b.created_at));
+  if(!cards.length)return toast('现在没有到期的卡。');
   return openContent('card',cards[0].id);
  }
  case 'l-relation-new':return relationModal(a.dataset.source||'');
@@ -638,9 +660,9 @@ action=async function(target){
  case 'l-graph-reset':{const cy=graphCy();if(cy)cy.animate({fit:{padding:30}},{duration:300});return;}
  case 'l-graph-relayout':{const cy=graphCy();if(cy)cy.layout(GRAPH_LAYOUT).run();return;}
  case 'l-settings-save':await settingsSave();return render();
- case 'l-test-flash':await settingsSave();L.testResult='正在读取 API 模型列表…';render();await rpc('learn_test_flash');return;
+ case 'l-test-api':await settingsSave();L.testResult='正在读取 API 模型列表…';render();await rpc('learn_test_api',{lane:a.dataset.lane});return;
  case 'l-test-codex':await settingsSave();L.testResult='正在进行 ACP 握手与会话创建…';render();await rpc('learn_connect',{topic_id:lt().id});return;
- case 'l-clear-key':if(!confirm('清除保存在本机配置文件中的 DeepSeek Key？环境变量不会被修改。'))return;ld().providers=await rpc('learn_settings_save',{config:{clear_key:true}});return render();
+ case 'l-clear-key':{const api=ld().providers.apis.find(x=>x.id===a.dataset.api);if(!confirm('清除保存在本机配置文件中的 '+api.label+' Key？环境变量不会被修改。'))return;ld().providers=await rpc('learn_settings_save',{config:{apis:{[api.id]:{clear_key:true}}}});return render();}
  case 'l-export':{await flushCells();const file=await rpc('learn_export',{},0);if(file)toast('学习档案已导出：'+file);return;}
  case 'nb-new':{const name=prompt('实验笔记名称：','新的小实验');if(!name)return;await flushCells();const nb=await rpc('nb_create',{topic_id:lt().id,title:name});await rpc('nb_cell_save',{cell:{notebook_id:nb.id,kind:'code',source:'# 从这里开始你的实验\n'}});L.notebookId=nb.id;await learnRefresh();return openContent('notebook');}
  case 'nb-files':L.filesOpen=!L.filesOpen;if(L.filesOpen&&S.projectId)await loadTree();return render();
@@ -693,7 +715,8 @@ const originalOnChange=onChange;
 onChange=async function(e){
  const t=e.target;
  if(t.id==='learn-topic-select')return focusTopic(t.value);
- if(t.id==='cfg-tutor-agent'){all('.agent-fields').forEach(d=>d.hidden=d.dataset.agent!==t.value);return;}
+ if(t.id==='cfg-tutor-agent'){all('.agent-fields').forEach(d=>d.hidden=d.dataset.agent==='acp'?t.value==='api':d.dataset.agent!==t.value);return;}
+ if(t.id==='cfg-flash-api'||t.id==='cfg-tutor-api'){const m=ld().providers.apis.find(x=>x.id===t.value)?.default_model;if(m)el('#cfg-'+t.dataset.lane+'-model').value=m;return;}
  if(t.id==='notebook-select'){await flushCells();L.notebookId=t.value;return render();}
  if(t.id==='knowledge-stage'){L.stage=t.value;el('#knowledge-body').innerHTML=knowledgeBody(visibleCards());return;}
  if(t.id==='knowledge-topic'){L.scope=t.value;el('#knowledge-body').innerHTML=knowledgeBody(visibleCards());return;}

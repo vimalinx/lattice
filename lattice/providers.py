@@ -1,4 +1,4 @@
-"""Configurable OpenAI-compatible Flash API. Credentials never cross WebChannel."""
+"""OpenAI-compatible API lanes for quick answers and the tutor. Credentials never cross WebChannel."""
 from __future__ import annotations
 
 import asyncio
@@ -18,11 +18,23 @@ from .acp import AGENTS, agent_options, agent_command, command_available
 LOG = logging.getLogger("lattice")
 
 ROOT = Path(__file__).resolve().parents[1]
+# Fixed set of OpenAI-compatible connections; each keeps its own key. "{session}"
+# in a header value is replaced by the Lattice session id (OpenCode Go routes
+# and caches by x-opencode-session and rejects requests without it).
+APIS = {
+    "deepseek": {"label": "DeepSeek", "base_url": "https://api.deepseek.com", "model": "deepseek-chat",
+                 "headers": {}, "extra_body": {"thinking": {"type": "disabled"}}, "env": "DEEPSEEK_API_KEY"},
+    "commandcode": {"label": "CommandCode", "base_url": "https://api.commandcode.ai/provider/v1",
+                    "model": "deepseek/deepseek-v4.1-flash", "headers": {}, "extra_body": {}, "env": "COMMANDCODE_API_KEY"},
+    "opencode": {"label": "OpenCode Go", "base_url": "https://opencode.ai/zen/go/v1", "model": "deepseek-v4.1-flash",
+                 "headers": {"x-opencode-session": "{session}"}, "extra_body": {}, "env": "OPENCODE_GO_API_KEY"},
+    "custom": {"label": "自定义", "base_url": "", "model": "", "headers": {}, "extra_body": {}, "env": ""},
+}
+API_FIELDS = {"base_url", "headers", "extra_body", "api_key"}
 DEFAULTS = {
-    "base_url": "https://api.deepseek.com", "model": "deepseek-flash",
-    "api_key": "", "max_tokens": 1400, "timeout": 60, "temperature": 0.35,
-    "extra_body": {"thinking": {"type": "disabled"}},
-    "tutor_agent": "codex",
+    "apis": {}, "flash_api": "commandcode", "flash_model": "deepseek/deepseek-v4.1-flash-fast", "flash_max_tokens": 4000,
+    "tutor_agent": "api", "tutor_api": "commandcode", "tutor_model": "deepseek/deepseek-v4.1-flash", "tutor_max_tokens": 16000,
+    "timeout": 120, "temperature": 0.35,
     "codex_command": str(ROOT / "runtime/node_modules/.bin/codex-acp"),
     "codex_args": [], "codex_model": "", "codex_effort": "high",
     "devin_command": str(Path.home() / ".local/bin/devin"),
@@ -30,6 +42,12 @@ DEFAULTS = {
     "custom_command": "", "custom_args": [],
     "kernel_name": "python3", "kernel_timeout": 120,
 }
+TUTOR_AGENTS = {"api", *AGENTS}
+
+
+def model_label(model):
+    """Short display name: the model id without its vendor prefix."""
+    return str(model).rsplit("/", 1)[-1] or "未选择模型"
 
 
 class ProviderConfig:
@@ -37,29 +55,57 @@ class ProviderConfig:
         self.path = Path(path) if path else Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "lattice/providers.json"
 
     def read(self):
-        result = {**DEFAULTS, "extra_body": dict(DEFAULTS["extra_body"])}
+        result = json.loads(json.dumps(DEFAULTS))
         try:
             if self.path.exists():
                 saved = json.loads(self.path.read_text(encoding="utf-8"))
                 if isinstance(saved, dict):
-                    result.update(saved)
+                    result.update({k: v for k, v in saved.items() if k in DEFAULTS})
         except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
             # A hand-edited or truncated config must not break the whole app state.
             LOG.warning("无法读取 providers.json，回退默认配置: %s", exc)
+        saved_apis = result["apis"] if isinstance(result["apis"], dict) else {}
+        result["apis"] = {}
+        for ident, spec in APIS.items():
+            own = saved_apis.get(ident) if isinstance(saved_apis.get(ident), dict) else {}
+            result["apis"][ident] = {**{k: spec[k] for k in API_FIELDS - {"api_key"}}, "api_key": "",
+                                     **{k: v for k, v in own.items() if k in API_FIELDS}}
         return result
 
-    def key(self, config=None):
+    def key(self, api, config=None):
         config = config or self.read()
-        return config.get("api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
+        env = APIS.get(api, {}).get("env")
+        return config["apis"].get(api, {}).get("api_key") or (os.environ.get(env, "") if env else "")
+
+    def lane(self, lane, config=None):
+        """Everything one API lane needs to send a request, key included."""
+        config = config or self.read()
+        api = config[lane + "_api"]
+        return {**config["apis"][api], "api": api, "label": APIS[api]["label"], "api_key": self.key(api, config), "model": config[lane + "_model"],
+                "max_tokens": config[lane + "_max_tokens"], "timeout": config["timeout"], "temperature": config["temperature"]}
+
+    def label(self, lane, config=None):
+        config = config or self.read()
+        if lane == "tutor" and config["tutor_agent"] != "api":
+            return AGENTS[config["tutor_agent"]]["label"]
+        return model_label(config[lane + "_model"])
 
     def public(self):
-        # Only known keys cross the bridge; a hand-edited providers.json must
-        # not echo arbitrary fields into the frontend.
+        # Only known keys cross the bridge; keys never do.
         raw = self.read()
-        result = {k: raw[k] for k in DEFAULTS if k in raw}
-        has_saved = bool(result.pop("api_key", ""))
-        result["has_key"] = has_saved or bool(os.environ.get("DEEPSEEK_API_KEY"))
-        result["key_source"] = "本机配置" if has_saved else "环境变量" if result["has_key"] else "尚未配置"
+        result = {k: raw[k] for k in DEFAULTS if k != "apis"}
+        result["apis"] = []
+        for ident, spec in APIS.items():
+            api = raw["apis"][ident]
+            saved, env = bool(api["api_key"]), spec["env"]
+            has_env = bool(env and os.environ.get(env))
+            result["apis"].append({"id": ident, "label": spec["label"], "default_model": spec["model"],
+                                   **{k: api[k] for k in API_FIELDS - {"api_key"}},
+                                   "has_key": saved or has_env,
+                                   "key_source": "本机配置" if saved else ("环境变量 " + env) if has_env else "尚未配置"})
+        result["flash_label"], result["tutor_label"] = self.label("flash", raw), self.label("tutor", raw)
+        result["has_key"] = bool(self.key(raw["flash_api"], raw))
+        result["tutor_ready"] = bool(self.key(raw["tutor_api"], raw)) if raw["tutor_agent"] == "api" else True
         result["codex_installed"] = command_available(agent_command("codex", result)[0])
         result["acp_agents"] = agent_options(result)
         return result
@@ -67,35 +113,56 @@ class ProviderConfig:
     def save(self, changes):
         if not isinstance(changes, dict):
             raise ValueError("配置必须是对象")
-        unexpected = set(changes) - set(DEFAULTS) - {"clear_key"}
+        unexpected = set(changes) - set(DEFAULTS)
         if unexpected:
             raise ValueError("未知配置项：" + ", ".join(unexpected))
         updated = self.read()
         for key, val in changes.items():
-            if key not in {"api_key", "clear_key"}:
+            if key != "apis":
                 updated[key] = val
-        if changes.get("clear_key"):
-            updated["api_key"] = ""
-        elif changes.get("api_key"):
-            updated["api_key"] = str(changes["api_key"]).strip()
-        url = urlsplit(str(updated["base_url"]).strip())
-        if url.scheme not in {"https", "http"} or not url.hostname or url.username or url.password or url.query or url.fragment:
-            raise ValueError("Base URL 必须是没有嵌入凭据、查询或片段的 HTTP(S) 地址")
-        updated["base_url"] = str(updated["base_url"]).strip().rstrip("/")
-        if not str(updated["model"]).strip():
-            raise ValueError("请填写 API 模型名")
-        updated["max_tokens"] = max(64, min(int(updated["max_tokens"]), 16000))
-        updated["timeout"] = max(5, min(int(updated["timeout"]), 300))
+        api_changes = changes.get("apis", {})
+        if not isinstance(api_changes, dict) or set(api_changes) - set(APIS):
+            raise ValueError("未知的 API 连接")
+        for ident, change in api_changes.items():
+            if not isinstance(change, dict) or set(change) - API_FIELDS - {"clear_key"}:
+                raise ValueError("API 连接含不支持的字段")
+            api = updated["apis"][ident]
+            api.update({k: v for k, v in change.items() if k in API_FIELDS - {"api_key"}})
+            if change.get("clear_key"):
+                api["api_key"] = ""
+            elif change.get("api_key"):
+                api["api_key"] = str(change["api_key"]).strip()
+        for ident, api in updated["apis"].items():
+            label = APIS[ident]["label"]
+            base = str(api["base_url"]).strip()
+            url = urlsplit(base)
+            if base and (url.scheme not in {"https", "http"} or not url.hostname or url.username or url.password or url.query or url.fragment):
+                raise ValueError(label + " 的 Base URL 必须是没有嵌入凭据、查询或片段的 HTTP(S) 地址")
+            api["base_url"] = base.rstrip("/")
+            if not isinstance(api["extra_body"], dict) or set(api["extra_body"]) & {"messages", "model", "stream", "max_tokens", "temperature"}:
+                raise ValueError(label + " 的附加参数应为 JSON 对象，不能覆盖 messages/model/stream/max_tokens/temperature")
+            if not isinstance(api["headers"], dict) or not all(isinstance(v, str) for v in api["headers"].values()) \
+                    or {k.casefold() for k in api["headers"]} & {"authorization", "content-type"}:
+                raise ValueError(label + " 的请求头应为字符串对象，不能覆盖 Authorization/Content-Type")
+        for lane in ("flash", "tutor"):
+            if updated[lane + "_api"] not in APIS:
+                raise ValueError("未知的 API 连接：" + str(updated[lane + "_api"]))
+            updated[lane + "_model"] = str(updated[lane + "_model"]).strip()
+            updated[lane + "_max_tokens"] = max(256, min(int(updated[lane + "_max_tokens"]), 64000))
+            if lane == "flash" or updated["tutor_agent"] == "api":
+                if not updated["apis"][updated[lane + "_api"]]["base_url"]:
+                    raise ValueError(("快答" if lane == "flash" else "主讲") + "所选连接还没有 Base URL")
+                if not updated[lane + "_model"]:
+                    raise ValueError("请填写" + ("快答" if lane == "flash" else "主讲") + "的模型名")
+        updated["timeout"] = max(5, min(int(updated["timeout"]), 600))
         updated["temperature"] = max(0, min(float(updated["temperature"]), 2))
         updated["kernel_timeout"] = max(3, min(int(updated["kernel_timeout"]), 3600))
-        if not isinstance(updated["extra_body"], dict) or set(updated["extra_body"]) & {"messages", "model", "stream", "max_tokens", "temperature"}:
-            raise ValueError("附加 API 参数应为 JSON 对象，不能覆盖 messages/model/stream/max_tokens/temperature")
         if not isinstance(updated["codex_args"], list) or not all(isinstance(x, str) for x in updated["codex_args"]):
             raise ValueError("ACP 参数必须是字符串数组")
         if updated["codex_effort"] not in {"", "low", "medium", "high", "xhigh"}:
             raise ValueError("推理强度配置无效")
         updated["codex_command"] = str(Path(str(updated["codex_command"])).expanduser())
-        if updated["tutor_agent"] not in AGENTS:
+        if updated["tutor_agent"] not in TUTOR_AGENTS:
             raise ValueError("未知的主讲适配器：" + str(updated["tutor_agent"]))
         updated["devin_model"] = str(updated["devin_model"]).strip()
         for key in ("devin_command", "custom_command"):
@@ -133,13 +200,14 @@ def clean_error(message, key=""):
     return message[:1000]
 
 
-class FlashWorker(QThread):
+class ApiWorker(QThread):
+    """One streamed chat completion for either lane (or a /models connection test)."""
     event = Signal(dict)
 
-    def __init__(self, topic_id, session_id, config, api_key, messages, test=False):
+    def __init__(self, lane, topic_id, session_id, conn, messages, test=False):
         super().__init__()
-        self.topic_id, self.session_id = topic_id, session_id
-        self.config, self.api_key, self.messages, self.test = config, api_key, messages, test
+        self.lane, self.topic_id, self.session_id = lane, topic_id, session_id
+        self.config, self.api_key, self.messages, self.test = conn, conn["api_key"], messages, test
         self.cancelled = threading.Event()
         self.response = None
         self.loop = None
@@ -147,8 +215,8 @@ class FlashWorker(QThread):
 
     def emit(self, kind, **data):
         if kind == "error":
-            LOG.warning("Flash worker %s: %s", self.session_id, data.get("message"))
-        self.event.emit({"type": "learning_agent", "lane": "flash", "topic_id": self.topic_id, "session_id": self.session_id, "kind": kind, **data})
+            LOG.warning("API worker %s: %s", self.session_id, data.get("message"))
+        self.event.emit({"type": "learning_agent", "lane": self.lane, "topic_id": self.topic_id, "session_id": self.session_id, "kind": kind, **data})
 
     def stop(self):
         self.cancelled.set()
@@ -164,14 +232,16 @@ class FlashWorker(QThread):
 
     async def _run(self):
         self.loop, self.task = asyncio.get_running_loop(), asyncio.current_task()
-        body, usage, stop_reason = "", None, "end_turn"
+        body, usage, stop_reason, thinking = "", None, "end_turn", False
         try:
             if self.cancelled.is_set():
                 raise asyncio.CancelledError()
             if not self.api_key:
-                raise ValueError("DeepSeek 尚未配置 API Key。请在「模型连接」中填写，或设置 DEEPSEEK_API_KEY。")
+                raise ValueError(self.config["label"] + " 尚未配置 API Key。请在「模型连接」中填写。")
             config = self.config
-            headers = {"Authorization": "Bearer " + self.api_key, "Content-Type": "application/json"}
+            session = self.session_id or "lattice-test"
+            headers = {**{k: v.replace("{session}", session) for k, v in config["headers"].items()},
+                       "Authorization": "Bearer " + self.api_key, "Content-Type": "application/json"}
             timeout = httpx.Timeout(float(config["timeout"]), connect=12)
             async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
                 if self.test:
@@ -184,58 +254,75 @@ class FlashWorker(QThread):
                     return
                 payload = {**config["extra_body"], "model": config["model"], "messages": self.messages, "stream": True,
                            "max_tokens": config["max_tokens"], "temperature": config["temperature"]}
-                self.emit("status", state="connecting")
-                async with client.stream("POST", endpoint(config["base_url"], "chat/completions"), headers=headers, json=payload) as response:
-                    self.response = response
-                    if response.status_code >= 400:
-                        detail = (await response.aread()).decode("utf-8", "replace")[:700]
-                        raise ValueError(f"API HTTP {response.status_code}: {detail}")
-                    response.raise_for_status()
-                    self.emit("status", state="responding")
-                    if "text/event-stream" not in response.headers.get("content-type", ""):
-                        data = json.loads(await response.aread())
-                        choices = data.get("choices") or []
-                        if not choices:
-                            raise ValueError("API 未返回 choices，无法读取回答")
-                        body = str((choices[0].get("message") or {}).get("content") or "")
-                        usage = data.get("usage")
-                        self.emit("chunk", text=body)
-                    else:
-                        saw_end = False
-                        async for line in response.aiter_lines():
-                            if self.cancelled.is_set():
-                                stop_reason = "cancelled"
-                                break
-                            if not line.startswith("data:"):
-                                continue
-                            raw = line[5:].strip()
-                            if raw == "[DONE]":
-                                saw_end = True
-                                break
-                            if not raw:
-                                continue
-                            data = json.loads(raw)
-                            if data.get("error"):
-                                raise ValueError("API 流返回错误：" + json.dumps(data["error"], ensure_ascii=False))
-                            if data.get("usage"):
-                                usage = data["usage"]
-                            for choice in data.get("choices", []):
-                                content = (choice.get("delta") or {}).get("content")
-                                if isinstance(content, str):
-                                    body += content
-                                    if len(body) > 2_000_000:
-                                        raise ValueError("API 回答超过安全大小限制；已停止接收")
-                                    self.emit("chunk", text=content)
-                                if choice.get("finish_reason"):
+                # A reasoning model occasionally stops after thinking with no answer at all;
+                # nothing reached the learner yet, so one silent retry is safe.
+                for attempt in range(2):
+                    body, thinking, stop_reason = "", False, "end_turn"
+                    self.emit("status", state="connecting")
+                    async with client.stream("POST", endpoint(config["base_url"], "chat/completions"), headers=headers, json=payload) as response:
+                        self.response = response
+                        if response.status_code >= 400:
+                            detail = (await response.aread()).decode("utf-8", "replace")[:700]
+                            raise ValueError(f"API HTTP {response.status_code}: {detail}")
+                        response.raise_for_status()
+                        self.emit("status", state="responding")
+                        if "text/event-stream" not in response.headers.get("content-type", ""):
+                            data = json.loads(await response.aread())
+                            choices = data.get("choices") or []
+                            if not choices:
+                                raise ValueError("API 未返回 choices，无法读取回答")
+                            body = str((choices[0].get("message") or {}).get("content") or "")
+                            usage = data.get("usage")
+                            self.emit("chunk", text=body)
+                        else:
+                            saw_end = False
+                            async for line in response.aiter_lines():
+                                if self.cancelled.is_set():
+                                    stop_reason = "cancelled"
+                                    break
+                                if not line.startswith("data:"):
+                                    continue
+                                raw = line[5:].strip()
+                                if raw == "[DONE]":
                                     saw_end = True
-                                    if choice["finish_reason"] == "length":
-                                        stop_reason = "max_tokens"
-                        if not saw_end and not self.cancelled.is_set():
-                            raise ValueError("API 数据流在完成标记前断开；已保留收到的部分回答")
-                if self.cancelled.is_set():
-                    stop_reason = "cancelled"
+                                    break
+                                if not raw:
+                                    continue
+                                data = json.loads(raw)
+                                if data.get("error"):
+                                    raise ValueError("API 流返回错误：" + json.dumps(data["error"], ensure_ascii=False))
+                                if data.get("usage"):
+                                    usage = data["usage"]
+                                for choice in data.get("choices", []):
+                                    delta = choice.get("delta") or {}
+                                    if not thinking and not body and (delta.get("reasoning_content") or delta.get("reasoning")):
+                                        # Reasoning models think before answering; the text itself is not kept.
+                                        thinking = True
+                                        self.emit("status", state="thinking")
+                                    content = delta.get("content")
+                                    if content and thinking and not body:
+                                        self.emit("status", state="responding")
+                                    if isinstance(content, str):
+                                        body += content
+                                        if len(body) > 2_000_000:
+                                            raise ValueError("API 回答超过安全大小限制；已停止接收")
+                                        self.emit("chunk", text=content)
+                                    if choice.get("finish_reason"):
+                                        saw_end = True
+                                        if choice["finish_reason"] == "length":
+                                            stop_reason = "max_tokens"
+                            if not saw_end and not self.cancelled.is_set():
+                                raise ValueError("API 数据流在完成标记前断开；已保留收到的部分回答")
+                    if self.cancelled.is_set():
+                        stop_reason = "cancelled"
+                    if not body.strip() and stop_reason == "max_tokens":
+                        raise ValueError("模型的思考用完了回复上限，还没开始回答。请在「模型连接」里调大回复上限。")
+                    if body.strip() or stop_reason != "end_turn" or not thinking or attempt:
+                        break
+                    LOG.warning("API worker %s: answer was empty after reasoning; retrying once", self.session_id)
                 if not body.strip() and stop_reason == "end_turn":
-                    raise ValueError("API 返回了空回答，请检查模型与附加参数")
+                    raise ValueError("模型这次只思考、没有给出回答（已自动重试一次）。请再发一次。" if thinking
+                                     else "API 返回了空回答，请检查模型与附加参数")
         except asyncio.CancelledError:
             stop_reason = "cancelled"
         except Exception as exc:

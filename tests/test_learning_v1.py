@@ -120,14 +120,14 @@ def test_persistence_reopen(tmp_path):
     s.close();s=Store(tmp_path/'db',seed=False);l=LearningStore(s);assert l.card(c['id'])['title']=='persistent';s.close()
 
 def test_config_private_permissions_masking_and_url(tmp_path,monkeypatch):
-    monkeypatch.delenv('DEEPSEEK_API_KEY',raising=False)
+    monkeypatch.delenv('COMMANDCODE_API_KEY',raising=False)
     c=ProviderConfig(tmp_path/'providers.json')
-    public=c.save({'api_key':'sk-not-a-real-key','base_url':'http://127.0.0.1:1234/v1','extra_body':{}})
-    assert public['has_key'] and 'api_key' not in public
+    public=c.save({'apis':{'commandcode':{'api_key':'sk-not-a-real-key','base_url':'http://127.0.0.1:1234/v1','extra_body':{}}}})
+    assert public['has_key'] and 'sk-not-a-real-key' not in json.dumps(public)
     assert stat.S_IMODE(c.path.stat().st_mode)==0o600
-    c.save({'api_key':''});assert c.key()=='sk-not-a-real-key'
-    c.save({'clear_key':True});assert not c.key()
-    with pytest.raises(ValueError):c.save({'base_url':'https://user:pass@evil.example'})
+    c.save({'apis':{'commandcode':{'api_key':''}}});assert c.key('commandcode')=='sk-not-a-real-key'
+    c.save({'apis':{'commandcode':{'clear_key':True}}});assert not c.key('commandcode')
+    with pytest.raises(ValueError):c.save({'apis':{'commandcode':{'base_url':'https://user:pass@evil.example'}}})
     assert endpoint('https://host/v1/chat/completions','models')=='https://host/v1/models'
     assert 'sk-not-a-real-key' not in clean_error('Failure sk-not-a-real-key','sk-not-a-real-key')
 
@@ -179,12 +179,12 @@ def test_lesson_and_notebook_delete(model):
     with pytest.raises(ValueError):model.one('learn_notebooks',nb['id'])
 
 def test_corrupt_provider_config_falls_back(tmp_path,monkeypatch):
-    monkeypatch.delenv('DEEPSEEK_API_KEY',raising=False)
+    monkeypatch.delenv('COMMANDCODE_API_KEY',raising=False)
     p=tmp_path/'providers.json';p.write_text('{ broken json',encoding='utf-8')
     c=ProviderConfig(p)
-    assert c.read()['model']==DEFAULTS['model']
+    assert c.read()['flash_model']==DEFAULTS['flash_model']
     public=c.public()
-    assert public['has_key'] is False and 'api_key' not in public
+    assert public['has_key'] is False and not any('api_key' in a for a in public['apis'])
 
 def test_markdown_import_is_idempotent(tmp_path):
     from PySide6.QtCore import QCoreApplication

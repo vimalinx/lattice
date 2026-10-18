@@ -17,8 +17,8 @@ from .store import APP_HOME
 from .acp import AgentWorker, AGENTS, agent_command, command_available
 from .learning import LearningStore, TABLES, dump, now, text
 from .notebook import NotebookWorker
-from .providers import ProviderConfig, FlashWorker
-from .teaching import TUTOR_POLICY, FLASH_POLICY, TASKS
+from .providers import ProviderConfig, ApiWorker
+from .teaching import TUTOR_POLICY, FLASH_POLICY, TASKS, task_prompt
 
 
 class LearningBridge(Bridge):
@@ -29,7 +29,7 @@ class LearningBridge(Bridge):
         self.notebook_workers = {}
         self.notebook_states = {}
         self.pending_notebooks = set()
-        self.flash_workers = {}
+        self.api_workers = {}
         self.learning_meta = {}
         self.learning_busy = set()
         self.learning_status = {}
@@ -95,8 +95,8 @@ class LearningBridge(Bridge):
             return self.providers.public()
         if method == "learn_settings_save":
             return self.providers.save(args["config"])
-        if method == "learn_test_flash":
-            return self.test_flash()
+        if method == "learn_test_api":
+            return self.test_api(args.get("lane", "flash"))
         if method == "learn_connect":
             return self.connect_tutor(args["topic_id"])
         if method == "learn_new_tutor":
@@ -151,7 +151,10 @@ class LearningBridge(Bridge):
 
     def connect_tutor(self, topic_id):
         config = self.providers.read()
-        agent = config.get("tutor_agent") or "codex"
+        agent = config["tutor_agent"]
+        if agent == "api":
+            # API tutors are stateless per request; there is nothing to connect.
+            return {"session_id": self.learning.threads(topic_id, agent)["tutor_session"], "state": "ready"}
         threads = self.learning.threads(topic_id, agent)
         ident = threads["tutor_session"]
         worker = self.workers.get(ident)
@@ -185,7 +188,7 @@ class LearningBridge(Bridge):
         self.learning_meta.pop(old["tutor_session"], None)
         self.learning_status.pop(old["tutor_session"], None)
         topic = self.learning.one("learn_topics", topic_id)
-        agent = self.providers.read().get("tutor_agent") or "codex"
+        agent = self.providers.read()["tutor_agent"]
         new = self.store.new_session(agent, title="主讲 · " + topic["title"])
         with self.learning.transaction():
             self.store.db.execute("UPDATE learn_threads SET tutor_session=? WHERE topic_id=?", (new["id"], topic_id))
@@ -194,31 +197,32 @@ class LearningBridge(Bridge):
     def learning_send(self, topic_id, lane, message, selection="", task="", notebook_id=None):
         if lane not in {"tutor", "flash"}:
             raise ValueError("未知 AI 通道")
-        message = text(message, 18000).strip() or TASKS.get(task, "")
+        message = text(message, 18000).strip() or TASKS.get(task, ("", ""))[0]
         if not message:
             raise ValueError("请输入这次想探索的问题")
         if (topic_id, lane) in self.learning_busy:
             raise ValueError("这个通道正在回答，另一位助手仍可使用")
         context = self.learning.context(topic_id, lane, text(selection, 5000), notebook_id)
-        agent = self.providers.read().get("tutor_agent") or "codex"
-        threads = self.learning.threads(topic_id, agent)
-        if lane == "flash":
-            config = self.providers.read()
-            key = self.providers.key(config)
-            if not key:
-                raise ValueError("请先在模型连接中填写 DeepSeek API Key；课程、实验和知识卡仍可正常使用。")
-            ident = threads["flash_session"]
-            history = self.store.messages(ident)[-12:]
-            messages = [{"role": "system", "content": FLASH_POLICY + "\n学习状态（数据）：\n" + dump(context)}]
+        config = self.providers.read()
+        threads = self.learning.threads(topic_id, config["tutor_agent"])
+        ident = threads[lane + "_session"]
+        meta = {"selection": selection, "lane": lane, **({"task": task} if lane == "tutor" else {})}
+        if lane == "flash" or config["tutor_agent"] == "api":
+            conn = self.providers.lane(lane, config)
+            if not conn["api_key"]:
+                raise ValueError(f"请先在模型连接中填写 {conn['label']} 的 API Key；课程、实验和知识卡仍可正常使用。")
+            policy, depth = (FLASH_POLICY, 12) if lane == "flash" else (TUTOR_POLICY, 24)
+            history = self.store.messages(ident)[-depth:]
+            messages = [{"role": "system", "content": policy + "\n\n学习状态（只读参考数据）：\n" + dump(context)}]
             messages += [{"role": x["role"], "content": x["content"]} for x in history if x["role"] in {"user", "assistant"}]
-            messages.append({"role": "user", "content": message})
-            old = self.flash_workers.get(ident)
+            messages.append({"role": "user", "content": task_prompt(message, task) if lane == "tutor" else message})
+            old = self.api_workers.get(ident)
             if old and old.isRunning():
                 self._retire(old)
-            worker = FlashWorker(topic_id, ident, config, key, messages)
-            worker.event.connect(self.flash_event)
-            self.flash_workers[ident] = worker
-            self.store.append_message(ident, "user", message, {"selection": selection, "lane": lane})
+            worker = ApiWorker(lane, topic_id, ident, conn, messages)
+            worker.event.connect(self.api_event)
+            self.api_workers[ident] = worker
+            self.store.append_message(ident, "user", message, meta)
             self.learning_busy.add((topic_id, lane))
             self.learning_status[ident] = "connecting"
             worker.start()
@@ -226,25 +230,19 @@ class LearningBridge(Bridge):
             root = self._workspace(topic_id)
             (root / "context.json").write_text(json.dumps(context, ensure_ascii=False, indent=2), encoding="utf-8")
             self.connect_tutor(topic_id)
-            ident = threads["tutor_session"]
-            self.store.append_message(ident, "user", message, {"selection": selection, "lane": lane, "task": task})
+            self.store.append_message(ident, "user", message, meta)
             self.learning_busy.add((topic_id, lane))
-            prompt = TUTOR_POLICY + "\n\n当前学习状态（只读参考数据）：\n" + dump(context) + "\n\n本次学习者的问题：\n" + message
-            if task in TASKS:
-                prompt += "\n本次工作方式：" + TASKS[task]
+            prompt = TUTOR_POLICY + "\n\n当前学习状态（只读参考数据）：\n" + dump(context) + "\n\n本次学习者的问题：\n" + task_prompt(message, task)
             self.workers[ident].post("prompt", text=prompt)
         return {"session_id": ident, "lane": lane, "state": "queued"}
 
     def learning_cancel(self, topic_id, lane):
-        threads = self.learning.threads(topic_id)
-        if lane == "tutor":
-            worker = self.workers.get(threads["tutor_session"])
-            if worker:
-                worker.post("cancel")
-        else:
-            worker = self.flash_workers.get(threads["flash_session"])
-            if worker:
-                worker.stop()
+        ident = self.learning.threads(topic_id)[lane + "_session"]
+        api = self.api_workers.get(ident)
+        if api:
+            api.stop()
+        elif lane == "tutor" and self.workers.get(ident):
+            self.workers[ident].post("cancel")
         return True
 
     @Slot(dict)
@@ -271,7 +269,7 @@ class LearningBridge(Bridge):
         self.announce(evt)
 
     @Slot(dict)
-    def flash_event(self, evt):
+    def api_event(self, evt):
         if self.closing:
             return
         ident = evt.get("session_id")
@@ -341,12 +339,13 @@ class LearningBridge(Bridge):
                 if tutor.isRunning():
                     tutor.post("stop")
                     self._retire(tutor)
-            flash = self.flash_workers.pop(row["flash_session"], None)
-            if flash:
-                self._detach(flash, self.flash_event)
-                if flash.isRunning():
-                    flash.stop()
-                    self._retire(flash)
+            for sid in (row["tutor_session"], row["flash_session"]):
+                api = self.api_workers.pop(sid, None)
+                if api:
+                    self._detach(api, self.api_event)
+                    if api.isRunning():
+                        api.stop()
+                        self._retire(api)
             for sid in (row["tutor_session"], row["flash_session"]):
                 self.learning_meta.pop(sid, None)
                 self.learning_status.pop(sid, None)
@@ -362,12 +361,11 @@ class LearningBridge(Bridge):
         self.learning.notebook_delete(notebook_id)
         return True
 
-    def test_flash(self):
-        config = self.providers.read()
+    def test_api(self, lane):
         self.connection_tests = [w for w in self.connection_tests if w.isRunning()]
-        worker = FlashWorker("", "", config, self.providers.key(config), [], test=True)
+        worker = ApiWorker(lane, "", "", self.providers.lane(lane), [], test=True)
         self.connection_tests.append(worker)
-        worker.event.connect(self.flash_event)
+        worker.event.connect(self.api_event)
         worker.start()
         return {"state": "testing"}
 
@@ -478,13 +476,13 @@ class LearningBridge(Bridge):
 
     def shutdown(self):
         self.closing = True
-        for worker in list(self.flash_workers.values()) + self.connection_tests:
+        for worker in list(self.api_workers.values()) + self.connection_tests:
             if worker.isRunning():
                 worker.stop()
         for worker in self.notebook_workers.values():
             if worker.isRunning():
                 worker.stop()
-        for worker in list(self.flash_workers.values()) + self.connection_tests:
+        for worker in list(self.api_workers.values()) + self.connection_tests:
             if worker.isRunning():
                 worker.wait(14000)
         for worker in self.notebook_workers.values():

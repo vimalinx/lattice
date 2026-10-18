@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QCoreApplication
 from lattice.notebook import NotebookWorker
-from lattice.providers import FlashWorker, DEFAULTS
+from lattice.providers import ApiWorker
 app=QCoreApplication.instance() or QCoreApplication([])
 results=[]
 def spin(test,seconds=40):
@@ -54,8 +54,8 @@ class Handler(BaseHTTPRequestHandler):
 server=ThreadingHTTPServer(('127.0.0.1',0),Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
 try:
     for mode in ['ok','truncated','error','slow']:
-        events=[];cfg={**DEFAULTS,'base_url':f'http://127.0.0.1:{server.server_port}/{mode}','model':'test-flash','extra_body':{}}
-        f=FlashWorker('topic','session',cfg,'sk-test-secret',[{'role':'user','content':'变量是什么'}]);f.event.connect(events.append);f.start()
+        events=[];cfg={'label':'test','base_url':f'http://127.0.0.1:{server.server_port}/{mode}','model':'test-flash','headers':{},'extra_body':{},'api_key':'sk-test-secret','max_tokens':400,'timeout':60,'temperature':0.35}
+        f=ApiWorker('flash','topic','session',cfg,[{'role':'user','content':'变量是什么'}]);f.event.connect(events.append);f.start()
         try:
             if mode=='slow':spin(lambda:any(e['kind']=='chunk' for e in events));t=time.monotonic();f.stop()
             spin(lambda:any(e['kind']=='finished' for e in events),15)
@@ -65,7 +65,7 @@ try:
             if mode=='error':check('HTTP errors redact credentials',end['stop_reason']=='error' and 'sk-test-secret' not in json.dumps(events))
             if mode=='slow':check('Flash cancellation interrupts pending network read',end['stop_reason']=='cancelled' and time.monotonic()-t<3)
         finally:f.stop();f.wait(5000);app.processEvents()
-    events=[];f=FlashWorker('','',cfg,'sk-test-secret',[],test=True);f.event.connect(events.append);f.start();spin(lambda:any(e['kind']=='connection_test' for e in events));f.wait(5000)
+    events=[];f=ApiWorker('flash','','',cfg,[],test=True);f.event.connect(events.append);f.start();spin(lambda:any(e['kind']=='connection_test' for e in events));f.wait(5000)
     check('API settings connection test reads /models',any(e.get('ok') and e.get('model_found') for e in events))
 finally:server.shutdown()
 print('RUNTIME_RESULT',json.dumps({'passed':len(results),'checks':results},ensure_ascii=False),flush=True)

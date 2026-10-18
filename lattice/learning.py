@@ -490,7 +490,7 @@ class LearningStore:
         # Base Store commits its writes; do not place these calls in a savepoint.
         topic = self.one("learn_topics", topic_id)
         tutor = self.store.new_session(agent, title="主讲 · " + topic["title"])
-        flash = self.store.new_session("deepseek", title="快答 · " + topic["title"])
+        flash = self.store.new_session("api", title="快答 · " + topic["title"])
         with self.transaction():
             self.db.execute("INSERT INTO learn_threads VALUES(?,?,?)", (topic_id, tutor["id"], flash["id"]))
         return {"topic_id": topic_id, "tutor_session": tutor["id"], "flash_session": flash["id"]}
@@ -701,6 +701,13 @@ class LearningStore:
                 cells.append({"id": c["id"], "kind": c["kind"], "source": c["source"][:2500], "actual_output": readable,
                               "output_stale": c["stale"], "execution_count": c["execution_count"]})
             context["notebooks"].append({"title": nb["title"], "cells": cells})
+        said = [m["created_at"] for m in s["tutor_messages"] + s["flash_messages"]]
+        if said:
+            last = datetime.fromisoformat(max(said))
+            days = (datetime.now().astimezone().date() - last.astimezone().date()).days
+            context["last_studied"] = last.strftime("%Y-%m-%d") + ("（今天）" if days == 0 else f"（{days} 天前）")
+        else:
+            context["last_studied"] = "这是第一次学习这个主题"
         context["other_assistant_recent_dialogue"] = [{"role": m["role"], "content": m["content"][:2200]} for m in
                                                      (s["flash_messages"] if lane == "tutor" else s["tutor_messages"])[-6:]]
         context["provenance_notice"] = "这些是持久化记录；程序重启后变量不一定仍在内核中。代码成功不等于概念已掌握。"
