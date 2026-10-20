@@ -94,7 +94,7 @@ function learningHeader(){
  const t=lt();
  // Topics are made and switched by talking to the tutor; the header only says where you are.
  const parent=t&&t.parent_id?d_topics().find(x=>x.id===t.parent_id):null;
- const topicBar='<div class="topic-bar">'+(t?'<span class="topic-name" title="'+esc(t.question||'')+'">'+(parent?'<small>'+esc(parent.title)+' ›</small> ':'')+esc(t.title)+'</span>'+
+ const topicBar='<div class="topic-bar">'+(t&&!isChat()?'<span class="topic-name" title="'+esc(t.question||'')+'">'+(parent?'<small>'+esc(parent.title)+' ›</small> ':'')+esc(t.title)+'</span>'+
  (t.question?'<span class="topic-q" title="'+esc(t.question)+'">'+esc(t.question)+'</span>':''):'')+'</div>';
  return '<header class="topbar learning-topbar"><h1 class="learning-page-title">'+esc(PAGES[S.view])+'</h1>'+topicBar+
  '<div class="learn-header-tools">'+'<span class="learn-agent-chip '+(laneBusy("tutor")?'working':'')+'"><i></i> '+esc(tutorLabel())+' · '+esc(laneBusy("tutor")?'正在思考':stateName[laneStatus("tutor")]||laneStatus("tutor"))+'</span>'+
@@ -271,7 +271,7 @@ function tutorChatView(){
  const messages=ld()?.tutor_messages||[];
  return '<div class="tutor-dialogue"><div class="tutor-dialogue-tools"><span>'+svg("bot",15)+' 主讲负责：讲清机制、安排实验、串联知识</span>'+(ld()?.providers?.tutor_agent==='api'?'':lbutton(svg("link",14)+' 连接 ACP','l-connect','','ghost sm'))+
  lbutton(svg("plus",14)+' 新会话','l-tutor-new','','ghost sm')+lbutton(svg("book",14)+' 提炼知识卡','l-tutor-task','data-task="capture"','ghost sm')+'</div><div class="learn-chat-scroll" id="learn-chat-tutor" data-scroll="chat-tutor" data-scroll-ns="'+esc(lt()?.id||'')+'">'+
- (messages.length||laneBusy('tutor')?conversationHtml('tutor'):isChat()?'<div class="tutor-welcome"><div class="learn-empty-icon">'+svg("spark",30)+'</div><h2>想到什么，直接说。</h2><p>'+esc(tutorLabel())+' 会跟着你的话题走，需要时去查你以前学过的内容。想把某段讨论单独整理成一个主题时，直接告诉它。</p></div>':'<div class="tutor-welcome"><div class="learn-empty-icon">'+svg("spark",30)+'</div><h2>不是从目录开始，<br>是从你想知道的事开始。</h2><p>'+esc(tutorLabel())+' 会参考当前课程、实验输出、快答讨论和知识卡。你不需要每次重新说明自己学到了哪里。</p><div>'+lbutton('为当前兴趣规划起点','l-tutor-task','data-task="plan"','primary')+'</div></div>')+
+ (messages.length||laneBusy('tutor')?conversationHtml('tutor'):isChat()?'<div class="tutor-welcome"><div class="learn-empty-icon">'+svg("spark",30)+'</div><h2>想到什么，直接说。</h2><p>'+esc(tutorLabel())+' 会跟着你的话题走，需要时去查你以前学过的内容；值得长期深入的内容，它会自己整理成主题。</p></div>':'<div class="tutor-welcome"><div class="learn-empty-icon">'+svg("spark",30)+'</div><h2>不是从目录开始，<br>是从你想知道的事开始。</h2><p>'+esc(tutorLabel())+' 会参考当前课程、实验输出、快答讨论和知识卡。你不需要每次重新说明自己学到了哪里。</p><div>'+lbutton('为当前兴趣规划起点','l-tutor-task','data-task="plan"','primary')+'</div></div>')+
  '</div>'+composer('tutor')+'</div>';
 }
 function composer(lane){

@@ -48,7 +48,7 @@ def test_snapshot_shape_is_stable_without_topics(tmp_path):
     for key in ("lessons", "notebooks", "threads", "tutor_messages", "flash_messages", "proposals"):
         assert key in snap
     # Deleting every topic still leaves the free conversation to land on.
-    assert snap["active_topic"] == l.chat_topic() and snap["topics"][0]["title"] == "随便聊"
+    assert snap["active_topic"] == l.chat_topic() and snap["topics"][0]["title"] == "未归入主题"
     s.close()
 
 

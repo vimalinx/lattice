@@ -16,6 +16,8 @@ from .store import words
 VERSION = 1
 SCHEMA_VERSION = 1
 CHAT_KEY = "chat_topic"
+# The default conversation is not a topic to the learner; it only needs a name where topics are listed.
+CHAT_TITLE = "未归入主题"
 STAGES = {"suggested", "seen", "explained", "applied"}
 RELATIONS = {"prerequisite", "part_of", "related", "applies_to", "contrasts"}
 TABLES = ("learn_settings", "learn_topics", "learn_lessons", "learn_cards", "learn_relations",
@@ -213,8 +215,10 @@ class LearningStore:
         """The always-present free conversation; topics are made from it only when the learner asks."""
         ident = self.setting(CHAT_KEY)
         if ident and self.db.execute("SELECT 1 FROM learn_topics WHERE id=?", (ident,)).fetchone():
+            self.db.execute("UPDATE learn_topics SET title=?, question='' WHERE id=? AND title!=?", (CHAT_TITLE, ident, CHAT_TITLE))
+            self.db.commit()
             return ident
-        ident = self.topic_save({"title": "随便聊", "question": ""})["id"]
+        ident = self.topic_save({"title": CHAT_TITLE, "question": ""})["id"]
         self.set_setting(CHAT_KEY, ident)
         if not self.setting("active_topic"):
             self.focus(ident)

@@ -106,7 +106,8 @@ def list_topics(ctx):
     rows = l.rows("SELECT * FROM learn_topics ORDER BY created_at")
     last = {r["topic_id"]: r["at"] for r in l.rows(
         "SELECT t.topic_id, MAX(m.created_at) at FROM learn_threads t JOIN messages m ON m.session_id IN (t.tutor_session,t.flash_session) GROUP BY t.topic_id")}
-    return [{**_topic_brief(l, t), "last_studied": last.get(t["id"])} for t in rows]
+    chat = l.chat_topic()
+    return [{**_topic_brief(l, t), "last_studied": last.get(t["id"]), **({"default_conversation": True} if t["id"] == chat else {})} for t in rows]
 
 
 @tool("read", ROLES, "读取一样东西的全文。ref 形如 topic:<id>（含主题档案、课程、笔记本、知识卡、练习列表）、card:<id或标题>、lesson:<id>、note:<id>、notebook:<id>（全部单元格与真实输出）、cell:<id>、practice:<id>（练习依据、对话与复盘）。",
