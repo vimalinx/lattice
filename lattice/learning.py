@@ -653,7 +653,8 @@ class LearningStore:
         # Name it after the lesson's first heading or bold phrase, never its opening sentence.
         found = re.search(r"^#+\s*(.+)$", seed, re.M) or re.search(r"\*\*(.+?)\*\*", seed)
         heading = found.group(1).strip(" #*：:。.") if found else ""
-        name = "练习 · " + ((name or "").strip()[:32] or heading[:32] or topic["title"])
+        short = re.split(r"[，。；：,;:（(]", (name or "").strip())[0][:32].strip()
+        name = "练习 · " + (short or heading[:32] or topic["title"])
         # Base Store commits its writes; do not place these calls in a savepoint.
         session = self.store.new_session("api", title=name)
         notebook = self.notebook_create(topic_id, name)
