@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import queue
 import threading
 from urllib.parse import urlsplit
 
@@ -42,6 +43,8 @@ DEFAULTS = {
     "devin_model": "swe-2-high",
     "custom_command": "", "custom_args": [],
     "kernel_name": "python3", "kernel_timeout": 120,
+    # Agents may run notebook code in the learner's own kernel (not a sandbox).
+    "agent_auto_run": True,
 }
 TUTOR_AGENTS = {"api", *AGENTS}
 
@@ -161,6 +164,7 @@ class ProviderConfig:
         updated["timeout"] = max(5, min(int(updated["timeout"]), 600))
         updated["temperature"] = max(0, min(float(updated["temperature"]), 2))
         updated["kernel_timeout"] = max(3, min(int(updated["kernel_timeout"]), 3600))
+        updated["agent_auto_run"] = bool(updated["agent_auto_run"])
         if not isinstance(updated["codex_args"], list) or not all(isinstance(x, str) for x in updated["codex_args"]):
             raise ValueError("ACP 参数必须是字符串数组")
         if updated["codex_effort"] not in {"", "low", "medium", "high", "xhigh"}:
@@ -216,10 +220,12 @@ class ApiWorker(QThread):
     """One streamed chat completion for either lane (or a /models connection test)."""
     event = Signal(dict)
 
-    def __init__(self, lane, topic_id, session_id, conn, messages, test=False):
+    def __init__(self, lane, topic_id, session_id, conn, messages, test=False, tools=None):
         super().__init__()
         self.lane, self.topic_id, self.session_id = lane, topic_id, session_id
         self.config, self.api_key, self.messages, self.test = conn, conn["api_key"], messages, test
+        # Tool calls are executed on the GUI thread (it owns SQLite); results come back here.
+        self.tools, self.tool_results, self.partial = tools or [], queue.Queue(), ""
         self.cancelled = threading.Event()
         self.response = None
         self.loop = None
@@ -239,12 +245,94 @@ class ApiWorker(QThread):
             except RuntimeError:
                 pass
 
+    def tool_result(self, call_id, content):
+        self.tool_results.put((call_id, content))
+
     def run(self):
         asyncio.run(self._run())
 
+    async def _tool(self, call):
+        self.emit("tool_call", call_id=call["id"], name=call["function"]["name"], arguments=call["function"]["arguments"])
+        while True:
+            if self.cancelled.is_set():
+                raise asyncio.CancelledError()
+            try:
+                ident, content = await asyncio.to_thread(self.tool_results.get, True, 0.5)
+            except queue.Empty:
+                continue
+            if ident == call["id"]:
+                return content
+
+    async def _stream(self, client, headers, payload, separate):
+        """One streamed completion. Returns content, reasoning, tool calls, finish and usage."""
+        content, reasoning, calls, finish, usage, thinking = "", "", {}, None, None, False
+        self.partial = ""
+        async with client.stream("POST", endpoint(self.config["base_url"], "chat/completions"), headers=headers, json=payload) as response:
+            self.response = response
+            if response.status_code >= 400:
+                detail = (await response.aread()).decode("utf-8", "replace")[:700]
+                raise ValueError(f"API HTTP {response.status_code}: {detail}")
+            self.emit("status", state="responding")
+            if "text/event-stream" not in response.headers.get("content-type", ""):
+                data = json.loads(await response.aread())
+                choices = data.get("choices") or []
+                if not choices:
+                    raise ValueError("API 未返回 choices，无法读取回答")
+                message = choices[0].get("message") or {}
+                content = str(message.get("content") or "")
+                if content:
+                    self.emit("chunk", text=("\n\n" if separate else "") + content)
+                return content, "", message.get("tool_calls") or [], choices[0].get("finish_reason") or "stop", data.get("usage")
+            async for line in response.aiter_lines():
+                if self.cancelled.is_set():
+                    return content, reasoning, [], "cancelled", usage
+                if not line.startswith("data:"):
+                    continue
+                raw = line[5:].strip()
+                if raw == "[DONE]":
+                    finish = finish or "stop"
+                    break
+                if not raw:
+                    continue
+                data = json.loads(raw)
+                if data.get("error"):
+                    raise ValueError("API 流返回错误：" + json.dumps(data["error"], ensure_ascii=False))
+                usage = data.get("usage") or usage
+                for choice in data.get("choices", []):
+                    delta = choice.get("delta") or {}
+                    thought = delta.get("reasoning_content") or delta.get("reasoning")
+                    if isinstance(thought, str) and thought:
+                        reasoning += thought
+                        if not thinking and not content:
+                            # Reasoning models think before answering; the text is only replayed to the model.
+                            thinking = True
+                            self.emit("status", state="thinking")
+                    piece = delta.get("content")
+                    if isinstance(piece, str) and piece:
+                        if not content:
+                            self.emit("status", state="responding")
+                            if separate:
+                                piece = "\n\n" + piece
+                        content += piece
+                        self.partial = content
+                        if len(content) > 2_000_000:
+                            raise ValueError("API 回答超过安全大小限制；已停止接收")
+                        self.emit("chunk", text=piece)
+                    for part in delta.get("tool_calls") or []:
+                        slot = calls.setdefault(part.get("index", 0), {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                        slot["id"] = part.get("id") or slot["id"]
+                        fn = part.get("function") or {}
+                        slot["function"]["name"] += fn.get("name") or ""
+                        slot["function"]["arguments"] += fn.get("arguments") or ""
+                    if choice.get("finish_reason"):
+                        finish = choice["finish_reason"]
+        if finish is None:
+            raise ValueError("API 数据流在完成标记前断开；已保留收到的部分回答")
+        return content.lstrip("\n") if separate else content, reasoning, [calls[i] for i in sorted(calls)], finish, usage
+
     async def _run(self):
         self.loop, self.task = asyncio.get_running_loop(), asyncio.current_task()
-        body, usage, stop_reason, thinking = "", None, "end_turn", False
+        body, stop_reason, usage = "", "end_turn", None
         try:
             if self.cancelled.is_set():
                 raise asyncio.CancelledError()
@@ -264,80 +352,50 @@ class ApiWorker(QThread):
                     self.emit("connection_test", ok=True, models=models, model_found=config["model"] in models,
                               message="API 鉴权与模型列表读取成功" + ("" if config["model"] in models else "；填写的模型名未出现在返回列表中"))
                     return
-                payload = {**config["extra_body"], "model": config["model"], "messages": self.messages, "stream": True,
-                           "max_tokens": config["max_tokens"], "temperature": config["temperature"]}
                 # A reasoning model occasionally stops after thinking with no answer at all;
-                # nothing reached the learner yet, so one silent retry is safe.
+                # when nothing reached the learner yet, one silent retry is safe.
                 for attempt in range(2):
-                    body, thinking, stop_reason = "", False, "end_turn"
+                    messages, body, stop_reason, thought, rounds = list(self.messages), "", "end_turn", False, 0
                     self.emit("status", state="connecting")
-                    async with client.stream("POST", endpoint(config["base_url"], "chat/completions"), headers=headers, json=payload) as response:
-                        self.response = response
-                        if response.status_code >= 400:
-                            detail = (await response.aread()).decode("utf-8", "replace")[:700]
-                            raise ValueError(f"API HTTP {response.status_code}: {detail}")
-                        response.raise_for_status()
-                        self.emit("status", state="responding")
-                        if "text/event-stream" not in response.headers.get("content-type", ""):
-                            data = json.loads(await response.aread())
-                            choices = data.get("choices") or []
-                            if not choices:
-                                raise ValueError("API 未返回 choices，无法读取回答")
-                            body = str((choices[0].get("message") or {}).get("content") or "")
-                            usage = data.get("usage")
-                            self.emit("chunk", text=body)
-                        else:
-                            saw_end = False
-                            async for line in response.aiter_lines():
-                                if self.cancelled.is_set():
-                                    stop_reason = "cancelled"
-                                    break
-                                if not line.startswith("data:"):
-                                    continue
-                                raw = line[5:].strip()
-                                if raw == "[DONE]":
-                                    saw_end = True
-                                    break
-                                if not raw:
-                                    continue
-                                data = json.loads(raw)
-                                if data.get("error"):
-                                    raise ValueError("API 流返回错误：" + json.dumps(data["error"], ensure_ascii=False))
-                                if data.get("usage"):
-                                    usage = data["usage"]
-                                for choice in data.get("choices", []):
-                                    delta = choice.get("delta") or {}
-                                    if not thinking and not body and (delta.get("reasoning_content") or delta.get("reasoning")):
-                                        # Reasoning models think before answering; the text itself is not kept.
-                                        thinking = True
-                                        self.emit("status", state="thinking")
-                                    content = delta.get("content")
-                                    if content and thinking and not body:
-                                        self.emit("status", state="responding")
-                                    if isinstance(content, str):
-                                        body += content
-                                        if len(body) > 2_000_000:
-                                            raise ValueError("API 回答超过安全大小限制；已停止接收")
-                                        self.emit("chunk", text=content)
-                                    if choice.get("finish_reason"):
-                                        saw_end = True
-                                        if choice["finish_reason"] == "length":
-                                            stop_reason = "max_tokens"
-                            if not saw_end and not self.cancelled.is_set():
-                                raise ValueError("API 数据流在完成标记前断开；已保留收到的部分回答")
-                    if self.cancelled.is_set():
-                        stop_reason = "cancelled"
+                    while True:
+                        payload = {**config["extra_body"], "model": config["model"], "messages": messages, "stream": True,
+                                   "max_tokens": config["max_tokens"], "temperature": config["temperature"],
+                                   **({"tools": self.tools} if self.tools else {})}
+                        content, reasoning, calls, finish, part_usage = await self._stream(client, headers, payload, bool(body))
+                        self.partial = ""
+                        usage = part_usage or usage
+                        thought = thought or bool(reasoning)
+                        body += ("\n\n" if body and content else "") + content
+                        if finish == "cancelled" or self.cancelled.is_set():
+                            stop_reason = "cancelled"
+                            break
+                        if finish == "length":
+                            stop_reason = "max_tokens"
+                            break
+                        if not calls:
+                            break
+                        rounds += 1
+                        if rounds > 30:
+                            raise ValueError("这一轮的工具调用超过 30 次，已停止")
+                        # Thinking-mode models need their reasoning replayed alongside the calls they made.
+                        messages.append({"role": "assistant", "content": content or None, "tool_calls": calls,
+                                         **({"reasoning_content": reasoning} if reasoning else {})})
+                        for call in calls:
+                            messages.append({"role": "tool", "tool_call_id": call["id"], "content": await self._tool(call)})
                     if not body.strip() and stop_reason == "max_tokens":
                         raise ValueError("模型的思考用完了回复上限，还没开始回答。请在「模型连接」里调大回复上限。")
-                    if body.strip() or stop_reason != "end_turn" or not thinking or attempt:
+                    if body.strip() or stop_reason != "end_turn" or not thought or rounds or attempt:
                         break
                     LOG.warning("API worker %s: answer was empty after reasoning; retrying once", self.session_id)
-                if not body.strip() and stop_reason == "end_turn":
-                    raise ValueError("模型这次只思考、没有给出回答（已自动重试一次）。请再发一次。" if thinking
+                if not body.strip() and stop_reason == "end_turn" and not rounds:
+                    raise ValueError("模型这次只思考、没有给出回答（已自动重试一次）。请再发一次。" if thought
                                      else "API 返回了空回答，请检查模型与附加参数")
         except asyncio.CancelledError:
+            body += self.partial
             stop_reason = "cancelled"
         except Exception as exc:
+            # A stream that breaks mid-answer keeps what already reached the learner.
+            body += self.partial
             if self.cancelled.is_set():
                 stop_reason = "cancelled"
             else:

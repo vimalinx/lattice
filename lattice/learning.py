@@ -19,7 +19,7 @@ STAGES = {"suggested", "seen", "explained", "applied"}
 RELATIONS = {"prerequisite", "part_of", "related", "applies_to", "contrasts"}
 TABLES = ("learn_settings", "learn_topics", "learn_lessons", "learn_cards", "learn_relations",
           "learn_evidence", "learn_notebooks", "learn_cells", "learn_runs", "learn_threads", "learn_proposals",
-          "learn_practices", "learn_insights")
+          "learn_practices", "learn_insights", "learn_actions")
 # Tables keyed by a real `id` column. learn_settings/learn_threads use different
 # primary keys and must be queried directly, never through one().
 ID_TABLES = frozenset(TABLES) - {"learn_settings", "learn_threads"}
@@ -110,6 +110,9 @@ class LearningStore:
           id TEXT PRIMARY KEY, topic_id TEXT NOT NULL REFERENCES learn_topics(id), practice_id TEXT,
           kind TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
           state TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS learn_actions(
+          id TEXT PRIMARY KEY, topic_id TEXT, actor TEXT NOT NULL, summary TEXT NOT NULL, ref TEXT,
+          undo TEXT, state TEXT NOT NULL, created_at TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS learn_practices_topic ON learn_practices(topic_id,created_at DESC);
         CREATE INDEX IF NOT EXISTS learn_insights_topic ON learn_insights(topic_id,state);
         CREATE INDEX IF NOT EXISTS learn_cells_order ON learn_cells(notebook_id,position);
@@ -224,6 +227,7 @@ class LearningStore:
             self.db.execute("DELETE FROM learn_proposals WHERE topic_id=?", (ident,))
             self.db.execute("DELETE FROM learn_practices WHERE topic_id=?", (ident,))
             self.db.execute("DELETE FROM learn_insights WHERE topic_id=?", (ident,))
+            self.db.execute("DELETE FROM learn_actions WHERE topic_id=?", (ident,))
             # learn_threads rows go, but the backing sessions/messages are kept:
             # they remain readable in the AI 协作 history archive.
             self.db.execute("DELETE FROM learn_threads WHERE topic_id=?", (ident,))
@@ -621,7 +625,7 @@ class LearningStore:
             self.db.execute("UPDATE learn_proposals SET state='dismissed' WHERE id=? AND state='pending'", (ident,))
         return True
 
-    def practice_create(self, topic_id, seed, source_message_id=None):
+    def practice_create(self, topic_id, seed, source_message_id=None, name=None):
         """A practice branch: its own coach conversation and its own notebook."""
         topic = self.one("learn_topics", topic_id)
         if self.db.execute("SELECT 1 FROM learn_practices WHERE topic_id=? AND state!='done'", (topic_id,)).fetchone():
@@ -632,7 +636,7 @@ class LearningStore:
         # Name it after the lesson's first heading or bold phrase, never its opening sentence.
         found = re.search(r"^#+\s*(.+)$", seed, re.M) or re.search(r"\*\*(.+?)\*\*", seed)
         heading = found.group(1).strip(" #*：:。.") if found else ""
-        name = "练习 · " + (heading[:32] or topic["title"])
+        name = "练习 · " + ((name or "").strip()[:32] or heading[:32] or topic["title"])
         # Base Store commits its writes; do not place these calls in a savepoint.
         session = self.store.new_session("api", title=name)
         notebook = self.notebook_create(topic_id, name)
@@ -726,6 +730,7 @@ class LearningStore:
                           proposals=self.rows("SELECT * FROM learn_proposals WHERE topic_id=? ORDER BY created_at DESC LIMIT 80", (topic_id,)),
                           practices=self.rows("SELECT id,title,state,next_focus,notebook_id,created_at,ended_at FROM learn_practices WHERE topic_id=? ORDER BY created_at DESC", (topic_id,)),
                           insights=self.rows("SELECT * FROM learn_insights WHERE topic_id=? ORDER BY created_at DESC", (topic_id,)))
+            result["undone_actions"] = [r["id"] for r in self.rows("SELECT id FROM learn_actions WHERE state='undone' ORDER BY created_at DESC LIMIT 400")]
             active = next((p for p in result["practices"] if p["state"] != "done"), None)
             result["practice"] = self.practice(active["id"]) if active else None
             for p in result["proposals"]:

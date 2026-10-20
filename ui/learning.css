@@ -280,3 +280,10 @@
 .insight-list li.insight-strength{border-left-color:var(--accent)}.insight-list li.resolved{opacity:.55}
 .insight-list strong{font-size:11.5px;color:var(--text)}.insight-list p{margin:2px 0 0;font-size:10.5px;color:var(--muted);line-height:1.7}.insight-list small{font-size:10px;color:var(--subtle);white-space:nowrap}
 @media(max-width:980px){.practice-layout{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}.practice-coach{border-right:0;border-bottom:1px solid var(--line-soft)}}
+/* What an agent did during a turn: one line each, with view and undo */
+.agent-actions{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}
+.agent-action{display:flex;align-items:center;gap:7px;font-size:10.5px;color:var(--muted);border:1px solid var(--line-soft);border-radius:8px;padding:3px 6px 3px 9px;background:var(--paper);width:fit-content;max-width:100%}
+.agent-action>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent-action svg{color:var(--accent);flex-shrink:0}.agent-action .btn{font-size:10px;padding:2px 7px}
+.agent-action.undone{opacity:.55}.agent-action.undone>span{text-decoration:line-through}.agent-action small{color:var(--subtle);font-size:9.5px}
+.connection-check{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:11.5px;flex-wrap:wrap}

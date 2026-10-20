@@ -118,6 +118,8 @@ class AgentWorker(QThread):
         self.command = None
         self.extra_env = {}
         self.agent_config = {}
+        self.mcp_servers = []
+        self.auto_permissions = False
         self.permissions = {}
         self.handshake_started = None
 
@@ -169,7 +171,7 @@ class AgentWorker(QThread):
         self._send(msg)
 
     def _start_new(self):
-        self.call("session/new",{"cwd":self.cwd,"mcpServers":[]})
+        self.call("session/new",{"cwd":self.cwd,"mcpServers":self.mcp_servers})
 
     def _activate(self):
         if self.pending_prompts and not self.busy and self.session:
@@ -209,7 +211,7 @@ class AgentWorker(QThread):
             self.emit("status",state="initialised")
             if self.restore_id and self.init_caps.get("loadSession"):
                 self.call("session/load",{
-                    "sessionId":self.restore_id,"cwd":self.cwd,"mcpServers":[]
+                    "sessionId":self.restore_id,"cwd":self.cwd,"mcpServers":self.mcp_servers
                 })
             else:
                 self._start_new()
@@ -262,6 +264,18 @@ class AgentWorker(QThread):
             return
         if method=="session/request_permission":
             options=params.get("options") or []
+            if self.auto_permissions:
+                # The learner is never asked: Lattice's own tools are allowed for the
+                # session (their writes are undoable); the agent's shell and file
+                # tools are refused, so it works through Lattice instead.
+                ours=(params.get("_meta") or {}).get("is_mcp_tool_approval") and "lattice" in json.dumps(params,ensure_ascii=False)
+                pick=next((o for o in options if "session" in str(o.get("optionId"))),None) or next((o for o in options if o.get("kind")=="allow_once"),None)
+                if ours and pick:
+                    self.respond(ident,{"outcome":{"outcome":"selected","optionId":pick["optionId"]}})
+                else:
+                    self.respond(ident,{"outcome":{"outcome":"cancelled"}})
+                    self.emit("diagnostic",message="已自动拒绝 Agent 的 "+str((params.get("toolCall") or {}).get("kind") or "操作")+" 请求")
+                return
             self.permissions[ident] = {o.get("optionId") for o in options}
             self.emit("permission",request_id=ident,title=(params.get("title") or "Agent 请求操作权限"),
                       options=options,tool=params.get("toolCall") or params.get("subject") or {})

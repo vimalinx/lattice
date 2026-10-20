@@ -2,7 +2,7 @@
 /* Native learning workspace; all persistent actions go through the Qt backend. */
 const L = {
  filesOpen:false, data:null, notebookId:null, lessonId:null, cardView:"cards", search:"", stage:"", scope:"",
- inputs:{tutor:"",flash:"",practice:""}, practiceId:null, practiceCache:null, streams:{}, errors:{}, localBusy:new Set(), selection:"", drafts:new Map(), timers:new Map(),
+ inputs:{tutor:"",flash:"",practice:""}, practiceId:null, practiceCache:null, liveActions:{}, undone:new Set(), streams:{}, errors:{}, localBusy:new Set(), selection:"", drafts:new Map(), timers:new Map(),
  editingCard:null, editingLesson:null, permissions:[], testResult:"", scrollBottom:null,
  cardDrafts:new Map(), details:{},
 };
@@ -19,6 +19,7 @@ function activeNotebook(){const d=ld();return d?.notebooks?.find(n=>n.id===L.not
 function activeLesson(){const d=ld();return d?.lessons?.find(n=>n.id===L.lessonId)||d?.lessons?.find(n=>n.state==="current")||d?.lessons?.[0]||null;}
 function adoptLearning(data){
  L.data=data;if(S.data)S.data.learning=data;
+ for(const id of data.undone_actions||[])L.undone.add(id);
  if(!data.notebooks?.some(n=>n.id===L.notebookId))L.notebookId=data.notebooks?.[0]?.id||null;
  if(!data.lessons?.some(n=>n.id===L.lessonId))L.lessonId=data.lessons?.find(n=>n.state==="current")?.id||data.lessons?.[0]?.id||null;
 }
@@ -228,6 +229,13 @@ function practicePage(){
  '<div class="notebook-state-row"><span id="nb-kernel-state">'+svg("terminal",13)+' Python · '+esc(ks==='offline'?'尚未启动内核':stateName[ks]||ks)+'</span><span>Shift + Enter 运行当前格 · 写完点「看看我的代码」</span></div>'+
  '<div class="notebook-scroll" id="notebook-scroll" data-scroll="nb" data-scroll-ns="'+esc(nb.id)+'">'+(nb.cells.length?nb.cells.map(cellHtml).join(''):'<p class="learn-caption practice-empty">教练给出的骨架代码可以点代码块上的「放到右侧」，也可以自己新建单元格。</p>')+notebookAdd()+'</div></div>':emptyState('flask','这次练习的笔记本已被删除','练习对话仍然保留。'))+'</section></div>';
 }
+/* Each thing an agent did shows as one line with view and undo. */
+function actionChips(actions,live=false){
+ if(!actions?.length)return '';
+ return '<div class="agent-actions">'+actions.map(a=>'<div class="agent-action'+(a.undone?' undone':'')+'">'+svg(live?'spark':'check',12)+'<span>'+esc(a.summary)+'</span>'+
+ (a.ref&&!a.undone?(a.ref.startsWith('handoff:')?lbutton('请主讲接住','l-handoff','','ghost sm'):lbutton('查看','l-ref-open','data-ref="'+esc(a.ref)+'"','ghost sm')):'')+
+ (a.undoable&&!a.undone?lbutton('撤销','l-action-undo','data-id="'+esc(a.id)+'"','ghost sm'):a.undone?'<small>已撤销</small>':'')+'</div>').join('')+'</div>';
+}
 const convCache={};
 const laneWho=lane=>({tutor:tutorLabel()+' · 主讲',flash:flashLabel()+' · 快答',practice:practiceLabel()+' · 练习教练'})[lane];
 // Saved messages are cached apart from the live tail, so a streamed chunk only
@@ -235,7 +243,7 @@ const laneWho=lane=>({tutor:tutorLabel()+' · 主讲',flash:flashLabel()+' · �
 function messagesHtml(lane){
  const d=ld(),messages=lane==='tutor'?d.tutor_messages:lane==='flash'?d.flash_messages:shownPractice()?.messages||[];
  const last=messages?.[messages.length-1];
- const ck=(lt()?.id||'')+'|'+(lane==='practice'?shownPractice()?.id||'':'')+'|'+(messages?.length||0)+'|'+(last?.id||'')+'|'+(last?.meta||'')+'|'+tutorLabel()+'|'+flashLabel();
+ const ck=(lt()?.id||'')+'|'+L.undone.size+'|'+(lane==='practice'?shownPractice()?.id||'':'')+'|'+(messages?.length||0)+'|'+(last?.id||'')+'|'+(last?.meta||'')+'|'+tutorLabel()+'|'+flashLabel();
  if(convCache[lane]?.key===ck)return convCache[lane].html;
  const who=laneWho(lane);
  const html=(messages||[]).map(m=>{
@@ -243,6 +251,7 @@ function messagesHtml(lane){
   const incomplete=m.role==='assistant'&&meta.stop_reason&&meta.stop_reason!=='end_turn';
   return '<div class="learn-message '+(m.role==='user'?'from-user':'from-ai')+'"><div class="learn-message-meta"><span>'+esc(m.role==='user'?'你':who)+'</span><time>'+esc(fmtDate(m.created_at,true))+'</time></div>'+
   '<div class="markdown learn-message-content">'+wrapCodeBlocks(m.role==='user'?markdown(m.content):replyHtml(m.content))+'</div>'+
+  actionChips((meta.actions||[]).map(a=>({...a,undone:L.undone.has(a.id)||a.undone})))+
   (incomplete?'<div class="answer-incomplete">'+esc(meta.stop_reason==='cancelled'?'已停止 · 保留部分回答':meta.stop_reason==='max_tokens'?'达到回复长度限制':'未正常完成 · 仅保留已收到内容')+'</div>':'')+
   (m.role==='assistant'&&lane!=='practice'?'<div class="learn-message-actions">'+lbutton(svg("book",12)+' 存为卡片','l-message-card','data-lane="'+esc(lane)+'" data-id="'+esc(m.id)+'"','ghost sm')+
   (lane==='tutor'&&/```(?:python|py)\s*\n/.test(m.content)?lbutton(svg("flask",12)+' 加入实验','l-message-code','data-id="'+esc(m.id)+'"','ghost sm'):'')+
@@ -255,7 +264,8 @@ function messagesHtml(lane){
 function conversationHtml(lane){
  const key=lk(lt()?.id,lane),stream=L.streams[key]||'';
  let html=messagesHtml(lane);
- if(stream)html+='<div class="learn-message from-ai streaming"><div class="learn-message-meta"><span>'+esc(laneWho(lane))+'</span><span>正在回答</span></div><div class="markdown">'+wrapCodeBlocks(replyHtml(stream))+'</div></div>';
+ const live=L.liveActions[key]||[];
+ if(stream||live.length)html+='<div class="learn-message from-ai streaming"><div class="learn-message-meta"><span>'+esc(laneWho(lane))+'</span><span>正在回答</span></div><div class="markdown">'+wrapCodeBlocks(replyHtml(stream))+'</div><div class="live-actions">'+actionChips(live,true)+'</div></div>';
  else if(laneBusy(lane))html+='<div class="learn-thinking"><span></span><span></span><span></span><b>'+esc(lane==='tutor'?'正在组织这个问题的下一步…':'正在解释…')+'</b></div>';
  if(L.errors[key])html+='<div class="learn-inline-error">'+esc(L.errors[key])+'</div>';
  return html;
@@ -271,7 +281,7 @@ function composer(lane){
  const busy=laneBusy(lane),ready=!!lt()&&({flash:ld()?.providers?.has_key,tutor:ld()?.providers?.tutor_ready,practice:ld()?.providers?.practice_ready&&shownPractice()?.state==='active'})[lane];
  const hint={flash:'这个词是什么意思？这行代码为什么这样写？',tutor:'告诉 '+tutorLabel()+'：你观察到了什么，又想继续追问什么？',practice:'说说你的想法、预测，或者哪里卡住了'}[lane];
  return '<div class="learn-composer '+lane+'"><textarea id="learn-input-'+lane+'" rows="'+esc((lane==='flash'?3:2))+'" placeholder="'+esc(hint)+'" aria-label="'+esc({flash:'快速答疑问题',tutor:'主讲问题',practice:'对练习教练说'}[lane])+'" '+(lt()?'':'disabled')+'>'+esc(L.inputs[lane])+'</textarea>'+
- '<div class="composer-bottom"><span>'+({flash:'当前主题与选中内容会随问题传入',tutor:'Ctrl + Enter 发送 · 课程建议需点击采纳',practice:'Ctrl + Enter 发送 · 教练会看到右侧代码的真实输出'})[lane]+'</span>'+
+ '<div class="composer-bottom"><span>'+({flash:'当前主题与选中内容会随问题传入',tutor:'Ctrl + Enter 发送 · AI 做的改动都能在对话里撤销',practice:'Ctrl + Enter 发送 · 教练会看到右侧代码的真实输出'})[lane]+'</span>'+
  (busy?lbutton(svg("stop",14)+' 停止','l-cancel','data-lane="'+esc(lane)+'"','ghost sm'):lbutton(svg("arrowup",15)+(lane==='flash'?' 提问':' 发送'),'l-send','data-lane="'+esc(lane)+'" '+(!ready?'disabled':''),'primary sm'))+'</div></div>';
 }
 function flashPanel(){
@@ -378,7 +388,8 @@ function connectionsBody(){
  (c.apis||[]).map(apiBlock).join('')+
  '<div class="connection-inline"><label>超时 / 秒<input class="field" type="number" id="cfg-timeout" min="5" max="600" value="'+esc(c.timeout)+'"/></label><label>Temperature<input class="field" type="number" step="0.05" id="cfg-temperature" min="0" max="2" value="'+esc(c.temperature)+'"/></label></div>'+
  '<p class="connection-foot">密钥保存在本机 0600 权限文件中，不进入学习档案导出。也可以用环境变量提供 Key。</p>'+
- '<div class="kernel-settings"><h3>'+svg("terminal",16)+' 本地 Jupyter 内核</h3><div class="connection-inline"><label>Kernel 名称<input class="field" id="cfg-kernel" value="'+esc(c.kernel_name)+'"/></label><label>单格时限 / 秒<input class="field" type="number" id="cfg-kernel-timeout" min="3" max="3600" value="'+esc(c.kernel_timeout)+'"/></label></div></div></section>'+
+ '<div class="kernel-settings"><h3>'+svg("terminal",16)+' 本地 Jupyter 内核</h3><div class="connection-inline"><label>Kernel 名称<input class="field" id="cfg-kernel" value="'+esc(c.kernel_name)+'"/></label><label>单格时限 / 秒<input class="field" type="number" id="cfg-kernel-timeout" min="3" max="3600" value="'+esc(c.kernel_timeout)+'"/></label></div>'+
+ '<label class="connection-check"><input type="checkbox" id="cfg-auto-run" '+(c.agent_auto_run?'checked':'')+'/> 允许 AI 自己运行实验笔记里的代码并读取结果 <span class="learn-caption">代码以你的用户权限在本机运行，不是沙箱</span></label></div></section>'+
  '<div class="connection-save-row"><div class="connection-test-result" id="connection-test-result">'+esc(L.testResult||'尚未执行连接测试。其他本地功能不依赖 API 配置。')+'</div>'+lbutton(svg("save",15)+' 保存全部设置','l-settings-save','','primary')+'</div>'+
  '<section class="connection-data"><div><h3>可以带走的学习档案</h3><p>SQLite 全量记录、知识卡 Markdown、关系 JSON 和标准 .ipynb。API Key 与 Codex 凭据不包含在内。</p></div>'+lbutton(svg("download",15)+' 导出学习档案','l-export','','ghost')+'</section></div>';
 }
@@ -433,6 +444,17 @@ async function saveCell(id){
 }
 async function flushCells(){for(const id of [...L.drafts.keys()])await saveCell(id);}
 async function focusTopic(id){await flushCells();adoptLearning(await rpc('learn_focus',{id}));L.inputs={tutor:'',flash:''};L.selection='';render();}
+/* What the learner has on screen goes with their words; agents look up the rest. */
+function screenRef(){
+ const d=currentDetail(),p=S.view==='practice'?shownPractice():null,nb=S.view==='notebook'?activeNotebook():null;
+ if(p)return 'practice:'+p.id+'「'+p.title+'」';
+ if(nb)return 'notebook:'+nb.id+'「'+nb.title+'」';
+ if(d&&!d.collapsed&&d.ref!=='new'){
+  const item=d.kind==='card'?ld().cards.find(c=>String(c.id)===String(d.ref)):d.kind==='lesson'?(ld().all_lessons||[]).find(l=>String(l.id)===String(d.ref)):d.kind==='note'?S.data?.notes?.find(n=>String(n.id)===String(d.ref)):null;
+  if(item)return d.kind+':'+d.ref+'「'+item.title+'」';
+ }
+ return '';
+}
 async function sendLearning(lane,message=null,task=''){
  if(!lt())return toast('先创建一个探索主题，再开始提问。','error');
  if(laneBusy(lane))return toast('这个通道正在回答，另一位助手仍可提问。');
@@ -446,8 +468,9 @@ async function sendLearning(lane,message=null,task=''){
  if(message==null){L.inputs[lane]='';const inp=el('#learn-input-'+lane);if(inp)inp.value='';}
  L.selection='';const selBox=el('#flash-selection');if(selBox){selBox.classList.remove('has-selection');selBox.innerHTML=selectionHtml();}
  try{
-  if(lane==='practice')await rpc('learn_practice_send',{id:shownPractice().id,text:actual,task});
-  else await rpc('learn_send',{topic_id:lt().id,lane,text:actual,selection:sel,task,notebook_id:activeNotebook()?.id});
+  const page=PAGES[S.view],open=screenRef();
+  if(lane==='practice')await rpc('learn_practice_send',{id:shownPractice().id,text:actual,task,page,open});
+  else await rpc('learn_send',{topic_id:lt().id,lane,text:actual,selection:sel,task,page,open});
   ({tutor:ld().tutor_messages,flash:ld().flash_messages,practice:shownPractice()?.messages||[]})[lane].push({id:'pending-'+Date.now(),role:'user',content:actual,created_at:new Date().toISOString()});
   L.scrollBottom=lane;
   await openContent({tutor:'dialogue',flash:'flash',practice:'practice'}[lane]);
@@ -573,7 +596,7 @@ async function settingsSave(){
  codex_command:el('#cfg-codex').value,codex_args:JSON.parse(el('#cfg-codex-args').value),codex_model:el('#cfg-codex-model').value,
  codex_effort:el('#cfg-effort').value,devin_command:el('#cfg-devin').value,devin_model:el('#cfg-devin-model').value,
  custom_command:el('#cfg-custom').value,custom_args:JSON.parse(el('#cfg-custom-args').value||'[]'),
- kernel_name:el('#cfg-kernel').value,kernel_timeout:Number(el('#cfg-kernel-timeout').value)};
+ kernel_name:el('#cfg-kernel').value,kernel_timeout:Number(el('#cfg-kernel-timeout').value),agent_auto_run:el('#cfg-auto-run').checked};
  ld().providers=await rpc('learn_settings_save',{config:cfg});all('[id^="cfg-api-"][id$="-key"]').forEach(x=>x.value='');toast('模型设置已保存');
 }
 const originalGo=go;
@@ -647,6 +670,18 @@ action=async function(target){
   return openContent('practice');
  }
  case 'l-practice-task':return sendLearning('practice',null,a.dataset.task);
+ case 'l-action-undo':{
+  adoptLearning(await rpc('learn_action_undo',{id,topic_id:lt()?.id}));L.undone.add(id);render();return toast('已撤销');
+ }
+ case 'l-handoff':await go('learning');return sendLearning('tutor','快答刚把一个问题转交给你了，请接住它。');
+ case 'l-ref-open':{
+  const [kind,ref]=[a.dataset.ref.split(':')[0],a.dataset.ref.slice(a.dataset.ref.indexOf(':')+1)];
+  if(kind==='topic')return focusTopic(ref);
+  if(kind==='practice'){L.practiceId=ref;L.practiceCache=await rpc('learn_practice_get',{id:ref});return go('practice');}
+  if(kind==='notebook'||kind==='cell'){const nb=kind==='notebook'?ref:ld().notebooks.find(n=>n.cells.some(c=>c.id===ref))?.id;if(nb)L.notebookId=nb;return openContent('notebook');}
+  if(['card','lesson','note'].includes(kind)){await learnRefresh(false);if(kind==='note')await reloadData();return openContent(kind,ref);}
+  return;
+ }
  case 'l-practice-end':{
   if(!confirm('结束这次练习，交给主讲复盘？结束后不能再在这个分支里继续对话。'))return;
   await flushCells();
@@ -831,13 +866,23 @@ onEvent=async function(evt){
   if(evt.kind==='error'){L.localBusy.delete(key);L.errors[key]=evt.message||'请求失败，没有收到错误说明。请重试。';if(same)patchChat(evt.lane);L.testResult=evt.message;const b=el('#connection-test-result');if(b)b.textContent=evt.message;return;}
   if(evt.kind==='ready'){ld().runtime.agents[evt.session_id]='ready';L.testResult='✓ ACP 已完成握手并建立真实会话。';const b=el('#connection-test-result');if(b)b.textContent=L.testResult;return;}
   if(evt.kind==='status'){ld().runtime.agents[evt.session_id]=evt.state;if(evt.state==='offline')L.localBusy.delete(key);const chip=el('.learn-agent-chip');if(chip&&evt.lane==='tutor'&&same)chip.innerHTML='<i></i> '+esc(tutorLabel())+' · '+esc(stateName[evt.state]||evt.state);return;}
-  if(evt.kind==='tool'&&same){const b=el('#learn-chat-tutor');if(b)b.insertAdjacentHTML('beforeend','<div class="learning-tool-event">'+svg('terminal',12)+' '+esc(evt.title)+' · '+esc(evt.status)+'</div>');return;}
+  if(evt.kind==='tool'){
+   if(!evt.actions?.length)return;
+   (L.liveActions[key]=L.liveActions[key]||[]).push(...evt.actions);
+   if(same){const box=el('#learn-chat-'+evt.lane+' .streaming .live-actions');if(box)box.innerHTML=actionChips(L.liveActions[key],true);else patchChat(evt.lane);}
+   return;
+  }
   if(evt.kind==='finished'){
-   L.localBusy.delete(key);L.streams[key]='';
+   L.localBusy.delete(key);L.streams[key]='';L.liveActions[key]=[];
+   if(evt.focus&&evt.focus!==lt()?.id){adoptLearning(await rpc('learn_snapshot',{topic_id:evt.focus}));if(LEARNING_PAGES.has(S.view))render();return;}
    if(same){await learnRefresh(false);if(L.practiceId&&L.practiceId!==ld().practice?.id)L.practiceCache=await rpc('learn_practice_get',{id:L.practiceId});if(LEARNING_PAGES.has(S.view))render();}
    if(evt.artifacts?.errors?.length)toast('建议格式未通过验证：'+evt.artifacts.errors.join('；'),'error');
    return;
   }
+  return;
+ }
+ if(evt.type==='learning_changed'){
+  if(evt.topic_id===lt()?.id){await learnRefresh(false);if(['notebook','practice'].includes(S.view))render();}
   return;
  }
  if(evt.type==='notebook'){
