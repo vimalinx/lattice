@@ -171,7 +171,7 @@ async function safe(fn){
  try{return await fn();}catch(e){console.error(e);toast(e.message||String(e),"error");return null;}
 }
 const NAV_ITEMS=[
- ["learning","学习对话","bot"],["classroom","课程","book"],
+ ["learning","学习对话","bot"],["practice","练习","code"],["classroom","课程","book"],
  ["notebook","实验笔记","flask"],["notes","知识笔记","document"],
  ["knowledge","知识卡","tag"],["graph","知识网络","git"],["flash","即时答疑","spark"]
 ];

@@ -18,7 +18,8 @@ SCHEMA_VERSION = 1
 STAGES = {"suggested", "seen", "explained", "applied"}
 RELATIONS = {"prerequisite", "part_of", "related", "applies_to", "contrasts"}
 TABLES = ("learn_settings", "learn_topics", "learn_lessons", "learn_cards", "learn_relations",
-          "learn_evidence", "learn_notebooks", "learn_cells", "learn_runs", "learn_threads", "learn_proposals")
+          "learn_evidence", "learn_notebooks", "learn_cells", "learn_runs", "learn_threads", "learn_proposals",
+          "learn_practices", "learn_insights")
 # Tables keyed by a real `id` column. learn_settings/learn_threads use different
 # primary keys and must be queried directly, never through one().
 ID_TABLES = frozenset(TABLES) - {"learn_settings", "learn_threads"}
@@ -100,6 +101,17 @@ class LearningStore:
           id TEXT PRIMARY KEY, topic_id TEXT NOT NULL REFERENCES learn_topics(id), lane TEXT NOT NULL,
           message_id INTEGER, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending',
           result TEXT, created_at TEXT NOT NULL, applied_at TEXT);
+        CREATE TABLE IF NOT EXISTS learn_practices(
+          id TEXT PRIMARY KEY, topic_id TEXT NOT NULL REFERENCES learn_topics(id), title TEXT NOT NULL,
+          seed TEXT NOT NULL DEFAULT '', session_id TEXT NOT NULL, notebook_id TEXT NOT NULL,
+          source_message_id INTEGER, state TEXT NOT NULL DEFAULT 'active', next_focus TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL, ended_at TEXT);
+        CREATE TABLE IF NOT EXISTS learn_insights(
+          id TEXT PRIMARY KEY, topic_id TEXT NOT NULL REFERENCES learn_topics(id), practice_id TEXT,
+          kind TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
+          state TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS learn_practices_topic ON learn_practices(topic_id,created_at DESC);
+        CREATE INDEX IF NOT EXISTS learn_insights_topic ON learn_insights(topic_id,state);
         CREATE INDEX IF NOT EXISTS learn_cells_order ON learn_cells(notebook_id,position);
         CREATE INDEX IF NOT EXISTS learn_runs_cell ON learn_runs(cell_id,started_at DESC);
         CREATE INDEX IF NOT EXISTS learn_cards_topic ON learn_cards(topic_id,updated_at DESC);
@@ -210,6 +222,8 @@ class LearningStore:
                 self._notebook_delete(nb["id"])
             self.db.execute("DELETE FROM learn_lessons WHERE topic_id=?", (ident,))
             self.db.execute("DELETE FROM learn_proposals WHERE topic_id=?", (ident,))
+            self.db.execute("DELETE FROM learn_practices WHERE topic_id=?", (ident,))
+            self.db.execute("DELETE FROM learn_insights WHERE topic_id=?", (ident,))
             # learn_threads rows go, but the backing sessions/messages are kept:
             # they remain readable in the AI 协作 history archive.
             self.db.execute("DELETE FROM learn_threads WHERE topic_id=?", (ident,))
@@ -607,6 +621,82 @@ class LearningStore:
             self.db.execute("UPDATE learn_proposals SET state='dismissed' WHERE id=? AND state='pending'", (ident,))
         return True
 
+    def practice_create(self, topic_id, seed, source_message_id=None):
+        """A practice branch: its own coach conversation and its own notebook."""
+        topic = self.one("learn_topics", topic_id)
+        if self.db.execute("SELECT 1 FROM learn_practices WHERE topic_id=? AND state!='done'", (topic_id,)).fetchone():
+            raise ValueError("这个主题还有一个没结束的练习；先结束它，再开新的练习")
+        seed = text(seed, 30000).strip()
+        if not seed:
+            raise ValueError("没有可以练习的讲解内容")
+        # Name it after the lesson's first heading or bold phrase, never its opening sentence.
+        found = re.search(r"^#+\s*(.+)$", seed, re.M) or re.search(r"\*\*(.+?)\*\*", seed)
+        heading = found.group(1).strip(" #*：:。.") if found else ""
+        name = "练习 · " + (heading[:32] or topic["title"])
+        # Base Store commits its writes; do not place these calls in a savepoint.
+        session = self.store.new_session("api", title=name)
+        notebook = self.notebook_create(topic_id, name)
+        ident = uid()
+        with self.transaction():
+            self.db.execute("INSERT INTO learn_practices(id,topic_id,title,seed,session_id,notebook_id,source_message_id,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                            (ident, topic_id, name, seed, session["id"], notebook["id"], source_message_id, now()))
+            self.event("开始练习 · " + name, "", ident)
+        return self.practice(ident)
+
+    def practice(self, ident):
+        result = self.one("learn_practices", ident)
+        result["messages"] = self.store.messages(result["session_id"])
+        result["insights"] = self.rows("SELECT * FROM learn_insights WHERE practice_id=? ORDER BY created_at", (ident,))
+        return result
+
+    def practice_state(self, ident, state, next_focus=None):
+        self.one("learn_practices", ident)
+        with self.transaction():
+            self.db.execute("UPDATE learn_practices SET state=?,ended_at=CASE WHEN ?='done' THEN ? ELSE ended_at END,"
+                            "next_focus=COALESCE(?,next_focus) WHERE id=?", (state, state, now(), next_focus, ident))
+        return self.practice(ident)
+
+    def insights_record(self, practice_id, review):
+        """Store a tutor's review of one practice; weak points stay active until the learner clears them."""
+        practice = self.one("learn_practices", practice_id)
+        if not isinstance(review, dict):
+            raise ValueError("复盘结果应为 JSON 对象")
+        rows = []
+        for kind, key in (("weak", "weak_points"), ("strength", "strengths")):
+            items = review.get(key) or []
+            if not isinstance(items, list):
+                raise ValueError(key + " 应为数组")
+            for item in items[:8]:
+                if isinstance(item, str):
+                    item = {"title": item}
+                if not isinstance(item, dict) or not str(item.get("title", "")).strip():
+                    continue
+                rows.append((uid(), practice["topic_id"], practice_id, kind, title(str(item["title"])), text(str(item.get("detail", "")), 2000), now()))
+        focus = text(str(review.get("next_focus", "")), 2000).strip()
+        with self.transaction():
+            self.db.execute("DELETE FROM learn_insights WHERE practice_id=?", (practice_id,))
+            self.db.executemany("INSERT INTO learn_insights(id,topic_id,practice_id,kind,title,detail,created_at) VALUES(?,?,?,?,?,?,?)", rows)
+            self.db.execute("UPDATE learn_practices SET state='done',ended_at=?,next_focus=? WHERE id=?", (now(), focus, practice_id))
+        return self.practice(practice_id)
+
+    def insight_resolve(self, ident):
+        self.one("learn_insights", ident)
+        with self.transaction():
+            self.db.execute("UPDATE learn_insights SET state='resolved' WHERE id=?", (ident,))
+        return True
+
+    def learner_profile(self, topic_id):
+        """Weak points from practice reviews on this topic and its main lines."""
+        ids, current = [topic_id], self.one("learn_topics", topic_id)
+        while current["parent_id"]:
+            current = self.one("learn_topics", current["parent_id"])
+            ids.append(current["id"])
+        marks = ",".join("?" * len(ids))
+        weak = self.rows(f"SELECT title,detail,created_at FROM learn_insights WHERE kind='weak' AND state='active' AND topic_id IN ({marks}) ORDER BY created_at DESC LIMIT 12", ids)
+        strong = self.rows(f"SELECT title,created_at FROM learn_insights WHERE kind='strength' AND topic_id IN ({marks}) ORDER BY created_at DESC LIMIT 6", ids)
+        last = self.db.execute("SELECT title,next_focus,ended_at FROM learn_practices WHERE topic_id=? AND state='done' ORDER BY ended_at DESC LIMIT 1", (topic_id,)).fetchone()
+        return {"weak_points": weak, "recent_strengths": strong, "last_practice": dict(last) if last else None}
+
     def snapshot(self, topic_id=None):
         topics = self.rows("SELECT * FROM learn_topics ORDER BY created_at")
         topic_id = topic_id or self.setting("active_topic") or (topics[0]["id"] if topics else None)
@@ -623,6 +713,7 @@ class LearningStore:
                   # distinguish "no topic yet" from "missing field".
                   "lessons": [], "notebooks": [], "threads": None,
                   "tutor_messages": [], "flash_messages": [], "proposals": [],
+                  "practices": [], "insights": [], "practice": None,
                   "stats": {"topics": len(topics), "cards": len(cards), "seen": sum(c["stage"] != "suggested" for c in cards),
                             "evidence": sum(len(c["evidence"]) for c in cards), "runs": self.db.execute("SELECT COUNT(*) FROM learn_runs WHERE state='completed'").fetchone()[0]}}
         if topic_id:
@@ -632,7 +723,11 @@ class LearningStore:
                           threads=threads,
                           tutor_messages=self.store.messages(threads["tutor_session"]),
                           flash_messages=self.store.messages(threads["flash_session"]),
-                          proposals=self.rows("SELECT * FROM learn_proposals WHERE topic_id=? ORDER BY created_at DESC LIMIT 80", (topic_id,)))
+                          proposals=self.rows("SELECT * FROM learn_proposals WHERE topic_id=? ORDER BY created_at DESC LIMIT 80", (topic_id,)),
+                          practices=self.rows("SELECT id,title,state,next_focus,notebook_id,created_at,ended_at FROM learn_practices WHERE topic_id=? ORDER BY created_at DESC", (topic_id,)),
+                          insights=self.rows("SELECT * FROM learn_insights WHERE topic_id=? ORDER BY created_at DESC", (topic_id,)))
+            active = next((p for p in result["practices"] if p["state"] != "done"), None)
+            result["practice"] = self.practice(active["id"]) if active else None
             for p in result["proposals"]:
                 p["payload"] = json.loads(p["payload"])
         return result
@@ -689,16 +784,7 @@ class LearningStore:
         for nb in notebooks[:2]:
             cells = []
             for c in nb["cells"][-10:]:
-                readable = []
-                for out in c["outputs"]:
-                    if out.get("output_type") == "stream":
-                        readable.append(str(out.get("text", ""))[:1800])
-                    elif out.get("output_type") == "error":
-                        readable.append(str(out.get("ename", "")) + ": " + str(out.get("evalue", "")))
-                    else:
-                        data = out.get("data", {})
-                        readable.append(str(data.get("text/plain", "[图形输出已保存]"))[:1800])
-                cells.append({"id": c["id"], "kind": c["kind"], "source": c["source"][:2500], "actual_output": readable,
+                cells.append({"id": c["id"], "kind": c["kind"], "source": c["source"][:2500], "actual_output": readable_outputs(c["outputs"]),
                               "output_stale": c["stale"], "execution_count": c["execution_count"]})
             context["notebooks"].append({"title": nb["title"], "cells": cells})
         said = [m["created_at"] for m in s["tutor_messages"] + s["flash_messages"]]
@@ -710,6 +796,7 @@ class LearningStore:
             context["last_studied"] = "这是第一次学习这个主题"
         context["other_assistant_recent_dialogue"] = [{"role": m["role"], "content": m["content"][:2200]} for m in
                                                      (s["flash_messages"] if lane == "tutor" else s["tutor_messages"])[-6:]]
+        context["learner_profile"] = self.learner_profile(topic_id)
         context["provenance_notice"] = "这些是持久化记录；程序重启后变量不一定仍在内核中。代码成功不等于概念已掌握。"
         return context
 
@@ -736,6 +823,20 @@ class LearningStore:
         self.relation_add(ids["变量"], ids["预测误差"], "prerequisite", "先理解数值如何被命名，再比较预测与观察。")
         self.relation_add(ids["预测误差"], ids["更新步长"], "prerequisite", "把更新方向与移动幅度区分开。")
         self.relation_add(ids["列表"], ids["变量"], "related", "列表也可以由一个变量名引用。")
+
+
+def readable_outputs(outputs):
+    """Notebook outputs as text a model can read; figures become a marker."""
+    readable = []
+    for out in outputs:
+        if out.get("output_type") == "stream":
+            readable.append(str(out.get("text", ""))[:1800])
+        elif out.get("output_type") == "error":
+            readable.append(str(out.get("ename", "")) + ": " + str(out.get("evalue", "")))
+        else:
+            data = out.get("data", {})
+            readable.append(str(data.get("text/plain", "[图形输出已保存]"))[:1800])
+    return readable
 
 
 def title_or_body(value):

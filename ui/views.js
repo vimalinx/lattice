@@ -107,7 +107,7 @@ function render(){
  hideSelPop();teardownLive();
  const sc=scrollSnapshot(),learning=LEARNING_PAGES.has(S.view);
  document.documentElement.setAttribute('data-theme',S.theme);
- const contextual=['learning','classroom','notebook','flash'].includes(S.view);
+ const contextual=['learning','practice','classroom','notebook','flash'].includes(S.view);
  // Keep the shell mounted so page updates cannot interrupt navigation motion
  // or replace the focused navigation button.
  if(!el('#root'))el('#app').innerHTML='<div id="root" class="'+(S.sidebarCollapsed?'nav-collapsed':'')+'">'+sidebar()+'<main class="main"></main></div>';

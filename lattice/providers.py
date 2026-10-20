@@ -34,6 +34,7 @@ API_FIELDS = {"base_url", "headers", "extra_body", "api_key"}
 DEFAULTS = {
     "apis": {}, "flash_api": "commandcode", "flash_model": "deepseek/deepseek-v4.1-flash-fast", "flash_max_tokens": 4000,
     "tutor_agent": "api", "tutor_api": "commandcode", "tutor_model": "deepseek/deepseek-v4.1-flash", "tutor_max_tokens": 16000,
+    "practice_api": "commandcode", "practice_model": "deepseek/deepseek-v4.1-flash", "practice_max_tokens": 16000,
     "timeout": 120, "temperature": 0.35,
     "codex_command": str(ROOT / "runtime/node_modules/.bin/codex-acp"),
     "codex_args": [], "codex_model": "", "codex_effort": "high",
@@ -104,7 +105,9 @@ class ProviderConfig:
                                    "has_key": saved or has_env,
                                    "key_source": "本机配置" if saved else ("环境变量 " + env) if has_env else "尚未配置"})
         result["flash_label"], result["tutor_label"] = self.label("flash", raw), self.label("tutor", raw)
+        result["practice_label"] = self.label("practice", raw)
         result["has_key"] = bool(self.key(raw["flash_api"], raw))
+        result["practice_ready"] = bool(self.key(raw["practice_api"], raw))
         result["tutor_ready"] = bool(self.key(raw["tutor_api"], raw)) if raw["tutor_agent"] == "api" else True
         result["codex_installed"] = command_available(agent_command("codex", result)[0])
         result["acp_agents"] = agent_options(result)
@@ -144,16 +147,17 @@ class ProviderConfig:
             if not isinstance(api["headers"], dict) or not all(isinstance(v, str) for v in api["headers"].values()) \
                     or {k.casefold() for k in api["headers"]} & {"authorization", "content-type"}:
                 raise ValueError(label + " 的请求头应为字符串对象，不能覆盖 Authorization/Content-Type")
-        for lane in ("flash", "tutor"):
+        names = {"flash": "快答", "tutor": "主讲", "practice": "练习教练"}
+        for lane in names:
             if updated[lane + "_api"] not in APIS:
                 raise ValueError("未知的 API 连接：" + str(updated[lane + "_api"]))
             updated[lane + "_model"] = str(updated[lane + "_model"]).strip()
             updated[lane + "_max_tokens"] = max(256, min(int(updated[lane + "_max_tokens"]), 64000))
-            if lane == "flash" or updated["tutor_agent"] == "api":
+            if lane != "tutor" or updated["tutor_agent"] == "api":
                 if not updated["apis"][updated[lane + "_api"]]["base_url"]:
-                    raise ValueError(("快答" if lane == "flash" else "主讲") + "所选连接还没有 Base URL")
+                    raise ValueError(names[lane] + "所选连接还没有 Base URL")
                 if not updated[lane + "_model"]:
-                    raise ValueError("请填写" + ("快答" if lane == "flash" else "主讲") + "的模型名")
+                    raise ValueError("请填写" + names[lane] + "的模型名")
         updated["timeout"] = max(5, min(int(updated["timeout"]), 600))
         updated["temperature"] = max(0, min(float(updated["temperature"]), 2))
         updated["kernel_timeout"] = max(3, min(int(updated["kernel_timeout"]), 3600))

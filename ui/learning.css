@@ -257,3 +257,26 @@
 .knowledge-heading{padding-top:28px}
 .api-connections{max-width:1170px;margin-top:22px}
 .api-connection{border-top:1px solid var(--line);padding:12px 0 4px;margin-top:12px}.api-connection summary{cursor:pointer;display:flex;align-items:baseline;gap:12px;font-size:12px}.api-connection summary .learn-caption{font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Practice branch: coach conversation on the left, the learner's notebook on the right */
+.practice-layout{display:grid;grid-template-columns:minmax(360px,.95fr) minmax(420px,1.05fr);height:100%;min-height:0}
+.practice-coach{display:flex;flex-direction:column;min-height:0;min-width:0;border-right:1px solid var(--line-soft);background:var(--bg)}
+.practice-code{display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--context)}
+.practice-code .notebook-scroll{padding:16px 18px 22px}
+.practice-nb-title{font-size:11.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:auto}
+.practice-seed{margin:10px 24px 0;border:1px solid var(--line-soft);border-radius:10px;padding:8px 12px;font-size:11px;color:var(--muted);flex-shrink:0;max-height:38%;overflow:auto}
+.practice-seed summary{cursor:pointer}.practice-seed .markdown{margin-top:8px;font-size:11.5px}
+.practice-empty{padding:4px 2px 12px}
+.practice-review-note{flex-shrink:0;margin:9px 24px 17px;border:1px solid var(--line);background:var(--paper);border-radius:14px;padding:14px 16px;font-size:11.5px;line-height:1.8;color:var(--muted);max-height:45%;overflow:auto}
+.practice-review-note h3{margin:0 0 6px;font-size:13px;color:var(--text)}.practice-review-note h4{margin:10px 0 4px;font-size:11.5px;color:var(--text)}
+.practice-review-note>div:last-child{display:flex;gap:8px;margin-top:10px}
+.practice-review-note .learn-thinking{display:inline-flex;padding:0 6px 0 0}
+.practice-home-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-top:18px}
+.practice-panel{border:1px solid var(--line-soft);border-radius:14px;padding:16px 18px;background:var(--paper)}
+.practice-panel h3{display:flex;align-items:center;gap:7px;margin:0 0 10px;font-size:12.5px}
+.practice-row{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;padding:9px 10px;border-radius:9px;border:0;background:none;color:var(--text);cursor:pointer}
+.practice-row:hover{background:var(--hover,rgba(127,127,127,.08))}.practice-row small{color:var(--subtle);font-size:10px}
+.insight-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.insight-list li{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;border-left:3px solid var(--red);padding:4px 0 4px 10px}
+.insight-list li.insight-strength{border-left-color:var(--accent)}.insight-list li.resolved{opacity:.55}
+.insight-list strong{font-size:11.5px;color:var(--text)}.insight-list p{margin:2px 0 0;font-size:10.5px;color:var(--muted);line-height:1.7}.insight-list small{font-size:10px;color:var(--subtle);white-space:nowrap}
+@media(max-width:980px){.practice-layout{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}.practice-coach{border-right:0;border-bottom:1px solid var(--line-soft)}}

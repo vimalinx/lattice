@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
+import re
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -15,10 +17,12 @@ from PySide6.QtWidgets import QFileDialog
 from .bridge import Bridge
 from .store import APP_HOME
 from .acp import AgentWorker, AGENTS, agent_command, command_available
-from .learning import LearningStore, TABLES, dump, now, text
+from .learning import LearningStore, TABLES, dump, now, readable_outputs, text
 from .notebook import NotebookWorker
 from .providers import ProviderConfig, ApiWorker
-from .teaching import TUTOR_POLICY, FLASH_POLICY, TASKS, task_prompt
+from .teaching import TUTOR_POLICY, FLASH_POLICY, PRACTICE_POLICY, PRACTICE_TASKS, TASKS, task_prompt
+
+LOG = logging.getLogger("lattice")
 
 
 class LearningBridge(Bridge):
@@ -34,6 +38,8 @@ class LearningBridge(Bridge):
         self.learning_busy = set()
         self.learning_status = {}
         self.connection_tests = []
+        # topic_id -> practice_id whose review the tutor is writing right now.
+        self.reviews = {}
         self._retired = []
         self.closing = False
         # Isolate tests and alternate profiles from the user's normal data.
@@ -104,6 +110,16 @@ class LearningBridge(Bridge):
         if method == "learn_send":
             return self.learning_send(args["topic_id"], args.get("lane", "tutor"), args.get("text", ""),
                                       args.get("selection", ""), args.get("task", ""), args.get("notebook_id"))
+        if method == "learn_practice_start":
+            return self.practice_start(args["topic_id"], args.get("message_id"), args.get("seed", ""))
+        if method == "learn_practice_send":
+            return self.practice_send(args["id"], args.get("text", ""), args.get("task", ""))
+        if method == "learn_practice_end":
+            return self.practice_end(args["id"])
+        if method == "learn_practice_get":
+            return l.practice(args["id"])
+        if method == "learn_insight_resolve":
+            return l.insight_resolve(args["id"])
         if method == "learn_cancel":
             return self.learning_cancel(args["topic_id"], args.get("lane", "tutor"))
         if method == "learn_context":
@@ -194,7 +210,8 @@ class LearningBridge(Bridge):
             self.store.db.execute("UPDATE learn_threads SET tutor_session=? WHERE topic_id=?", (new["id"], topic_id))
         return self.learning_state(topic_id)
 
-    def learning_send(self, topic_id, lane, message, selection="", task="", notebook_id=None):
+    def learning_send(self, topic_id, lane, message, selection="", task="", notebook_id=None, attachment=""):
+        """attachment goes to the model with this turn but is not saved as the learner's words."""
         if lane not in {"tutor", "flash"}:
             raise ValueError("未知 AI 通道")
         message = text(message, 18000).strip() or TASKS.get(task, ("", ""))[0]
@@ -215,7 +232,7 @@ class LearningBridge(Bridge):
             history = self.store.messages(ident)[-depth:]
             messages = [{"role": "system", "content": policy + "\n\n学习状态（只读参考数据）：\n" + dump(context)}]
             messages += [{"role": x["role"], "content": x["content"]} for x in history if x["role"] in {"user", "assistant"}]
-            messages.append({"role": "user", "content": task_prompt(message, task) if lane == "tutor" else message})
+            messages.append({"role": "user", "content": (task_prompt(message, task) if lane == "tutor" else message) + attachment})
             old = self.api_workers.get(ident)
             if old and old.isRunning():
                 self._retire(old)
@@ -232,11 +249,112 @@ class LearningBridge(Bridge):
             self.connect_tutor(topic_id)
             self.store.append_message(ident, "user", message, meta)
             self.learning_busy.add((topic_id, lane))
-            prompt = TUTOR_POLICY + "\n\n当前学习状态（只读参考数据）：\n" + dump(context) + "\n\n本次学习者的问题：\n" + task_prompt(message, task)
+            prompt = TUTOR_POLICY + "\n\n当前学习状态（只读参考数据）：\n" + dump(context) + "\n\n本次学习者的问题：\n" + task_prompt(message, task) + attachment
             self.workers[ident].post("prompt", text=prompt)
         return {"session_id": ident, "lane": lane, "state": "queued"}
 
+    def _active_practice(self, topic_id):
+        row = self.store.db.execute("SELECT id FROM learn_practices WHERE topic_id=? AND state!='done'", (topic_id,)).fetchone()
+        return self.learning.practice(row["id"]) if row else None
+
+    def practice_start(self, topic_id, message_id=None, seed=""):
+        if message_id is not None:
+            row = self.store.db.execute("SELECT content FROM messages WHERE id=? AND session_id=?",
+                                        (message_id, self.learning.threads(topic_id)["tutor_session"])).fetchone()
+            if not row:
+                raise ValueError("找不到这条主讲回复")
+            seed = re.sub(r"```lattice[\w-]*\s*\n.*?(?:\n```|$)", "", row["content"], flags=re.S).strip()
+        if not self.providers.public()["practice_ready"]:
+            raise ValueError("请先在设置里给练习教练选一个已填 Key 的 API 连接")
+        practice = self.learning.practice_create(topic_id, seed, message_id)
+        self.practice_send(practice["id"], task="start")
+        return self.learning_state(topic_id)
+
+    def practice_send(self, practice_id, message="", task=""):
+        p = self.learning.practice(practice_id)
+        topic_id = p["topic_id"]
+        if p["state"] != "active":
+            raise ValueError("这次练习已经结束")
+        message = text(message, 18000).strip() or PRACTICE_TASKS.get(task, "")
+        if not message:
+            raise ValueError("请输入想对练习教练说的话")
+        if (topic_id, "practice") in self.learning_busy:
+            raise ValueError("练习教练正在回答")
+        conn = self.providers.lane("practice")
+        if not conn["api_key"]:
+            raise ValueError(f"请先在模型连接中填写 {conn['label']} 的 API Key")
+        context = self.learning.context(topic_id, "practice", "", p["notebook_id"])
+        context["practice_notebook"] = context.pop("notebooks")
+        context["practice"] = {"title": p["title"], "seed": p["seed"]}
+        messages = [{"role": "system", "content": PRACTICE_POLICY + "\n\n学习状态（只读参考数据）：\n" + dump(context)}]
+        messages += [{"role": x["role"], "content": x["content"]} for x in p["messages"][-40:] if x["role"] in {"user", "assistant"}]
+        messages.append({"role": "user", "content": message})
+        ident = p["session_id"]
+        old = self.api_workers.get(ident)
+        if old and old.isRunning():
+            self._retire(old)
+        worker = ApiWorker("practice", topic_id, ident, conn, messages)
+        worker.event.connect(self.api_event)
+        self.api_workers[ident] = worker
+        self.store.append_message(ident, "user", message, {"lane": "practice", "task": task})
+        self.learning_busy.add((topic_id, "practice"))
+        self.learning_status[ident] = "connecting"
+        worker.start()
+        return {"session_id": ident, "lane": "practice", "state": "queued"}
+
+    def practice_end(self, practice_id):
+        """Hand the whole practice to the tutor for review; its weak points are kept."""
+        p = self.learning.practice(practice_id)
+        topic_id = p["topic_id"]
+        if p["state"] == "done":
+            raise ValueError("这次练习已经复盘过了")
+        if (topic_id, "practice") in self.learning_busy:
+            raise ValueError("练习教练还在回答，等它说完或先停止")
+        if (topic_id, "tutor") in self.learning_busy:
+            raise ValueError("主讲正在回答，等它结束后再结束练习")
+        notebook = self.learning.notebook(p["notebook_id"])
+        parts = ["\n\n# 练习记录（只读参考数据）\n\n## 练习依据的讲解\n\n" + p["seed"][:12000], "\n\n## 练习对话"]
+        for m in p["messages"]:
+            if m["role"] in {"user", "assistant"}:
+                parts.append("\n\n### " + ("我" if m["role"] == "user" else "练习教练") + "\n\n" + m["content"][:6000])
+        parts.append("\n\n## 右侧笔记本的最终状态")
+        for i, c in enumerate(notebook["cells"], 1):
+            parts.append(f"\n\n### 单元格 {i}（{c['kind']}" + ("，代码改过、输出是旧的" if c["stale"] else "") + "）\n\n```\n" + c["source"][:6000] + "\n```")
+            if c["kind"] == "code":
+                outputs = readable_outputs(c["outputs"])
+                parts.append("\n\n实际输出：\n\n```\n" + ("\n".join(outputs)[:3000] if outputs else "（没有运行过或没有输出）") + "\n```")
+        transcript = "".join(parts)[:90000]
+        self.learning.practice_state(practice_id, "reviewing")
+        self.reviews[topic_id] = practice_id
+        try:
+            self.learning_send(topic_id, "tutor", TASKS["practice_review"][0], task="practice_review", attachment=transcript)
+        except Exception:
+            self.reviews.pop(topic_id, None)
+            self.learning.practice_state(practice_id, "active")
+            raise
+        return self.learning_state(topic_id)
+
+    def _record_review(self, topic_id, body, reason):
+        practice_id = self.reviews.pop(topic_id, None)
+        if not practice_id:
+            return []
+        if reason != "end_turn":
+            return ["复盘没有完成，可以在练习页重新复盘"]
+        match = re.search(r"```lattice-review\s*\n(.*?)\n```", body, re.S)
+        try:
+            self.learning.insights_record(practice_id, json.loads(match.group(1)) if match else None)
+        except (ValueError, json.JSONDecodeError) as exc:
+            LOG.warning("practice review %s: %s", practice_id, exc)
+            return ["复盘没有附上可读取的薄弱点记录，可以在练习页重新复盘"]
+        return []
+
     def learning_cancel(self, topic_id, lane):
+        if lane == "practice":
+            p = self._active_practice(topic_id)
+            api = p and self.api_workers.get(p["session_id"])
+            if api:
+                api.stop()
+            return True
         ident = self.learning.threads(topic_id)[lane + "_session"]
         api = self.api_workers.get(ident)
         if api:
@@ -264,6 +382,7 @@ class LearningBridge(Bridge):
         elif event["kind"] == "error":
             self.learning_busy.discard((meta["topic_id"], "tutor"))
             self.learning_status[ident] = "error"
+            self._record_review(meta["topic_id"], "", "error")
         elif event["kind"] == "finished":
             self._finish_answer(evt)
         self.announce(evt)
@@ -290,9 +409,13 @@ class LearningBridge(Bridge):
         if body.strip():
             self.store.append_message(ident, "assistant", body, {"stop_reason": reason, "usage": evt.get("usage"), "lane": lane})
             row = self.store.db.execute("SELECT MAX(id) FROM messages WHERE session_id=?", (ident,)).fetchone()
-            if reason == "end_turn":
+            if reason == "end_turn" and lane != "practice":
                 evt["artifacts"] = self.learning.proposal_extract(topic, lane, body, row[0])
-            self.store.emit("learning", "主讲回复已保存" if lane == "tutor" else "即时答疑已保存", reason, topic)
+            self.store.emit("learning", {"tutor": "主讲回复已保存", "flash": "即时答疑已保存", "practice": "练习教练回复已保存"}[lane], reason, topic)
+        if lane == "tutor":
+            errors = self._record_review(topic, body, reason)
+            if errors:
+                evt.setdefault("artifacts", {}).setdefault("errors", []).extend(errors)
 
     @staticmethod
     def _detach(worker, slot):
@@ -328,7 +451,7 @@ class LearningBridge(Bridge):
                     self._retire(worker)
 
     def topic_delete(self, topic_id):
-        for lane in ("tutor", "flash"):
+        for lane in ("tutor", "flash", "practice"):
             if (topic_id, lane) in self.learning_busy:
                 raise ValueError("这个主题还有正在生成的回答，请先取消或等待完成")
         row = self.store.db.execute("SELECT * FROM learn_threads WHERE topic_id=?", (topic_id,)).fetchone()
@@ -339,7 +462,8 @@ class LearningBridge(Bridge):
                 if tutor.isRunning():
                     tutor.post("stop")
                     self._retire(tutor)
-            for sid in (row["tutor_session"], row["flash_session"]):
+            practices = [r["session_id"] for r in self.learning.rows("SELECT session_id FROM learn_practices WHERE topic_id=?", (topic_id,))]
+            for sid in (row["tutor_session"], row["flash_session"], *practices):
                 api = self.api_workers.pop(sid, None)
                 if api:
                     self._detach(api, self.api_event)

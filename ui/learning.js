@@ -2,7 +2,7 @@
 /* Native learning workspace; all persistent actions go through the Qt backend. */
 const L = {
  filesOpen:false, data:null, notebookId:null, lessonId:null, cardView:"cards", search:"", stage:"", scope:"",
- inputs:{tutor:"",flash:""}, streams:{}, errors:{}, localBusy:new Set(), selection:"", drafts:new Map(), timers:new Map(),
+ inputs:{tutor:"",flash:"",practice:""}, practiceId:null, practiceCache:null, streams:{}, errors:{}, localBusy:new Set(), selection:"", drafts:new Map(), timers:new Map(),
  editingCard:null, editingLesson:null, permissions:[], testResult:"", scrollBottom:null,
  cardDrafts:new Map(), details:{},
 };
@@ -27,8 +27,8 @@ function laneBusy(lane){return L.localBusy.has(lk(lt()?.id,lane))||(ld()?.runtim
 function laneStatus(lane){const key=lane==="tutor"?"tutor_session":"flash_session";const id=ld()?.threads?.[key];const api=lane==="flash"||ld()?.providers?.tutor_agent==="api";return ld()?.runtime?.agents?.[id]||(api?(lane==="flash"?ld()?.providers?.has_key:ld()?.providers?.tutor_ready)?"ready":"offline":"offline");}
 function lbutton(label,action,attrs="",variant=""){return button(label,action,attrs,variant);}
 /* Each navigation entry owns one page. Detail cards expand in that page only. */
-const CONTENT_ROUTES={dialogue:'learning',classroom:'classroom',lesson:'classroom',notebook:'notebook',flash:'flash',knowledge:'knowledge',card:'knowledge',note:'notes'};
-const LEARNING_PAGES=new Set(['learning','classroom','notebook','flash','knowledge','notes']);
+const CONTENT_ROUTES={dialogue:'learning',practice:'practice',classroom:'classroom',lesson:'classroom',notebook:'notebook',flash:'flash',knowledge:'knowledge',card:'knowledge',note:'notes'};
+const LEARNING_PAGES=new Set(['learning','practice','classroom','notebook','flash','knowledge','notes']);
 function currentDetail(){return L.details[S.view]||null;}
 async function openContent(kind,ref=null){
  const page=CONTENT_ROUTES[kind];if(!page)return;
@@ -76,6 +76,7 @@ function coursesPage(){
 function learningPage(){
  switch(S.view){
   case 'learning':return tutorChatView();
+  case 'practice':return practicePage();
   case 'classroom':return coursesPage();
   case 'notebook':return notebookShell();
   case 'flash':return flashPanel();
@@ -85,7 +86,7 @@ function learningPage(){
 }
 function topicOptions(value,empty="所有主题"){return '<option value="">'+esc(empty)+'</option>'+(ld()?.topics||[]).map(t=>'<option value="'+esc(t.id)+'" '+(value===t.id?'selected':'')+'>'+esc((t.parent_id?'↳ ':'')+t.title)+'</option>').join('');}
 function badge(stage){return '<span class="learn-stage stage-'+esc(stage)+'">'+esc(stageName[stage]||stage)+'</span>';}
-function cleanReply(body){return String(body||"").replace(/```lattice\s*\n[\s\S]*?(?:\n```|$)/g,"").trim();}
+function cleanReply(body){return String(body||"").replace(/```lattice[\w-]*\s*\n[\s\S]*?(?:\n```|$)/g,"").trim();}
 function replyHtml(body){return markdown(cleanReply(body));}
 
 function learningHeader(){
@@ -165,7 +166,9 @@ function notebookView(){
  lbutton(svg("upload",14),'nb-import','title="导入 .ipynb"','ghost sm')+
  lbutton(svg("trash",14),'nb-remove','title="删除这份笔记本"','ghost sm')+'</div></div>'+
  '<div class="notebook-state-row"><span id="nb-kernel-state">'+svg("terminal",13)+' Python · '+esc(ks==='offline'?'尚未启动内核':stateName[ks]||ks)+'</span><span>Shift + Enter 运行当前格 · Tab 缩进</span></div>'+
- '<div class="notebook-scroll" id="notebook-scroll" data-scroll="nb" data-scroll-ns="'+esc(nb.id)+'">'+nb.cells.map(cell=>{
+ '<div class="notebook-scroll" id="notebook-scroll" data-scroll="nb" data-scroll-ns="'+esc(nb.id)+'">'+nb.cells.map(cellHtml).join('')+notebookAdd()+'<p class="notebook-disclaimer">运行会在你本机的 Python 内核中执行代码。每份笔记本独立保留变量；重启内核后，历史输出仍在，变量需重新计算。</p></div></div>';
+}
+function cellHtml(cell){
   const src=L.drafts.get(cell.id)?.source??cell.source;
   const stale=cell.run_source!==null&&src!==cell.run_source;
   return '<section class="notebook-cell '+cell.kind+'" data-cell="'+esc(cell.id)+'"><div class="cell-topline"><span class="cell-kind">'+svg(cell.kind==='code'?'code':'document',13)+' '+(cell.kind==='code'?'PYTHON':'MARKDOWN')+'</span>'+
@@ -179,17 +182,60 @@ function notebookView(){
  (cell.kind==='markdown'?'<div class="markdown cell-markdown-preview" id="md-preview-'+cell.id+'">'+markdown(src)+'</div>':'')+
  '<div class="cell-output" id="cell-output-'+cell.id+'">'+outputHtml(cell.outputs)+'</div>'+
  '<div class="cell-stale '+(stale?'visible':'')+'" id="cell-stale-'+cell.id+'">代码已修改：上方输出属于之前的运行，重新执行后更新。</div></section>';
- }).join('')+'<div class="notebook-add">'+lbutton(svg("plus",14)+' Python 单元格','nb-add','data-kind="code"','ghost')+
- lbutton(svg("plus",14)+' 文字与观察','nb-add','data-kind="markdown"','ghost')+'</div><p class="notebook-disclaimer">运行会在你本机的 Python 内核中执行代码。每份笔记本独立保留变量；重启内核后，历史输出仍在，变量需重新计算。</p></div></div>';
+ }
+function notebookAdd(){
+ return '<div class="notebook-add">'+lbutton(svg("plus",14)+' Python 单元格','nb-add','data-kind="code"','ghost')+lbutton(svg("plus",14)+' 文字与观察','nb-add','data-kind="markdown"','ghost')+'</div>';
+}
+/* Practice branch: the coach on the left, the learner's own notebook on the right. */
+function practiceLabel(){return ld()?.providers?.practice_label||'练习教练';}
+function shownPractice(){
+ const cur=ld()?.practice;
+ if(cur&&(!L.practiceId||L.practiceId===cur.id))return cur;
+ const p=L.practiceCache;
+ return p&&p.id===L.practiceId&&p.topic_id===lt()?.id?p:null;
+}
+function insightList(items,resolvable){
+ if(!items.length)return '';
+ return '<ul class="insight-list">'+items.map(i=>'<li class="insight-'+esc(i.kind)+(i.state==='resolved'?' resolved':'')+'"><div><strong>'+esc(i.title)+'</strong>'+(i.detail?'<p>'+esc(i.detail)+'</p>':'')+'</div>'+
+ (resolvable&&i.kind==='weak'&&i.state==='active'?lbutton('已克服','l-insight-resolve','data-id="'+esc(i.id)+'" title="不再提醒主讲关注这一点"','ghost sm'):i.state==='resolved'?'<small>已克服</small>':'')+'</li>').join('')+'</ul>';
+}
+function practiceHome(){
+ const d=ld(),weak=(d.insights||[]).filter(i=>i.kind==='weak'&&i.state==='active'),past=(d.practices||[]).filter(p=>p.state==='done');
+ return '<section class="flat-page practice-home"><div class="flat-heading"><div><h1>练习</h1><p>主讲讲完一段能动手的内容后，点那条回复下的「开始练习」。'+esc(practiceLabel())+' 会在左边一步步带你写，右边是你自己的实验笔记，代码在本机 Jupyter 里真实运行。结束练习后，主讲会读完整记录复盘，记下你的薄弱点，并决定接下来怎么讲。</p></div>'+lbutton(svg('bot',14)+' 回到学习对话','nav','data-view="learning"','primary')+'</div>'+
+ '<div class="practice-home-grid"><section class="practice-panel"><h3>'+svg('bulb',15)+' 主讲正在留意的薄弱点</h3>'+(weak.length?insightList(weak,true):'<p class="learn-caption">还没有。完成一次练习并复盘后，这里会出现主讲发现的薄弱点；主讲、快答和练习教练每一轮都会参考它们。</p>')+'</section>'+
+ '<section class="practice-panel"><h3>'+svg('history',15)+' 做过的练习</h3>'+(past.length?past.map(p=>'<button class="practice-row" data-action="l-practice-open" data-id="'+esc(p.id)+'"><strong>'+esc(p.title)+'</strong><small>'+esc(fmtDate(p.ended_at||p.created_at,true))+(p.next_focus?' · 接下来：'+shorten(p.next_focus,60):'')+'</small></button>').join(''):'<p class="learn-caption">还没有做完的练习。</p>')+'</section></div></section>';
+}
+function practiceSide(p){
+ if(p.state==='active')return composer('practice');
+ if(p.state==='reviewing')return '<div class="practice-review-note">'+(laneBusy('tutor')?'<span class="learn-thinking"><span></span><span></span><span></span></span> '+esc(tutorLabel())+' 正在读这次练习的完整记录并复盘。复盘会出现在学习对话里。':'复盘还没有完成。')+
+ '<div>'+(laneBusy('tutor')?lbutton(svg('bot',14)+' 去学习对话看复盘','nav','data-view="learning"','ghost sm'):lbutton('重新复盘','l-practice-end','data-id="'+esc(p.id)+'"','primary sm'))+'</div></div>';
+ const weak=p.insights.filter(i=>i.kind==='weak'),strong=p.insights.filter(i=>i.kind==='strength');
+ return '<div class="practice-review-note done"><h3>主讲的复盘</h3>'+(p.next_focus?'<p><b>接下来的讲解重点：</b>'+esc(p.next_focus)+'</p>':'')+
+ (weak.length?'<h4>薄弱点</h4>'+insightList(weak,true):'')+(strong.length?'<h4>做得好的地方</h4>'+insightList(strong,false):'')+
+ '<div>'+lbutton(svg('bot',14)+' 回到学习对话','nav','data-view="learning"','primary sm')+(L.practiceId?lbutton('返回练习列表','l-practice-close','','ghost sm'):'')+'</div></div>';
+}
+function practicePage(){
+ const p=shownPractice();if(!p)return practiceHome();
+ const d=ld(),nb=d.notebooks.find(n=>n.id===p.notebook_id);
+ if(nb)L.notebookId=nb.id;
+ const ks=nb?d.runtime?.notebooks?.[nb.id]?.state||'offline':'offline',active=p.state==='active';
+ return '<div class="practice-layout"><section class="practice-coach"><div class="tutor-dialogue-tools"><span>'+svg('code',15)+' '+esc(p.title)+' · '+esc({active:'练习中',reviewing:'复盘中',done:'已复盘'}[p.state]||p.state)+'</span>'+
+ (active?lbutton('看看我的代码','l-practice-task','data-task="check"','ghost sm')+lbutton('给点提示','l-practice-task','data-task="hint"','ghost sm')+lbutton(svg('check',14)+' 结束练习并复盘','l-practice-end','data-id="'+esc(p.id)+'"','primary sm'):'')+'</div>'+
+ '<details class="practice-seed"><summary>这次练习依据的讲解</summary><div class="markdown">'+replyHtml(p.seed)+'</div></details>'+
+ '<div class="learn-chat-scroll" id="learn-chat-practice" data-scroll="chat-practice" data-scroll-ns="'+esc(p.id)+'">'+conversationHtml('practice')+'</div>'+practiceSide(p)+'</section>'+
+ '<section class="practice-code">'+(nb?'<div class="notebook-workspace"><div class="notebook-toolbar"><strong class="practice-nb-title">'+esc(nb.title)+'</strong><div class="notebook-actions">'+
+ lbutton(svg("play",14)+' 全部运行','nb-run-all','','primary sm')+lbutton(svg("stop",14),'nb-stop','title="中断执行"','ghost sm')+lbutton(svg("refresh",14),'nb-restart','title="重启内核，清空运行变量"','ghost sm')+'</div></div>'+
+ '<div class="notebook-state-row"><span id="nb-kernel-state">'+svg("terminal",13)+' Python · '+esc(ks==='offline'?'尚未启动内核':stateName[ks]||ks)+'</span><span>Shift + Enter 运行当前格 · 写完点「看看我的代码」</span></div>'+
+ '<div class="notebook-scroll" id="notebook-scroll" data-scroll="nb" data-scroll-ns="'+esc(nb.id)+'">'+(nb.cells.length?nb.cells.map(cellHtml).join(''):'<p class="learn-caption practice-empty">教练给出的骨架代码可以点代码块上的「放到右侧」，也可以自己新建单元格。</p>')+notebookAdd()+'</div></div>':emptyState('flask','这次练习的笔记本已被删除','练习对话仍然保留。'))+'</section></div>';
 }
 const convCache={};
-const laneWho=lane=>(lane==='tutor'?tutorLabel():flashLabel())+(lane==='tutor'?' · 主讲':' · 快答');
+const laneWho=lane=>({tutor:tutorLabel()+' · 主讲',flash:flashLabel()+' · 快答',practice:practiceLabel()+' · 练习教练'})[lane];
 // Saved messages are cached apart from the live tail, so a streamed chunk only
 // re-renders the reply being written, not the whole conversation.
 function messagesHtml(lane){
- const d=ld(),messages=lane==='tutor'?d.tutor_messages:d.flash_messages;
+ const d=ld(),messages=lane==='tutor'?d.tutor_messages:lane==='flash'?d.flash_messages:shownPractice()?.messages||[];
  const last=messages?.[messages.length-1];
- const ck=(lt()?.id||'')+'|'+(messages?.length||0)+'|'+(last?.id||'')+'|'+(last?.meta||'')+'|'+tutorLabel()+'|'+flashLabel();
+ const ck=(lt()?.id||'')+'|'+(lane==='practice'?shownPractice()?.id||'':'')+'|'+(messages?.length||0)+'|'+(last?.id||'')+'|'+(last?.meta||'')+'|'+tutorLabel()+'|'+flashLabel();
  if(convCache[lane]?.key===ck)return convCache[lane].html;
  const who=laneWho(lane);
  const html=(messages||[]).map(m=>{
@@ -198,8 +244,9 @@ function messagesHtml(lane){
   return '<div class="learn-message '+(m.role==='user'?'from-user':'from-ai')+'"><div class="learn-message-meta"><span>'+esc(m.role==='user'?'你':who)+'</span><time>'+esc(fmtDate(m.created_at,true))+'</time></div>'+
   '<div class="markdown learn-message-content">'+wrapCodeBlocks(m.role==='user'?markdown(m.content):replyHtml(m.content))+'</div>'+
   (incomplete?'<div class="answer-incomplete">'+esc(meta.stop_reason==='cancelled'?'已停止 · 保留部分回答':meta.stop_reason==='max_tokens'?'达到回复长度限制':'未正常完成 · 仅保留已收到内容')+'</div>':'')+
-  (m.role==='assistant'?'<div class="learn-message-actions">'+lbutton(svg("book",12)+' 存为卡片','l-message-card','data-lane="'+esc(lane)+'" data-id="'+esc(m.id)+'"','ghost sm')+
+  (m.role==='assistant'&&lane!=='practice'?'<div class="learn-message-actions">'+lbutton(svg("book",12)+' 存为卡片','l-message-card','data-lane="'+esc(lane)+'" data-id="'+esc(m.id)+'"','ghost sm')+
   (lane==='tutor'&&/```(?:python|py)\s*\n/.test(m.content)?lbutton(svg("flask",12)+' 加入实验','l-message-code','data-id="'+esc(m.id)+'"','ghost sm'):'')+
+  (lane==='tutor'?lbutton(svg("code",12)+' 开始练习','l-practice-start','data-id="'+esc(m.id)+'" title="进入练习分支，由练习教练带着一步步写代码"','ghost sm'):'')+
   (lane==='flash'?lbutton('交给主讲深入讲','l-escalate','data-id="'+esc(m.id)+'"','ghost sm'):'')+'</div>':'')+'</div>';
  }).join('');
  convCache[lane]={key:ck,html};
@@ -221,9 +268,10 @@ function tutorChatView(){
  '</div>'+composer('tutor')+'</div>';
 }
 function composer(lane){
- const busy=laneBusy(lane),ready=!!lt()&&(lane==='flash'?ld()?.providers?.has_key:ld()?.providers?.tutor_ready);
- return '<div class="learn-composer '+lane+'"><textarea id="learn-input-'+lane+'" rows="'+esc((lane==='flash'?3:2))+'" placeholder="'+(lane==='flash'?'这个词是什么意思？这行代码为什么这样写？':'告诉 '+esc(tutorLabel())+'：你观察到了什么，又想继续追问什么？')+'" aria-label="'+esc((lane==='flash'?'快速答疑问题':'主讲问题'))+'" '+(lt()?'':'disabled')+'>'+esc(L.inputs[lane])+'</textarea>'+
- '<div class="composer-bottom"><span>'+ (lane==='flash'?'当前主题与选中内容会随问题传入':'Ctrl + Enter 发送 · 课程建议需点击采纳')+'</span>'+
+ const busy=laneBusy(lane),ready=!!lt()&&({flash:ld()?.providers?.has_key,tutor:ld()?.providers?.tutor_ready,practice:ld()?.providers?.practice_ready&&shownPractice()?.state==='active'})[lane];
+ const hint={flash:'这个词是什么意思？这行代码为什么这样写？',tutor:'告诉 '+tutorLabel()+'：你观察到了什么，又想继续追问什么？',practice:'说说你的想法、预测，或者哪里卡住了'}[lane];
+ return '<div class="learn-composer '+lane+'"><textarea id="learn-input-'+lane+'" rows="'+esc((lane==='flash'?3:2))+'" placeholder="'+esc(hint)+'" aria-label="'+esc({flash:'快速答疑问题',tutor:'主讲问题',practice:'对练习教练说'}[lane])+'" '+(lt()?'':'disabled')+'>'+esc(L.inputs[lane])+'</textarea>'+
+ '<div class="composer-bottom"><span>'+({flash:'当前主题与选中内容会随问题传入',tutor:'Ctrl + Enter 发送 · 课程建议需点击采纳',practice:'Ctrl + Enter 发送 · 教练会看到右侧代码的真实输出'})[lane]+'</span>'+
  (busy?lbutton(svg("stop",14)+' 停止','l-cancel','data-lane="'+esc(lane)+'"','ghost sm'):lbutton(svg("arrowup",15)+(lane==='flash'?' 提问':' 发送'),'l-send','data-lane="'+esc(lane)+'" '+(!ready?'disabled':''),'primary sm'))+'</div></div>';
 }
 function flashPanel(){
@@ -309,6 +357,8 @@ function connectionsBody(){
  return '<div class="connection-page">'+
  '<div class="connection-grid"><section class="connection-card"><div class="connection-title"><span class="connection-symbol">'+svg("spark",22)+'</span><div><h2>快答</h2><p>'+esc(c.flash_label)+' · OpenAI 兼容 Chat Completions / SSE</p></div><span class="learn-stage">'+esc(c.has_key?'已保存凭据':'等待接入')+'</span></div>'+
  laneFields('flash',c)+'<p class="connection-foot">测试只读取模型列表，不生成回答。</p></section>'+
+ '<section class="connection-card"><div class="connection-title"><span class="connection-symbol">'+svg("code",22)+'</span><div><h2>练习教练</h2><p>'+esc(c.practice_label)+' · 在练习分支里一步步带你写代码</p></div><span class="learn-stage">'+esc(c.practice_ready?'已保存凭据':'等待接入')+'</span></div>'+
+ laneFields('practice',c)+'<p class="connection-foot">每轮发送练习规则、练习依据的讲解、右侧笔记本的代码与真实输出，以及最近 40 条练习对话。</p></section>'+
  '<section class="connection-card"><div class="connection-title"><span class="connection-symbol codex">'+svg("bot",22)+'</span><div><h2>主讲</h2><p>'+esc(c.tutor_label)+'</p></div><span class="learn-stage">'+esc(c.tutor_agent==='api'?(c.tutor_ready?'已保存凭据':'等待接入'):acp.find(a=>a.id===c.tutor_agent)?.installed?'适配器已安装':'路径待配置')+'</span></div>'+
  '<label>主讲方式<select class="field" id="cfg-tutor-agent"><option value="api" '+(c.tutor_agent==='api'?'selected':'')+'>OpenAI 兼容 API</option>'+acp.map(a=>'<option value="'+esc(a.id)+'" '+(c.tutor_agent===a.id?'selected':'')+'>'+esc(a.label)+' · ACP'+(a.installed?'':' · 未安装')+'</option>').join('')+'</select></label>'+
  '<div class="agent-fields" data-agent="api"'+(c.tutor_agent==='api'?'':' hidden')+'>'+laneFields('tutor',c)+'<p class="connection-foot">每轮发送教学规则、学习状态和最近 24 条主讲对话。</p></div>'+
@@ -340,7 +390,7 @@ function wrapCodeBlocks(html){
   const lang=(attrs.match(/language-(\w+)/)||[])[1]||'code',id='snip'+(++snippetSeq);
   return '<div class="code-block"><div class="code-block-bar"><span>'+esc(lang)+'</span>'+
   '<button data-action="l-code-copy" data-target="'+esc(id)+'" title="复制代码">'+svg("copy",11)+'</button>'+
-  '<button data-action="l-code-run" data-target="'+esc(id)+'" title="放进实验笔记并用本机 Jupyter 运行">'+svg("play",11)+' 运行</button></div>'+
+  (S.view==='practice'?'<button data-action="l-code-run" data-target="'+esc(id)+'" title="作为新单元格放到右侧笔记本，不会自动运行">'+svg("arrow",11)+' 放到右侧</button>':'<button data-action="l-code-run" data-target="'+esc(id)+'" title="放进实验笔记并用本机 Jupyter 运行">'+svg("play",11)+' 运行</button>')+'</div>'+
   '<pre><code id="'+esc(id)+'"'+attrs+'>'+code+'</code></pre></div>';
  });
 }
@@ -388,7 +438,7 @@ async function sendLearning(lane,message=null,task=''){
  if(laneBusy(lane))return toast('这个通道正在回答，另一位助手仍可提问。');
  await flushCells();
  const value=(message??L.inputs[lane]).trim();if(!value&&!task)return;
- const actual=value||({plan:'我想从这个主题开始学。',continue:'接着上次的地方继续。',bridge:'我好像卡在某个前置知识上了。',capture:'把我们讨论过的内容整理成知识卡。',experiment:'给我设计一个能亲手改的小实验。'}[task]||'');
+ const actual=value||(lane==='practice'?({start:'开始练习。',check:'我写好了，帮我看看右侧的代码和运行结果。',hint:'我卡住了，给我一点提示，先别直接给答案。'}[task]||''):'')||({plan:'我想从这个主题开始学。',continue:'接着上次的地方继续。',bridge:'我好像卡在某个前置知识上了。',capture:'把我们讨论过的内容整理成知识卡。',experiment:'给我设计一个能亲手改的小实验。'}[task]||'');
  const key=lk(lt().id,lane);L.localBusy.add(key);L.streams[key]='';L.errors[key]='';
  /* Snapshot-and-clear the composer and selection up front: anything typed while
     the bridge call is in flight must survive the send. */
@@ -396,10 +446,11 @@ async function sendLearning(lane,message=null,task=''){
  if(message==null){L.inputs[lane]='';const inp=el('#learn-input-'+lane);if(inp)inp.value='';}
  L.selection='';const selBox=el('#flash-selection');if(selBox){selBox.classList.remove('has-selection');selBox.innerHTML=selectionHtml();}
  try{
-  await rpc('learn_send',{topic_id:lt().id,lane,text:actual,selection:sel,task,notebook_id:activeNotebook()?.id});
-  (lane==='tutor'?ld().tutor_messages:ld().flash_messages).push({id:'pending-'+Date.now(),role:'user',content:actual,created_at:new Date().toISOString()});
+  if(lane==='practice')await rpc('learn_practice_send',{id:shownPractice().id,text:actual,task});
+  else await rpc('learn_send',{topic_id:lt().id,lane,text:actual,selection:sel,task,notebook_id:activeNotebook()?.id});
+  ({tutor:ld().tutor_messages,flash:ld().flash_messages,practice:shownPractice()?.messages||[]})[lane].push({id:'pending-'+Date.now(),role:'user',content:actual,created_at:new Date().toISOString()});
   L.scrollBottom=lane;
-  await openContent(lane==='tutor'?'dialogue':'flash');
+  await openContent({tutor:'dialogue',flash:'flash',practice:'practice'}[lane]);
  }catch(e){L.localBusy.delete(key);L.errors[key]=e.message;if(message==null)L.inputs[lane]=value;render();throw e;}
 }
 function topicModal(branch=false,edit=false){
@@ -517,6 +568,7 @@ async function settingsSave(){
  for(const a of ld().providers.apis){const v=k=>el('#cfg-api-'+a.id+'-'+k).value;apis[a.id]={base_url:v('base'),api_key:v('key'),headers:JSON.parse(v('headers')||'{}'),extra_body:JSON.parse(v('extra')||'{}')};}
  const cfg={apis,timeout:Number(el('#cfg-timeout').value),temperature:Number(el('#cfg-temperature').value),tutor_agent:el('#cfg-tutor-agent').value,
  flash_api:el('#cfg-flash-api').value,flash_model:el('#cfg-flash-model').value,flash_max_tokens:Number(el('#cfg-flash-tokens').value),
+ practice_api:el('#cfg-practice-api').value,practice_model:el('#cfg-practice-model').value,practice_max_tokens:Number(el('#cfg-practice-tokens').value),
  tutor_api:el('#cfg-tutor-api').value,tutor_model:el('#cfg-tutor-model').value,tutor_max_tokens:Number(el('#cfg-tutor-tokens').value),
  codex_command:el('#cfg-codex').value,codex_args:JSON.parse(el('#cfg-codex-args').value),codex_model:el('#cfg-codex-model').value,
  codex_effort:el('#cfg-effort').value,devin_command:el('#cfg-devin').value,devin_model:el('#cfg-devin-model').value,
@@ -587,6 +639,24 @@ action=async function(target){
  case 'l-send':return sendLearning(a.dataset.lane);
  case 'l-cancel':return rpc('learn_cancel',{topic_id:lt().id,lane:a.dataset.lane});
  case 'l-tutor-task':return sendLearning('tutor',null,a.dataset.task);
+ case 'l-practice-start':{
+  if(ld().practice)return toast('还有一个练习没结束：先在「练习」页结束它，再开新的。','error');
+  await flushCells();
+  adoptLearning(await rpc('learn_practice_start',{topic_id:lt().id,message_id:Number(id)}));
+  L.practiceId=null;L.inputs.practice='';L.localBusy.add(lk(lt().id,'practice'));L.scrollBottom='practice';
+  return openContent('practice');
+ }
+ case 'l-practice-task':return sendLearning('practice',null,a.dataset.task);
+ case 'l-practice-end':{
+  if(!confirm('结束这次练习，交给主讲复盘？结束后不能再在这个分支里继续对话。'))return;
+  await flushCells();
+  adoptLearning(await rpc('learn_practice_end',{id}));
+  L.practiceId=id;L.practiceCache=await rpc('learn_practice_get',{id});L.localBusy.add(lk(lt().id,'tutor'));
+  render();return toast('已交给主讲复盘');
+ }
+ case 'l-practice-open':L.practiceId=id;L.practiceCache=await rpc('learn_practice_get',{id});return render();
+ case 'l-practice-close':L.practiceId=null;L.practiceCache=null;return render();
+ case 'l-insight-resolve':await rpc('learn_insight_resolve',{id});if(L.practiceCache)L.practiceCache=await rpc('learn_practice_get',{id:L.practiceCache.id});return learnRefresh();
  case 'l-connect':await rpc('learn_connect',{topic_id:lt().id});return toast('正在进行真实 ACP 握手');
  case 'l-tutor-new':
   if(!confirm('开启新的主讲会话？学习数据会保留，之前的对话仍在 AI 协作历史里。'))return;
@@ -599,6 +669,12 @@ action=async function(target){
   const n=el('#'+a.dataset.target),code=n?n.textContent.trim():'';
   if(!code)return;
   await flushCells();
+  if(S.view==='practice'&&shownPractice()?.state==='active'){
+   const nb=ld().notebooks.find(x=>x.id===shownPractice().notebook_id);if(!nb)return toast('这次练习的笔记本已被删除','error');
+   await rpc('nb_cell_save',{cell:{notebook_id:nb.id,kind:'code',source:code}});await learnRefresh();
+   const b=el('#notebook-scroll');if(b)b.scrollTop=b.scrollHeight;
+   return toast('已放到右侧。补全空白后按 Shift + Enter 运行');
+  }
   let nb=activeNotebook();
   if(!nb){if(!lt())return toast('先创建一个探索主题');nb=await rpc('nb_create',{topic_id:lt().id,title:'对话片段实验'});}
   const cell=await rpc('nb_cell_save',{cell:{notebook_id:nb.id,kind:'code',source:code}});
@@ -717,6 +793,7 @@ onInput=async function(e){
  const t=e.target;
  if(t.id==='learn-input-tutor'){L.inputs.tutor=t.value;return;}
  if(t.id==='learn-input-flash'){L.inputs.flash=t.value;return;}
+ if(t.id==='learn-input-practice'){L.inputs.practice=t.value;return;}
  if(t.dataset.f&&CARD_FIELDS.has(t.dataset.f)){
   const slot=t.closest('.content-detail'),s=slot?currentDetail():null;
   if(s?.kind==='card'){const d=L.cardDrafts.get(s.uid)||{};d[t.dataset.f]=t.value;L.cardDrafts.set(s.uid,d);}
@@ -738,7 +815,7 @@ onChange=async function(e){
  const t=e.target;
  if(t.id==='learn-topic-select')return focusTopic(t.value);
  if(t.id==='cfg-tutor-agent'){all('.agent-fields').forEach(d=>d.hidden=d.dataset.agent==='acp'?t.value==='api':d.dataset.agent!==t.value);return;}
- if(t.id==='cfg-flash-api'||t.id==='cfg-tutor-api'){const m=ld().providers.apis.find(x=>x.id===t.value)?.default_model;if(m)el('#cfg-'+t.dataset.lane+'-model').value=m;return;}
+ if(['cfg-flash-api','cfg-tutor-api','cfg-practice-api'].includes(t.id)){const m=ld().providers.apis.find(x=>x.id===t.value)?.default_model;if(m)el('#cfg-'+t.dataset.lane+'-model').value=m;return;}
  if(t.id==='notebook-select'){await flushCells();L.notebookId=t.value;return render();}
  if(t.id==='knowledge-stage'){L.stage=t.value;el('#knowledge-body').innerHTML=knowledgeBody(visibleCards());return;}
  if(t.id==='knowledge-topic'){L.scope=t.value;el('#knowledge-body').innerHTML=knowledgeBody(visibleCards());return;}
@@ -757,7 +834,7 @@ onEvent=async function(evt){
   if(evt.kind==='tool'&&same){const b=el('#learn-chat-tutor');if(b)b.insertAdjacentHTML('beforeend','<div class="learning-tool-event">'+svg('terminal',12)+' '+esc(evt.title)+' · '+esc(evt.status)+'</div>');return;}
   if(evt.kind==='finished'){
    L.localBusy.delete(key);L.streams[key]='';
-   if(same){await learnRefresh(false);if(LEARNING_PAGES.has(S.view))render();}
+   if(same){await learnRefresh(false);if(L.practiceId&&L.practiceId!==ld().practice?.id)L.practiceCache=await rpc('learn_practice_get',{id:L.practiceId});if(LEARNING_PAGES.has(S.view))render();}
    if(evt.artifacts?.errors?.length)toast('建议格式未通过验证：'+evt.artifacts.errors.join('；'),'error');
    return;
   }
@@ -802,7 +879,7 @@ document.addEventListener('keydown',e=>{
   e.preventDefault();const start=t.selectionStart,end=t.selectionEnd;t.setRangeText('    ',start,end,'end');t.dispatchEvent(new Event('input',{bubbles:true}));return;
  }
  if(t.dataset.cellEditor&&e.key==='Enter'&&e.shiftKey){e.preventDefault();safe(async()=>{await flushCells();await rpc('nb_run',{id:activeNotebook().id,cell_id:t.dataset.cellEditor});});return;}
- if(mod&&e.key==='Enter'&&t.id.startsWith('learn-input-')){e.preventDefault();safe(()=>sendLearning(t.id.endsWith('flash')?'flash':'tutor'));return;}
+ if(mod&&e.key==='Enter'&&t.id.startsWith('learn-input-')){e.preventDefault();safe(()=>sendLearning(t.id.slice(12)));return;}
  
 });
 document.addEventListener('mouseup',e=>{
