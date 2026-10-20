@@ -1,8 +1,8 @@
 """Workspace tools the learning agents call to read and change Lattice.
 
 Agents are told which tools exist and look things up themselves; nothing is
-pushed into their context. One registry serves the API lanes (OpenAI tool
-calls) and Codex (through the MCP bridge in mcp_server.py). Every write is
+pushed into their context. The API lanes call them as OpenAI-compatible
+tools. Every write is
 journaled in learn_actions so the learner can undo it from the conversation.
 Learner-owned fields (stage, own understanding, own explanations, review
 self-ratings) and deletions are never exposed.

@@ -105,9 +105,6 @@ class _Spin(QThread):
         super().__init__()
         self.calls = []
 
-    def post(self, kind, **kw):
-        self.calls.append(kind)
-
     def stop(self):
         self.calls.append("stop")
 
@@ -119,9 +116,9 @@ def test_topic_delete_retires_running_workers(bridge):
     tid = topic(bridge.learning)
     threads = bridge.learning.threads(tid)
     spin = _Spin()
-    spin.event.connect(bridge.tutor_event)
+    spin.event.connect(bridge.api_event)
     spin.start()
-    bridge.workers[threads["tutor_session"]] = spin
+    bridge.api_workers[threads["tutor_session"]] = spin
     bridge.topic_delete(tid)
     # Retiring keeps the QThread alive; destroying it here would qFatal the app.
     assert spin.isRunning()

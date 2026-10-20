@@ -182,7 +182,7 @@
 .connection-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px;margin-top:24px;max-width:1170px}
 .connection-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:24px}
 .connection-title{display:flex;align-items:center;gap:11px;margin-bottom:24px}.connection-title>div{flex:1}.connection-title h2{font-size:16px;font-weight:640;margin:0 0 6px}.connection-title p{font-size:10px;color:var(--subtle);margin:0}
-.connection-symbol{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:12px;border:1px solid var(--line);background:var(--accent-glow);color:var(--accent)}.connection-symbol.codex{color:var(--violet)}
+.connection-symbol{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:12px;border:1px solid var(--line);background:var(--accent-glow);color:var(--accent)}.connection-symbol.tutor{color:var(--violet)}
 .connection-card label,.learn-form-label{display:flex;flex-direction:column;gap:7px;font-size:11px;color:var(--muted);line-height:1.7;margin:15px 0 0}
 .connection-card label>.learn-caption{font-size:10px}.connection-card label .field{font-size:12px;min-width:0}
 .connection-inline,.card-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.config-json{font-family:monospace!important;font-size:11px!important}.config-path{font-size:11px!important}

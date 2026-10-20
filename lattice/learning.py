@@ -517,14 +517,14 @@ class LearningStore:
             self.event("导入 Jupyter Notebook", "代码与 Markdown 已导入；请本地运行以获得可追溯结果", nb["id"])
         return self.notebook(nb["id"])
 
-    def threads(self, topic_id, agent="codex"):
+    def threads(self, topic_id):
         self.one("learn_topics", topic_id)
         row = self.db.execute("SELECT * FROM learn_threads WHERE topic_id=?", (topic_id,)).fetchone()
         if row:
             return dict(row)
         # Base Store commits its writes; do not place these calls in a savepoint.
         topic = self.one("learn_topics", topic_id)
-        tutor = self.store.new_session(agent, title="主讲 · " + topic["title"])
+        tutor = self.store.new_session("api", title="主讲 · " + topic["title"])
         flash = self.store.new_session("api", title="快答 · " + topic["title"])
         with self.transaction():
             self.db.execute("INSERT INTO learn_threads VALUES(?,?,?)", (topic_id, tutor["id"], flash["id"]))

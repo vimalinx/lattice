@@ -14,11 +14,8 @@ import httpx
 import logging
 from PySide6.QtCore import QThread, Signal
 
-from .acp import AGENTS, agent_options, agent_command, command_available
-
 LOG = logging.getLogger("lattice")
 
-ROOT = Path(__file__).resolve().parents[1]
 # Fixed set of OpenAI-compatible connections; each keeps its own key. "{session}"
 # in a header value is replaced by the Lattice session id (OpenCode Go routes
 # and caches by x-opencode-session and rejects requests without it).
@@ -34,19 +31,13 @@ APIS = {
 API_FIELDS = {"base_url", "headers", "extra_body", "api_key"}
 DEFAULTS = {
     "apis": {}, "flash_api": "commandcode", "flash_model": "deepseek/deepseek-v4.1-flash-fast", "flash_max_tokens": 4000,
-    "tutor_agent": "api", "tutor_api": "commandcode", "tutor_model": "deepseek/deepseek-v4.1-flash", "tutor_max_tokens": 16000,
+    "tutor_api": "commandcode", "tutor_model": "deepseek/deepseek-v4.1-flash", "tutor_max_tokens": 16000,
     "practice_api": "commandcode", "practice_model": "deepseek/deepseek-v4.1-flash", "practice_max_tokens": 16000,
     "timeout": 120, "temperature": 0.35,
-    "codex_command": str(ROOT / "runtime/node_modules/.bin/codex-acp"),
-    "codex_args": [], "codex_model": "", "codex_effort": "high",
-    "devin_command": str(Path.home() / ".local/bin/devin"),
-    "devin_model": "swe-2-high",
-    "custom_command": "", "custom_args": [],
     "kernel_name": "python3", "kernel_timeout": 120,
     # Agents may run notebook code in the learner's own kernel (not a sandbox).
     "agent_auto_run": True,
 }
-TUTOR_AGENTS = {"api", *AGENTS}
 
 
 def model_label(model):
@@ -90,8 +81,6 @@ class ProviderConfig:
 
     def label(self, lane, config=None):
         config = config or self.read()
-        if lane == "tutor" and config["tutor_agent"] != "api":
-            return AGENTS[config["tutor_agent"]]["label"]
         return model_label(config[lane + "_model"])
 
     def public(self):
@@ -111,9 +100,7 @@ class ProviderConfig:
         result["practice_label"] = self.label("practice", raw)
         result["has_key"] = bool(self.key(raw["flash_api"], raw))
         result["practice_ready"] = bool(self.key(raw["practice_api"], raw))
-        result["tutor_ready"] = bool(self.key(raw["tutor_api"], raw)) if raw["tutor_agent"] == "api" else True
-        result["codex_installed"] = command_available(agent_command("codex", result)[0])
-        result["acp_agents"] = agent_options(result)
+        result["tutor_ready"] = bool(self.key(raw["tutor_api"], raw))
         return result
 
     def save(self, changes):
@@ -156,28 +143,14 @@ class ProviderConfig:
                 raise ValueError("未知的 API 连接：" + str(updated[lane + "_api"]))
             updated[lane + "_model"] = str(updated[lane + "_model"]).strip()
             updated[lane + "_max_tokens"] = max(256, min(int(updated[lane + "_max_tokens"]), 64000))
-            if lane != "tutor" or updated["tutor_agent"] == "api":
-                if not updated["apis"][updated[lane + "_api"]]["base_url"]:
-                    raise ValueError(names[lane] + "所选连接还没有 Base URL")
-                if not updated[lane + "_model"]:
-                    raise ValueError("请填写" + names[lane] + "的模型名")
+            if not updated["apis"][updated[lane + "_api"]]["base_url"]:
+                raise ValueError(names[lane] + "所选连接还没有 Base URL")
+            if not updated[lane + "_model"]:
+                raise ValueError("请填写" + names[lane] + "的模型名")
         updated["timeout"] = max(5, min(int(updated["timeout"]), 600))
         updated["temperature"] = max(0, min(float(updated["temperature"]), 2))
         updated["kernel_timeout"] = max(3, min(int(updated["kernel_timeout"]), 3600))
         updated["agent_auto_run"] = bool(updated["agent_auto_run"])
-        if not isinstance(updated["codex_args"], list) or not all(isinstance(x, str) for x in updated["codex_args"]):
-            raise ValueError("ACP 参数必须是字符串数组")
-        if updated["codex_effort"] not in {"", "low", "medium", "high", "xhigh"}:
-            raise ValueError("推理强度配置无效")
-        updated["codex_command"] = str(Path(str(updated["codex_command"])).expanduser())
-        if updated["tutor_agent"] not in TUTOR_AGENTS:
-            raise ValueError("未知的主讲适配器：" + str(updated["tutor_agent"]))
-        updated["devin_model"] = str(updated["devin_model"]).strip()
-        for key in ("devin_command", "custom_command"):
-            value = str(updated[key]).strip()
-            updated[key] = str(Path(value).expanduser()) if value else ""
-        if not isinstance(updated["custom_args"], list) or not all(isinstance(x, str) for x in updated["custom_args"]):
-            raise ValueError("自定义 ACP 参数必须是字符串数组")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(self.path.name + ".tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

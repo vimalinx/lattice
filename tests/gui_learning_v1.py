@@ -89,7 +89,7 @@ script=r'''(async()=>{
  await action(el('[data-action="search"]'));paletteFilter('主讲');check(!all('[data-action="open-session"]').some(b=>b.textContent.includes('主讲')),'learning sessions stay out of agent results');closeModal();
  {const m=document.createElement('div');m.style.cssText='position:fixed;left:-9999px;top:0;width:600px';m.innerHTML=markdown('```mermaid\ngraph LR; A[误差] --> B[步长];\n```');document.body.appendChild(m);await delay(1200);check(!!m.querySelector('.mermaid svg'),'mermaid code block renders a diagram');m.remove();}
  await openPane('knowledge');L.cardView='tree';render();check(!!el('.knowledge-tree-row'),'typed knowledge tree');L.cardView='graph';render();check(!!el('.knowledge-cy canvas')&&(el('.knowledge-cy').__cy?.nodes().length||0)>=5,'graph shows real card nodes');
- await go('settings');check(!!el('#cfg-codex')&&!!el('#cfg-flash-model'),'ACP and API settings live in settings');
+ await go('settings');check(!!el('#cfg-flash-model')&&!!el('#cfg-tutor-model'),'API settings live in settings');
  const cfg=await rpc('learn_settings');check(!('api_key' in cfg),'saved key never returned to frontend');
  await focusTopic(lt().parent_id);await openPane('notebook');check(all('[data-cell-editor]').length>=4,'notebook cell editor');
  const nb=activeNotebook(),cell=nb.cells.find(c=>c.kind==='code');

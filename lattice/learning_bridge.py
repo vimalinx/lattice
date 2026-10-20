@@ -7,19 +7,15 @@ import logging
 import os
 import re
 from pathlib import Path
-import secrets
 import sqlite3
-import sys
 import tempfile
 import zipfile
 
 from PySide6.QtCore import Slot
-from PySide6.QtNetwork import QLocalServer
 from PySide6.QtWidgets import QFileDialog
 
 from .bridge import Bridge
 from .store import APP_HOME
-from .acp import AgentWorker, AGENTS, agent_command, command_available
 from .learning import LearningStore, TABLES, dump, now, readable_outputs, text
 from .notebook import NotebookWorker
 from .providers import ProviderConfig, ApiWorker
@@ -38,7 +34,6 @@ class LearningBridge(Bridge):
         self.notebook_states = {}
         self.pending_notebooks = set()
         self.api_workers = {}
-        self.learning_meta = {}
         self.learning_busy = set()
         self.learning_status = {}
         self.connection_tests = []
@@ -53,7 +48,6 @@ class LearningBridge(Bridge):
         self.turn_carry = {}
         self.after_turn = {}
         self.deferred = []
-        self.tool_server, self.tool_token = None, secrets.token_hex(16)
         self._retired = []
         self.closing = False
         # Isolate tests and alternate profiles from the user's normal data.
@@ -117,8 +111,6 @@ class LearningBridge(Bridge):
             return self.providers.save(args["config"])
         if method == "learn_test_api":
             return self.test_api(args.get("lane", "flash"))
-        if method == "learn_connect":
-            return self.connect_tutor(args["topic_id"])
         if method == "learn_new_tutor":
             return self.new_tutor(args["topic_id"])
         if method == "learn_send":
@@ -177,57 +169,13 @@ class LearningBridge(Bridge):
             return self.export_learning(args.get("path"))
         return super().dispatch(method, args)
 
-    def _workspace(self, topic_id):
-        self.learning.one("learn_topics", topic_id)
-        root = self.learning_home / "workspaces" / topic_id
-        root.mkdir(parents=True, exist_ok=True)
-        (root / "AGENTS.md").write_text(TUTOR_POLICY, encoding="utf-8")
-        return root
-
-    def connect_tutor(self, topic_id):
-        config = self.providers.read()
-        agent = config["tutor_agent"]
-        if agent == "api":
-            # API tutors are stateless per request; there is nothing to connect.
-            return {"session_id": self.learning.threads(topic_id, agent)["tutor_session"], "state": "ready"}
-        threads = self.learning.threads(topic_id, agent)
-        ident = threads["tutor_session"]
-        worker = self.workers.get(ident)
-        if worker and worker.isRunning():
-            return {"session_id": ident, "state": self.learning_status.get(ident, "connecting")}
-        session = self.store.session(ident)
-        command, env = agent_command(agent, config)
-        label = AGENTS.get(agent, {}).get("label", agent)
-        if not command_available(command):
-            raise ValueError(f"找不到 {label} 的可执行文件，请在模型连接中配置 ACP 路径")
-        worker = AgentWorker(ident, agent, str(self._workspace(topic_id)), session.get("remote_id"))
-        worker.command = command
-        worker.extra_env = env
-        worker.mcp_servers = [self._mcp_entry(ident)]
-        worker.auto_permissions = True
-        self.agent_ctx[ident] = ("tutor", topic_id, None)
-        self.learning_meta[ident] = {"topic_id": topic_id, "lane": "tutor"}
-        worker.event.connect(self.tutor_event)
-        self.workers[ident] = worker
-        self.learning_status[ident] = "connecting"
-        worker.start()
-        return {"session_id": ident, "state": "connecting"}
-
     def new_tutor(self, topic_id):
         old = self.learning.threads(topic_id)
         if (topic_id, "tutor") in self.learning_busy:
             raise ValueError("请先停止当前主讲回复，再创建新会话")
-        worker = self.workers.get(old["tutor_session"])
-        if worker and worker.isRunning():
-            worker.post("stop")
-            if not worker.wait(4000):
-                raise ValueError("旧 ACP 连接尚未关闭，请稍后重试")
-        self.workers.pop(old["tutor_session"], None)
-        self.learning_meta.pop(old["tutor_session"], None)
         self.learning_status.pop(old["tutor_session"], None)
         topic = self.learning.one("learn_topics", topic_id)
-        agent = self.providers.read()["tutor_agent"]
-        new = self.store.new_session(agent, title="主讲 · " + topic["title"])
+        new = self.store.new_session("api", title="主讲 · " + topic["title"])
         with self.learning.transaction():
             self.store.db.execute("UPDATE learn_threads SET tutor_session=? WHERE topic_id=?", (new["id"], topic_id))
         return self.learning_state(topic_id)
@@ -266,25 +214,16 @@ class LearningBridge(Bridge):
             raise ValueError("请输入这次想探索的问题")
         if (topic_id, lane) in self.learning_busy:
             raise ValueError("这个通道正在回答，另一位助手仍可使用")
-        config = self.providers.read()
-        ident = self.learning.threads(topic_id, config["tutor_agent"])[lane + "_session"]
+        ident = self.learning.threads(topic_id)[lane + "_session"]
         meta = {"selection": selection, "lane": lane, **({"task": task} if lane == "tutor" else {})}
         user = (task_prompt(message, task) if lane == "tutor" else message) + extra + self._note(text(selection, 5000))
-        if lane == "flash" or config["tutor_agent"] == "api":
-            conn = self.providers.lane(lane, config)
-            if not conn["api_key"]:
-                raise ValueError(f"请先在模型连接中填写 {conn['label']} 的 API Key；课程、实验和知识卡仍可正常使用。")
-            policy, depth = (FLASH_POLICY, 12) if lane == "flash" else (TUTOR_POLICY, 24)
-            history = self.store.messages(ident)[-depth:]
-            self.store.append_message(ident, "user", message, meta)
-            self._api_turn(lane, topic_id, ident, conn, policy, history, user)
-        else:
-            self.connect_tutor(topic_id)
-            self.store.append_message(ident, "user", message, meta)
-            self.agent_ctx[ident] = ("tutor", topic_id, None)
-            self.turn_actions.pop(ident, None)
-            self.learning_busy.add((topic_id, lane))
-            self.workers[ident].post("prompt", text=user)
+        conn = self.providers.lane(lane)
+        if not conn["api_key"]:
+            raise ValueError(f"请先在模型连接中填写 {conn['label']} 的 API Key；课程、实验和知识卡仍可正常使用。")
+        policy, depth = (FLASH_POLICY, 12) if lane == "flash" else (TUTOR_POLICY, 24)
+        history = self.store.messages(ident)[-depth:]
+        self.store.append_message(ident, "user", message, meta)
+        self._api_turn(lane, topic_id, ident, conn, policy, history, user)
         return {"session_id": ident, "lane": lane, "state": "queued"}
 
     def _active_practice(self, topic_id):
@@ -364,33 +303,7 @@ class LearningBridge(Bridge):
         api = self.api_workers.get(ident)
         if api:
             api.stop()
-        elif lane == "tutor" and self.workers.get(ident):
-            self.workers[ident].post("cancel")
         return True
-
-    @Slot(dict)
-    def tutor_event(self, event):
-        if self.closing:
-            return
-        ident = event["session_id"]
-        meta = self.learning_meta.get(ident)
-        if not meta:
-            return
-        evt = {"type": "learning_agent", **event, **meta}
-        if event["kind"] == "ready":
-            self.store.set_remote_id(ident, event.get("remote_id"))
-            self.learning_status[ident] = "ready"
-        elif event["kind"] == "status":
-            self.learning_status[ident] = event.get("state", "")
-            if event.get("state") == "offline":
-                self.learning_busy.discard((meta["topic_id"], "tutor"))
-        elif event["kind"] == "error":
-            self.learning_busy.discard((meta["topic_id"], "tutor"))
-            self.learning_status[ident] = "error"
-            self._record_review(meta["topic_id"], "error")
-        elif event["kind"] == "finished":
-            self._finish_answer(evt)
-        self.announce(evt)
 
     @Slot(dict)
     def api_event(self, evt):
@@ -408,52 +321,6 @@ class LearningBridge(Bridge):
         elif evt["kind"] == "error":
             self.learning_status[ident] = "error"
         self.announce(evt)
-
-    def _mcp_entry(self, ident):
-        """How an ACP agent starts the Lattice MCP server for one tutor session."""
-        if self.tool_server is None:
-            base = Path(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir())
-            path = str(base / f"lattice-tools-{os.getpid()}")
-            QLocalServer.removeServer(path)
-            server = QLocalServer(self)
-            server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
-            if not server.listen(path):
-                raise ValueError("无法启动工具服务：" + server.errorString())
-            server.newConnection.connect(lambda: self._tool_client(server.nextPendingConnection()))
-            self.tool_server = server
-        env = {"LATTICE_TOOLS_SOCKET": self.tool_server.fullServerName(), "LATTICE_TOOLS_TOKEN": self.tool_token, "LATTICE_TOOLS_SESSION": ident}
-        return {"name": "lattice", "command": sys.executable, "args": ["-I", str(Path(__file__).with_name("mcp_server.py"))],
-                "env": [{"name": k, "value": v} for k, v in env.items()]}
-
-    def _tool_client(self, conn):
-        buffer = bytearray()
-
-        def write(message):
-            if conn.isValid():
-                conn.write((json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8"))
-                conn.flush()
-
-        def on_ready():
-            buffer.extend(bytes(conn.readAll()))
-            while b"\n" in buffer:
-                at = buffer.index(b"\n")
-                line, buffer[:] = bytes(buffer[:at]), buffer[at + 1:]
-                try:
-                    msg = json.loads(line)
-                except ValueError:
-                    continue
-                if not secrets.compare_digest(str(msg.get("token", "")), self.tool_token):
-                    write({"id": msg.get("id"), "content": "未授权", "is_error": True})
-                    continue
-                role = self.agent_ctx.get(msg.get("session"), ("tutor",))[0]
-                if msg.get("method") == "list":
-                    write({"id": msg.get("id"), "tools": [{"name": t["function"]["name"], "description": t["function"]["description"],
-                                                         "inputSchema": t["function"]["parameters"]} for t in tools.schemas(role)]})
-                else:
-                    self.run_tool(msg.get("session"), msg.get("name"), msg.get("arguments") or {},
-                                  lambda content, i=msg.get("id"): write({"id": i, "content": content, "is_error": '"error"' in content[:12]}))
-        conn.readyRead.connect(on_ready)
-        conn.disconnected.connect(conn.deleteLater)
 
     def run_tool(self, ident, name, arguments, reply):
         """Execute one agent tool call on the GUI thread and hand the JSON result back."""
@@ -500,7 +367,7 @@ class LearningBridge(Bridge):
         focus = self.turn_focus.pop(ident, None)
         if focus and focus != topic and lane == "tutor":
             # The turn that created or chose another topic belongs to that topic's thread.
-            target = self.learning.threads(focus, self.providers.read()["tutor_agent"])["tutor_session"]
+            target = self.learning.threads(focus)["tutor_session"]
             # This turn's question and answer, plus the earlier messages the tutor chose to carry.
             ids = [r[0] for r in self.store.db.execute("SELECT id FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 2", (ident,))]
             ids += self.turn_carry.pop(ident, [])
@@ -555,12 +422,6 @@ class LearningBridge(Bridge):
                 raise ValueError("这个主题还有正在生成的回答，请先取消或等待完成")
         row = self.store.db.execute("SELECT * FROM learn_threads WHERE topic_id=?", (topic_id,)).fetchone()
         if row:
-            tutor = self.workers.pop(row["tutor_session"], None)
-            if tutor:
-                self._detach(tutor, self.tutor_event)
-                if tutor.isRunning():
-                    tutor.post("stop")
-                    self._retire(tutor)
             practices = [r["session_id"] for r in self.learning.rows("SELECT session_id FROM learn_practices WHERE topic_id=?", (topic_id,))]
             for sid in (row["tutor_session"], row["flash_session"], *practices):
                 api = self.api_workers.pop(sid, None)
@@ -570,7 +431,6 @@ class LearningBridge(Bridge):
                         api.stop()
                         self._retire(api)
             for sid in (row["tutor_session"], row["flash_session"]):
-                self.learning_meta.pop(sid, None)
                 self.learning_status.pop(sid, None)
         for nb in self.learning.rows("SELECT id FROM learn_notebooks WHERE topic_id=?", (topic_id,)):
             self._stop_kernel(nb["id"])
@@ -705,7 +565,7 @@ class LearningBridge(Bridge):
                 for row in self.learning.rows("SELECT id FROM learn_cards"):
                     c = self.learning.card(row["id"])
                     archive.writestr("cards/" + c["id"] + ".md", "# " + c["title"] + "\n\n" + c["body"] + "\n\n## 我的理解\n\n" + c["understanding"] + "\n\n## 仍然想问\n\n" + c["question"] + "\n")
-                archive.writestr("README.txt", "Lattice 本地学习档案。包括 SQLite 全量记录、学习图谱 JSON、知识卡 Markdown 和 Jupyter Notebook。\n不包含 providers.json/API Key 或 Codex 登录凭据。\n恢复时先关闭应用并备份原数据库；然后用 lattice.db 替换应用数据目录内的数据库。")
+                archive.writestr("README.txt", "Lattice 本地学习档案。包括 SQLite 全量记录、学习图谱 JSON、知识卡 Markdown 和 Jupyter Notebook。\n不包含 providers.json/API Key。\n恢复时先关闭应用并备份原数据库；然后用 lattice.db 替换应用数据目录内的数据库。")
         self.store.emit("export", "导出完整学习档案", str(path))
         return str(path)
 

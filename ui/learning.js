@@ -3,7 +3,7 @@
 const L = {
  filesOpen:false, data:null, notebookId:null, lessonId:null, cardView:"cards", search:"", stage:"", scope:"",
  inputs:{tutor:"",flash:"",practice:""}, practiceId:null, practiceCache:null, liveActions:{}, undone:new Set(), streams:{}, errors:{}, localBusy:new Set(), selection:"", drafts:new Map(), timers:new Map(),
- editingCard:null, editingLesson:null, permissions:[], testResult:"", scrollBottom:null,
+ editingCard:null, editingLesson:null, testResult:"", scrollBottom:null,
  cardDrafts:new Map(), details:{},
 };
 const CARD_FIELDS=new Set(['title','stage','body','understanding','question','tags','topic']);
@@ -25,7 +25,7 @@ function adoptLearning(data){
 }
 async function learnRefresh(redraw=true){adoptLearning(await rpc("learn_snapshot",{topic_id:ld()?.active_topic}));if(redraw)render();}
 function laneBusy(lane){return L.localBusy.has(lk(lt()?.id,lane))||(ld()?.runtime?.busy||[]).some(x=>x[0]===lt()?.id&&x[1]===lane);}
-function laneStatus(lane){const key=lane==="tutor"?"tutor_session":"flash_session";const id=ld()?.threads?.[key];const api=lane==="flash"||ld()?.providers?.tutor_agent==="api";return ld()?.runtime?.agents?.[id]||(api?(lane==="flash"?ld()?.providers?.has_key:ld()?.providers?.tutor_ready)?"ready":"offline":"offline");}
+function laneStatus(lane){const key=lane==="tutor"?"tutor_session":"flash_session";const id=ld()?.threads?.[key];return ld()?.runtime?.agents?.[id]||((lane==="flash"?ld()?.providers?.has_key:ld()?.providers?.tutor_ready)?"ready":"offline");}
 function lbutton(label,action,attrs="",variant=""){return button(label,action,attrs,variant);}
 /* Each navigation entry owns one page. Detail cards expand in that page only. */
 const CONTENT_ROUTES={dialogue:'learning',practice:'practice',classroom:'classroom',lesson:'classroom',notebook:'notebook',flash:'flash',knowledge:'knowledge',card:'knowledge',note:'notes'};
@@ -269,7 +269,7 @@ function conversationHtml(lane){
 }
 function tutorChatView(){
  const messages=ld()?.tutor_messages||[];
- return '<div class="tutor-dialogue"><div class="tutor-dialogue-tools"><span>'+svg("bot",15)+' 主讲负责：讲清机制、安排实验、串联知识</span>'+(ld()?.providers?.tutor_agent==='api'?'':lbutton(svg("link",14)+' 连接 ACP','l-connect','','ghost sm'))+
+ return '<div class="tutor-dialogue"><div class="tutor-dialogue-tools"><span>'+svg("bot",15)+' 主讲负责：讲清机制、安排实验、串联知识</span>'+
  lbutton(svg("plus",14)+' 新会话','l-tutor-new','','ghost sm')+lbutton(svg("book",14)+' 提炼知识卡','l-tutor-task','data-task="capture"','ghost sm')+'</div><div class="learn-chat-scroll" id="learn-chat-tutor" data-scroll="chat-tutor" data-scroll-ns="'+esc(lt()?.id||'')+'">'+
  (messages.length||laneBusy('tutor')?conversationHtml('tutor'):isChat()?'<div class="tutor-welcome"><div class="learn-empty-icon">'+svg("spark",30)+'</div><h2>想到什么，直接说。</h2><p>'+esc(tutorLabel())+' 会跟着你的话题走，需要时去查你以前学过的内容；值得长期深入的内容，它会自己整理成主题。</p></div>':'<div class="tutor-welcome"><div class="learn-empty-icon">'+svg("spark",30)+'</div><h2>不是从目录开始，<br>是从你想知道的事开始。</h2><p>'+esc(tutorLabel())+' 会参考当前课程、实验输出、快答讨论和知识卡。你不需要每次重新说明自己学到了哪里。</p><div>'+lbutton('为当前兴趣规划起点','l-tutor-task','data-task="plan"','primary')+'</div></div>')+
  '</div>'+composer('tutor')+'</div>';
@@ -360,27 +360,15 @@ function apiBlock(a){
  '<div class="connection-buttons">'+lbutton('清除本机 Key','l-clear-key','data-api="'+esc(a.id)+'"','ghost sm')+'</div></details>';
 }
 function connectionsBody(){
- const c=ld().providers,acp=c.acp_agents||[];
+ const c=ld().providers;
  return '<div class="connection-page">'+
- '<div class="connection-grid"><section class="connection-card"><div class="connection-title"><span class="connection-symbol">'+svg("spark",22)+'</span><div><h2>快答</h2><p>'+esc(c.flash_label)+' · OpenAI 兼容 Chat Completions / SSE</p></div><span class="learn-stage">'+esc(c.has_key?'已保存凭据':'等待接入')+'</span></div>'+
+ '<div class="connection-grid">'+
+ '<section class="connection-card"><div class="connection-title"><span class="connection-symbol tutor">'+svg("bot",22)+'</span><div><h2>主讲</h2><p>'+esc(c.tutor_label)+' · OpenAI 兼容 Chat Completions / SSE</p></div><span class="learn-stage">'+esc(c.tutor_ready?'已保存凭据':'等待接入')+'</span></div>'+
+ laneFields('tutor',c)+'<p class="connection-foot">每轮发送教学规则、工具清单和最近 24 条主讲对话；其余内容由主讲自己按需查。</p></section>'+
+ '<section class="connection-card"><div class="connection-title"><span class="connection-symbol">'+svg("spark",22)+'</span><div><h2>快答</h2><p>'+esc(c.flash_label)+' · OpenAI 兼容 Chat Completions / SSE</p></div><span class="learn-stage">'+esc(c.has_key?'已保存凭据':'等待接入')+'</span></div>'+
  laneFields('flash',c)+'<p class="connection-foot">测试只读取模型列表，不生成回答。</p></section>'+
  '<section class="connection-card"><div class="connection-title"><span class="connection-symbol">'+svg("code",22)+'</span><div><h2>练习教练</h2><p>'+esc(c.practice_label)+' · 在练习分支里一步步带你写代码</p></div><span class="learn-stage">'+esc(c.practice_ready?'已保存凭据':'等待接入')+'</span></div>'+
- laneFields('practice',c)+'<p class="connection-foot">每轮发送练习规则、练习依据的讲解、右侧笔记本的代码与真实输出，以及最近 40 条练习对话。</p></section>'+
- '<section class="connection-card"><div class="connection-title"><span class="connection-symbol codex">'+svg("bot",22)+'</span><div><h2>主讲</h2><p>'+esc(c.tutor_label)+'</p></div><span class="learn-stage">'+esc(c.tutor_agent==='api'?(c.tutor_ready?'已保存凭据':'等待接入'):acp.find(a=>a.id===c.tutor_agent)?.installed?'适配器已安装':'路径待配置')+'</span></div>'+
- '<label>主讲方式<select class="field" id="cfg-tutor-agent"><option value="api" '+(c.tutor_agent==='api'?'selected':'')+'>OpenAI 兼容 API</option>'+acp.map(a=>'<option value="'+esc(a.id)+'" '+(c.tutor_agent===a.id?'selected':'')+'>'+esc(a.label)+' · ACP'+(a.installed?'':' · 未安装')+'</option>').join('')+'</select></label>'+
- '<div class="agent-fields" data-agent="api"'+(c.tutor_agent==='api'?'':' hidden')+'>'+laneFields('tutor',c)+'<p class="connection-foot">每轮发送教学规则、学习状态和最近 24 条主讲对话。</p></div>'+
- '<div class="agent-fields" data-agent="codex"'+(c.tutor_agent==='codex'?'':' hidden')+'>'+
- '<label>ACP 可执行文件<input class="field config-path" id="cfg-codex" value="'+esc(c.codex_command)+'"/></label>'+
- '<label>启动参数 <span class="learn-caption">JSON 字符串数组，不经 Shell 执行</span><input class="field config-json" id="cfg-codex-args" value="'+esc(JSON.stringify(c.codex_args))+'"/></label>'+
- '<label>Codex 模型 <span class="learn-caption">留空沿用当前 Codex 默认值</span><input class="field" id="cfg-codex-model" value="'+esc(c.codex_model)+'" placeholder="沿用 Codex 默认模型"/></label>'+
- '<label>推理强度<select class="field" id="cfg-effort">'+['','low','medium','high','xhigh'].map(e=>'<option value="'+esc(e)+'" '+(c.codex_effort===e?'selected':'')+'>'+esc(e||'沿用默认')+'</option>').join('')+'</select></label></div>'+
- '<div class="agent-fields" data-agent="devin"'+(c.tutor_agent==='devin'?'':' hidden')+'>'+
- '<label>Devin 可执行文件<input class="field config-path" id="cfg-devin" value="'+esc(c.devin_command)+'"/></label>'+
- '<label>Devin 模型 <span class="learn-caption">以 --model 传入 devin acp</span><input class="field" id="cfg-devin-model" value="'+esc(c.devin_model)+'"/></label></div>'+
- '<div class="agent-fields" data-agent="custom"'+(c.tutor_agent==='custom'?'':' hidden')+'>'+
- '<label>ACP 可执行文件 <span class="learn-caption">任何实现了 ACP 协议的 Agent</span><input class="field config-path" id="cfg-custom" value="'+esc(c.custom_command)+'" placeholder="/path/to/agent-acp"/></label>'+
- '<label>启动参数 <span class="learn-caption">JSON 字符串数组，不经 Shell 执行</span><input class="field config-json" id="cfg-custom-args" value="'+esc(JSON.stringify(c.custom_args))+'"/></label></div>'+
- '<div class="agent-fields" data-agent="acp"'+(c.tutor_agent==='api'?' hidden':'')+'><div class="connection-buttons">'+lbutton('保存并连接 ACP','l-test-codex','','primary sm')+'</div><p class="connection-foot">登录凭据由所选 Agent 自行管理。支持会话恢复、流式回复、停止与权限确认。模型设置在新连接 / 新会话生效。</p></div></section></div>'+
+ laneFields('practice',c)+'<p class="connection-foot">每轮发送练习规则、练习依据的讲解、右侧笔记本的代码与真实输出，以及最近 40 条练习对话。</p></section></div>'+
  '<section class="connection-card api-connections"><div class="connection-title"><span class="connection-symbol">'+svg("link",22)+'</span><div><h2>API 连接</h2><p>每个连接各存一份 Key，快答和主讲可以选同一个</p></div></div>'+
  (c.apis||[]).map(apiBlock).join('')+
  '<div class="connection-inline"><label>超时 / 秒<input class="field" type="number" id="cfg-timeout" min="5" max="600" value="'+esc(c.timeout)+'"/></label><label>Temperature<input class="field" type="number" step="0.05" id="cfg-temperature" min="0" max="2" value="'+esc(c.temperature)+'"/></label></div>'+
@@ -388,7 +376,7 @@ function connectionsBody(){
  '<div class="kernel-settings"><h3>'+svg("terminal",16)+' 本地 Jupyter 内核</h3><div class="connection-inline"><label>Kernel 名称<input class="field" id="cfg-kernel" value="'+esc(c.kernel_name)+'"/></label><label>单格时限 / 秒<input class="field" type="number" id="cfg-kernel-timeout" min="3" max="3600" value="'+esc(c.kernel_timeout)+'"/></label></div>'+
  '<label class="connection-check"><input type="checkbox" id="cfg-auto-run" '+(c.agent_auto_run?'checked':'')+'/> 允许 AI 自己运行实验笔记里的代码并读取结果 <span class="learn-caption">代码以你的用户权限在本机运行，不是沙箱</span></label></div></section>'+
  '<div class="connection-save-row"><div class="connection-test-result" id="connection-test-result">'+esc(L.testResult||'尚未执行连接测试。其他本地功能不依赖 API 配置。')+'</div>'+lbutton(svg("save",15)+' 保存全部设置','l-settings-save','','primary')+'</div>'+
- '<section class="connection-data"><div><h3>可以带走的学习档案</h3><p>SQLite 全量记录、知识卡 Markdown、关系 JSON 和标准 .ipynb。API Key 与 Codex 凭据不包含在内。</p></div>'+lbutton(svg("download",15)+' 导出学习档案','l-export','','ghost')+'</section></div>';
+ '<section class="connection-data"><div><h3>可以带走的学习档案</h3><p>SQLite 全量记录、知识卡 Markdown、关系 JSON 和标准 .ipynb。API Key 不包含在内。</p></div>'+lbutton(svg("download",15)+' 导出学习档案','l-export','','ghost')+'</section></div>';
 }
 function fitCodeEditors(){all('.cell-editor').forEach(t=>{t.style.height='auto';t.style.height=Math.max(74,Math.min(560,t.scrollHeight))+'px';});}
 /* Chat code blocks get a title bar with copy / run-into-notebook actions. */
@@ -577,13 +565,10 @@ function proposalsModal(){
 async function settingsSave(){
  const apis={};
  for(const a of ld().providers.apis){const v=k=>el('#cfg-api-'+a.id+'-'+k).value;apis[a.id]={base_url:v('base'),api_key:v('key'),headers:JSON.parse(v('headers')||'{}'),extra_body:JSON.parse(v('extra')||'{}')};}
- const cfg={apis,timeout:Number(el('#cfg-timeout').value),temperature:Number(el('#cfg-temperature').value),tutor_agent:el('#cfg-tutor-agent').value,
+ const cfg={apis,timeout:Number(el('#cfg-timeout').value),temperature:Number(el('#cfg-temperature').value),
  flash_api:el('#cfg-flash-api').value,flash_model:el('#cfg-flash-model').value,flash_max_tokens:Number(el('#cfg-flash-tokens').value),
  practice_api:el('#cfg-practice-api').value,practice_model:el('#cfg-practice-model').value,practice_max_tokens:Number(el('#cfg-practice-tokens').value),
  tutor_api:el('#cfg-tutor-api').value,tutor_model:el('#cfg-tutor-model').value,tutor_max_tokens:Number(el('#cfg-tutor-tokens').value),
- codex_command:el('#cfg-codex').value,codex_args:JSON.parse(el('#cfg-codex-args').value),codex_model:el('#cfg-codex-model').value,
- codex_effort:el('#cfg-effort').value,devin_command:el('#cfg-devin').value,devin_model:el('#cfg-devin-model').value,
- custom_command:el('#cfg-custom').value,custom_args:JSON.parse(el('#cfg-custom-args').value||'[]'),
  kernel_name:el('#cfg-kernel').value,kernel_timeout:Number(el('#cfg-kernel-timeout').value),agent_auto_run:el('#cfg-auto-run').checked};
  ld().providers=await rpc('learn_settings_save',{config:cfg});all('[id^="cfg-api-"][id$="-key"]').forEach(x=>x.value='');toast('模型设置已保存');
 }
@@ -597,12 +582,6 @@ const originalAction=action;
 action=async function(target){
  const a=target&&target.closest('[data-action]');if(!a)return;
  const kind=a.dataset.action,id=a.dataset.id;
- // A close button on a permission dialog also sends an explicit rejection.
- if(S.permission&&['modal-close','permission-select','permission-deny'].includes(kind)){
-  const p=S.permission;
-  await rpc('agent_permission',{id:p.session_id,request_id:p.request_id,option_id:kind==='permission-select'?a.dataset.choice:undefined});
-  S.permission=null;closeModal();if(L.permissions.length)permissionModal(L.permissions.shift());return;
- }
  if(S.commandOpen&&a.closest('#palette-list'))closeModal();
  if(!kind.startsWith('l-')&&!kind.startsWith('nb-'))return originalAction(target);
  switch(kind){
@@ -666,7 +645,6 @@ action=async function(target){
  case 'l-practice-open':L.practiceId=id;L.practiceCache=await rpc('learn_practice_get',{id});return render();
  case 'l-practice-close':L.practiceId=null;L.practiceCache=null;return render();
  case 'l-insight-resolve':await rpc('learn_insight_resolve',{id});if(L.practiceCache)L.practiceCache=await rpc('learn_practice_get',{id:L.practiceCache.id});return learnRefresh();
- case 'l-connect':await rpc('learn_connect',{topic_id:lt().id});return toast('正在进行真实 ACP 握手');
  case 'l-tutor-new':
   if(!confirm('开启新的主讲会话？学习数据会保留，之前的对话仍在 AI 协作历史里。'))return;
   adoptLearning(await rpc('learn_new_tutor',{topic_id:lt().id}));return render();
@@ -768,7 +746,6 @@ action=async function(target){
  case 'l-graph-relayout':{const cy=graphCy();if(cy)cy.layout(GRAPH_LAYOUT).run();return;}
  case 'l-settings-save':await settingsSave();return render();
  case 'l-test-api':await settingsSave();L.testResult='正在读取 API 模型列表…';render();await rpc('learn_test_api',{lane:a.dataset.lane});return;
- case 'l-test-codex':await settingsSave();L.testResult='正在进行 ACP 握手与会话创建…';render();await rpc('learn_connect',{topic_id:lt().id});return;
  case 'l-clear-key':{const api=ld().providers.apis.find(x=>x.id===a.dataset.api);if(!confirm('清除保存在本机配置文件中的 '+api.label+' Key？环境变量不会被修改。'))return;ld().providers=await rpc('learn_settings_save',{config:{apis:{[api.id]:{clear_key:true}}}});return render();}
  case 'l-export':{await flushCells();const file=await rpc('learn_export',{},0);if(file)toast('学习档案已导出：'+file);return;}
  case 'nb-new':{const name=prompt('实验笔记名称：','新的小实验');if(!name)return;await flushCells();const nb=await rpc('nb_create',{topic_id:lt().id,title:name});await rpc('nb_cell_save',{cell:{notebook_id:nb.id,kind:'code',source:'# 从这里开始你的实验\n'}});L.notebookId=nb.id;await learnRefresh();return openContent('notebook');}
@@ -822,7 +799,6 @@ onInput=async function(e){
 const originalOnChange=onChange;
 onChange=async function(e){
  const t=e.target;
- if(t.id==='cfg-tutor-agent'){all('.agent-fields').forEach(d=>d.hidden=d.dataset.agent==='acp'?t.value==='api':d.dataset.agent!==t.value);return;}
  if(['cfg-flash-api','cfg-tutor-api','cfg-practice-api'].includes(t.id)){const m=ld().providers.apis.find(x=>x.id===t.value)?.default_model;if(m)el('#cfg-'+t.dataset.lane+'-model').value=m;return;}
  if(t.id==='notebook-select'){await flushCells();L.notebookId=t.value;return render();}
  if(t.id==='knowledge-stage'){L.stage=t.value;el('#knowledge-body').innerHTML=knowledgeBody(visibleCards());return;}
@@ -834,10 +810,8 @@ onEvent=async function(evt){
  if(evt.type==='learning_agent'){
   if(evt.kind==='connection_test'){L.testResult=(evt.ok?'✓ ':'连接失败：')+evt.message;const b=el('#connection-test-result');if(b)b.textContent=L.testResult;toast(L.testResult,evt.ok?'info':'error');return;}
   const key=lk(evt.topic_id,evt.lane),same=evt.topic_id===lt()?.id;
-  if(evt.kind==='permission'){if(S.permission)L.permissions.push(evt);else permissionModal(evt);return;}
   if(evt.kind==='chunk'){L.streams[key]=(L.streams[key]||'')+evt.text;if(same)patchStream(evt.lane);return;}
   if(evt.kind==='error'){L.localBusy.delete(key);L.errors[key]=evt.message||'请求失败，没有收到错误说明。请重试。';if(same)patchChat(evt.lane);L.testResult=evt.message;const b=el('#connection-test-result');if(b)b.textContent=evt.message;return;}
-  if(evt.kind==='ready'){ld().runtime.agents[evt.session_id]='ready';L.testResult='✓ ACP 已完成握手并建立真实会话。';const b=el('#connection-test-result');if(b)b.textContent=L.testResult;return;}
   if(evt.kind==='status'){ld().runtime.agents[evt.session_id]=evt.state;if(evt.state==='offline')L.localBusy.delete(key);const chip=el('.learn-agent-chip');if(chip&&evt.lane==='tutor'&&same)chip.innerHTML='<i></i> '+esc(tutorLabel())+' · '+esc(stateName[evt.state]||evt.state);return;}
   if(evt.kind==='tool'){
    if(!evt.actions?.length)return;

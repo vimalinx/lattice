@@ -6,7 +6,7 @@ const S = {
   noteDirty:false,noteTimer:null,
   projectId:null,treePath:"",filePath:null,fileContent:"",fileDirty:false,
   graphFilter:"all",
-  toastTimer:null, commandOpen:false, permission:null, permissionQueue:[], modalSnap:null
+  toastTimer:null, commandOpen:false, modalSnap:null
 };
 const el=(s)=>document.querySelector(s);
 const all=(s)=>Array.from(document.querySelectorAll(s));
@@ -225,9 +225,7 @@ function requestCloseModal(){
  closeModal();
 }
 function closeModal(){
- el("#overlays").innerHTML="";S.commandOpen=false;S.permission=null;S.modalSnap=null;
- const next=S.permissionQueue.shift()||(typeof L!=="undefined"?L.permissions.shift():undefined);
- if(next)permissionModal(next);
+ el("#overlays").innerHTML="";S.commandOpen=false;S.modalSnap=null;
 }
 /* Preserve scroll positions across innerHTML re-renders. Tag scrollable regions with
    data-scroll="key" data-scroll-ns="<view/tab it belongs to>". Positions only restore

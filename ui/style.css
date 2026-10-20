@@ -199,7 +199,7 @@ select.field{appearance:auto}
 .command-item{border:1px solid transparent;background:transparent;text-align:left;padding:12px;border-radius:8px;display:flex;gap:12px;align-items:center;font-size:12px}
 .command-item:hover{background:var(--surface)}
 .command-item svg{height:16px;width:16px;color:var(--accent)}
-.permission-note{background:#d5a85e11;color:var(--amber);padding:13px;border:1px solid #e3af6040;border-radius:9px;font-size:12px;margin:13px 0}
+
 .command-palette-input{background:transparent;border:0;border-bottom:1px solid var(--line);border-radius:0;padding:8px 5px 17px;font-size:18px;font-weight:500}
 #toast{position:fixed;right:24px;bottom:26px;background:var(--panel-hi);border:1px solid var(--line);color:var(--text);box-shadow:var(--shadow);padding:12px 16px;font-size:12px;z-index:120;border-radius:10px;display:none;max-width:440px}
 #toast.visible{display:block;animation:fadeUp .2s}

@@ -9,7 +9,7 @@ cd ~/Projects/Lattice
 python3 run.py
 ```
 
-桌面依赖：Python 3.11+、PySide6（含 QtWebEngine）、jupyter_client、ipykernel、httpx、numpy、matplotlib。ACP 适配器在 `runtime` 中，通过 `npm ci --prefix runtime` 安装已锁定依赖；主讲和快答默认都走 OpenAI 兼容 API：「设置与数据」里有 DeepSeek、CommandCode、OpenCode Go 和一个自定义连接，每个连接各存一份 Key，快答、主讲和练习教练各自选连接和模型（默认 CommandCode 的 `deepseek/deepseek-v4.1-flash-fast`、`deepseek/deepseek-v4.1-flash` 和 `deepseek/deepseek-v4.1-flash`）。主讲也可以改用 ACP 智能体（Codex、Devin 或自定义），此时读取本机登录，教学连接默认 read-only。思考型模型的思考内容计入回复上限；只思考没回答时会自动重试一次。OpenCode Go 要求 `x-opencode-session` 请求头，默认用会话 ID 填入。附加参数不被网关支持时可改为空对象 `{}`。
+桌面依赖：Python 3.11+、PySide6（含 QtWebEngine）、jupyter_client、ipykernel、httpx、numpy、matplotlib。主讲、快答和练习教练都走 OpenAI 兼容 API（流式 SSE + 工具调用）：「设置与数据」里有 DeepSeek、CommandCode、OpenCode Go 和一个自定义连接，每个连接各存一份 Key，三条通道各自选连接和模型（默认 CommandCode：快答 `deepseek/deepseek-v4.1-flash-fast`，主讲和练习教练 `deepseek/deepseek-v4.1-flash`）。思考型模型的思考内容计入回复上限；只思考没回答时会自动重试一次。OpenCode Go 要求 `x-opencode-session` 请求头，默认用会话 ID 填入。附加参数不被网关支持时可改为空对象 `{}`。
 
 ## 日常学习
 
@@ -21,7 +21,7 @@ python3 run.py
 
 平时直接和主讲聊，不需要任何主题；默认对话不显示名字（在按主题筛选的地方叫「未归入主题」）。界面上没有建主题的按钮，顶栏只在你处于某个主题时显示它的名字。主题怎么组织由主讲判断：某段讨论正在变成一条要跨天深入的学习线时，它会把它建成主题或某条主线的分支，切过去，并把属于它的那几条对话一起带走，别的话题留在原处；一两句闲问不会单独建。你也可以直接让它建、切或回到某个主题。它建了、切了都会在回复里说，并且可以撤销。
 
-主讲、快答和练习教练通过工具直接操作整个工作台（`lattice/tools.py`）。不会自动推送学习状态：每个 AI 只被告知有哪些工具，需要时自己去查，比如主题档案、知识卡、笔记、课程、实验单元格和真实输出、其他通道的对话、最近的改动、薄弱点和挂载目录（只读）。发送消息时只附一行界面附注，说明你在哪一页、看着什么、选中了什么。主讲可以新建主题或分支并切过去（这轮对话随之归到新主题下）、更新主题档案、保存课程、卡片、关系和经验文档、写代码并在本机内核里运行（可在设置里关闭自动运行）、开练习、记录薄弱点；快答只读，必要时转交主讲；练习教练只能写和运行自己那份笔记本。每个写操作在对话里显示为一行记录，可以查看或撤销。理解阶段、「我的理解」、你自己的解释、回顾自评和删除操作只归你。API 通道走 OpenAI 兼容的工具调用；Codex 通过 Lattice 自带的 MCP 服务（`lattice/mcp_server.py`，经本机用户专属 socket 转发）用同一套工具。Lattice 工具的调用自动放行；Codex 自带的 shell 和文件操作自动拒绝，不会弹窗打扰你。
+主讲、快答和练习教练通过工具直接操作整个工作台（`lattice/tools.py`）。不会自动推送学习状态：每个 AI 只被告知有哪些工具，需要时自己去查，比如主题档案、知识卡、笔记、课程、实验单元格和真实输出、其他通道的对话、最近的改动、薄弱点和挂载目录（只读）。发送消息时只附一行界面附注，说明你在哪一页、看着什么、选中了什么。主讲可以新建主题或分支并切过去（这轮对话随之归到新主题下）、更新主题档案、保存课程、卡片、关系和经验文档、写代码并在本机内核里运行（可在设置里关闭自动运行）、开练习、记录薄弱点；快答只读，必要时转交主讲；练习教练只能写和运行自己那份笔记本。每个写操作在对话里显示为一行记录，可以查看或撤销。理解阶段、「我的理解」、你自己的解释、回顾自评和删除操作只归你。三条通道都用 OpenAI 兼容的工具调用。
 
 「练习」是从主讲讲解分出去的练习分支：在主讲某条回复下点「开始练习」，练习教练（默认 CommandCode 的 `deepseek/deepseek-v4.1-flash`，在设置里可换）会在左边一步步带你写，右边是这次练习专属的实验笔记。教练每轮都能看到右侧代码的真实输出；代码块上的「放到右侧」只插入单元格，不自动运行。点「结束练习并复盘」后，整段练习记录（依据的讲解、全部对话、最终代码与输出）交给主讲复盘：主讲只按记录里的证据写出做到了什么、薄弱点和接下来的讲解重点，并直接讲下一步。复盘里的薄弱点自动记入学习画像，主讲、快答和练习教练之后每一轮都会参考；你可以在「练习」页把已克服的标记掉。每个主题同时只有一个进行中的练习。
 
@@ -41,7 +41,7 @@ python3 run.py
 
 ## 数据、凭据和备份
 
-默认数据：`~/.local/share/lattice/lattice.db`（支持 XDG_DATA_HOME）；学习实验工作目录在同目录 `learning/`。模型配置：`~/.config/lattice/providers.json`（支持 XDG_CONFIG_HOME），权限 0600；界面只知道是否有 Key，不接收已保存密钥；Key 也可以用环境变量 `DEEPSEEK_API_KEY`、`COMMANDCODE_API_KEY`、`OPENCODE_GO_API_KEY` 提供。导出 ZIP 包含数据库、知识结构 JSON、知识卡 Markdown 与 `.ipynb`，不包含凭据配置或 Codex 登录文件。实际使用模型时，所需学习上下文会发给你配置的模型服务，不能理解为“数据永不出网”。
+默认数据：`~/.local/share/lattice/lattice.db`（支持 XDG_DATA_HOME）；学习实验工作目录在同目录 `learning/`。模型配置：`~/.config/lattice/providers.json`（支持 XDG_CONFIG_HOME），权限 0600；界面只知道是否有 Key，不接收已保存密钥；Key 也可以用环境变量 `DEEPSEEK_API_KEY`、`COMMANDCODE_API_KEY`、`OPENCODE_GO_API_KEY` 提供。导出 ZIP 包含数据库、知识结构 JSON、知识卡 Markdown 与 `.ipynb`，不包含凭据配置。实际使用模型时，所需学习上下文会发给你配置的模型服务，不能理解为“数据永不出网”。
 
 恢复档案前退出所有 Lattice 窗口，备份整个数据目录，再把 ZIP 中的 lattice.db 放入新的空白 Lattice 数据目录。建议先用独立 XDG_DATA_HOME 启动验证，而非覆盖正在使用的 SQLite/WAL 文件。
 
@@ -53,7 +53,7 @@ python3 tests/runtime_smoke_v1.py
 QT_QPA_PLATFORM=offscreen python3 tests/gui_probe_v1.py
 ```
 
-旧版分栏 GUI 验收脚本 `tests/gui_learning_v1.py` 针对已移除的分栏交互，不能作为新版导航的验收入口。新版导航的 Qt 实际渲染与交互记录见 `docs/navigation-review/REPORT.md`。其他历史执行结果见 `docs/TEST_REPORT.md`。缺少真实 DeepSeek Key 时仅做本地 HTTP/SSE 协议联调，不能据此声称该账户已在线验证。ACP 和 Jupyter 则分别做实际适配器与真实内核测试。
+旧版分栏 GUI 验收脚本 `tests/gui_learning_v1.py` 针对已移除的分栏交互，不能作为新版导航的验收入口。新版导航的 Qt 实际渲染与交互记录见 `docs/navigation-review/REPORT.md`。其他历史执行结果见 `docs/TEST_REPORT.md`。缺少真实 DeepSeek Key 时仅做本地 HTTP/SSE 协议联调，不能据此声称该账户已在线验证。Jupyter 做真实内核测试。
 
 
 ## 启动入口与平铺窗口

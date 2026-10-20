@@ -173,19 +173,6 @@ function paletteFilter(query){
  const box=el("#palette-list");if(box)box.innerHTML=rows.join("")||
  '<div class="muted text-sm" style="padding:14px">没有找到匹配结果</div>';
 }
-function permissionModal(evt){
- if(S.permission||el(".modal")){(S.permissionQueue=S.permissionQueue||[]).push(evt);return;}
- S.permission=evt;
- const opts=evt.options||[];
- const details=typeof evt.tool==="object"?JSON.stringify(evt.tool,null,2):String(evt.tool||"");
- const safeOpts=opts.map(o=>'<button class="btn" data-action="permission-select" data-choice="'+esc(o.optionId||"")+'">'+
- esc(o.name||o.optionId||"允许")+'</button>').join("");
- modal(modalHead("Agent 请求操作许可")+
- '<div class="permission-note">'+esc(evt.title||"即将执行操作")+'</div>'+
- '<pre class="context-code" style="max-height:145px;overflow:auto;white-space:pre-wrap">'+esc(details.slice(0,1600))+'</pre>'+
- '<p>确认前可以查看请求的工具操作。拒绝后 Agent 会收到取消结果。</p>'+
- '<div class="modal-actions">'+button("拒绝","permission-deny","","danger")+safeOpts+'</div>',"large",false);
-}
 async function onEvent(_evt){}
 async function action(click){
  const a=click&&click.closest("[data-action]");if(!a)return;
@@ -233,12 +220,6 @@ async function action(click){
   }
   return await go("learning");
  }
- case "permission-select":
-  if(S.permission)await rpc("agent_permission",{id:S.permission.session_id,request_id:S.permission.request_id,option_id:a.dataset.choice});
-  return closeModal();
- case "permission-deny":
-  if(S.permission)await rpc("agent_permission",{id:S.permission.session_id,request_id:S.permission.request_id});
-  return closeModal();
  case "add-project":return await addProject();
  case "project-enter":
   S.treePath=a.dataset.path;S.filePath=null;S.fileDirty=false;await loadTree();return render();
@@ -289,14 +270,14 @@ function initInteractions(){
    if(confirm("「"+title+"」还没有对应的笔记或知识卡，要新建一篇笔记吗？"))await createNote(title);
   });return;}
   const modalBg=e.target.closest("[data-dismiss]");
-  if(modalBg&&e.target===modalBg){if(!S.permission)requestCloseModal();return;}
+  if(modalBg&&e.target===modalBg){requestCloseModal();return;}
   safe(()=>action(e.target));
  });
  document.addEventListener("input",e=>{safe(()=>onInput(e));});
  document.addEventListener("change",e=>{safe(()=>onChange(e));});
  document.addEventListener("keydown",e=>{
   const mod=e.ctrlKey||e.metaKey;
-  if(e.key==="Escape"&&el(".modal-backdrop")&&!S.permission){requestCloseModal();return;}
+  if(e.key==="Escape"&&el(".modal-backdrop")){requestCloseModal();return;}
   if(S.commandOpen&&["ArrowDown","ArrowUp","Enter"].includes(e.key)){
    const items=all("#palette-list .command-item");if(!items.length)return;
    if(e.key==="Enter"){if(e.target.id==="palette-query"){e.preventDefault();items[0].click();}return;}

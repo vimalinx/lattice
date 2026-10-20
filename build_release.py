@@ -5,8 +5,7 @@ R=Path(__file__).resolve().parent
 D=R/'docs';D.mkdir(exist_ok=True)
 E=D/'test-evidence';E.mkdir(exist_ok=True)
 qa=Path('/tmp/lattice-learning-release-v1');gui=json.loads((qa/'result.json').read_text());assert not gui['errors'] and len(gui['checks'])==13
-codex=Path('/tmp/lattice-codex-e2e-5uhjddm6/result.json');live=json.loads(codex.read_text());assert len(live['checks'])==4
-shutil.copy2(qa/'result.json',E/'gui-result.json');shutil.copy2(codex,E/'codex-result.json')
+shutil.copy2(qa/'result.json',E/'gui-result.json')
 for image in qa.glob('*.png'):shutil.copy2(image,E/image.name)
 for name,cmd in [('unit',[sys.executable,'-m','pytest','-q','tests/test_learning_v1.py','tests/test_store.py']),('runtime',[sys.executable,'tests/runtime_smoke_v1.py'])]:
  proc=subprocess.run(cmd,cwd=R,text=True,capture_output=True,timeout=70)
@@ -38,7 +37,6 @@ report='''# Lattice Learning V1 · 实测报告
 - 数据层与原有存储回归：20 项 pytest 测试通过。
 - 运行层：12 项检查通过。其中 7 项执行真实 Jupyter，5 项使用本地 HTTP/SSE 测试服务，不冒充 DeepSeek 真实响应。
 - 原生 Qt WebEngine 界面：13 项操作检查通过，9 张实际窗口截图；不是静态网页效果图。
-- Codex：通过本机登录状态和 ACP 完成真实回复；另完成「真实模型生成课程/知识卡/代码 → 结构化解析 → 明确采纳 → Jupyter 执行得到 42」整条链路。
 - 原有笔记、修订、项目、旧实验、消息和任务的数据行均与升级前备份逐行核对，保留完整。详见 test-evidence/preservation.json。
 
 ## 覆盖内容
@@ -51,7 +49,7 @@ GUI 验证包含快答面板开合、兴趣分支、卡片保存、树与图谱�
 
 ## 尚未验证与边界
 
-没有使用用户的 DeepSeek API Key 调用官方服务；需要在模型连接页填入自己的 Base URL、模型名和 Key。连接测试检查 /models，不等同于真实生成测试。Codex 接入受本机登录、网络与账户可用额度影响。
+没有使用用户的 DeepSeek API Key 调用官方服务；需要在模型连接页填入自己的 Base URL、模型名和 Key。连接测试检查 /models，不等同于真实生成测试。
 
 Notebook 是本机 Python 执行，不是操作系统沙箱。关闭工作台会停止由本工作台启动的内核；重启后保留代码、输出和历史，但运行变量需要重新计算。
 
@@ -64,8 +62,6 @@ Notebook 是本机 Python 执行，不是操作系统沙箱。关闭工作台会
 `python3 tests/runtime_smoke_v1.py`
 
 在可用的 Wayland 桌面环境设置 XDG_RUNTIME_DIR、WAYLAND_DISPLAY、DBUS_SESSION_BUS_ADDRESS 后，使用 `QT_QUICK_BACKEND=software QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu python3 tests/gui_learning_v1.py`。再次测试请指定新的 LATTICE_QA_DIR，避免重复创建测试卡片。
-
-`python3 tests/learning_codex_smoke.py` 会发起真实 Codex 请求。其结果和所有 GUI 数据均写入隔离的临时目录，不写入个人知识库。
 '''
 (D/'TEST_REPORT.md').write_text(report)
 release=R/'releases';release.mkdir(exist_ok=True)
@@ -74,7 +70,7 @@ with zipfile.ZipFile(release/'lattice-learning-v1-source.zip','w',zipfile.ZIP_DE
   if not p.is_file():continue
   rel=p.relative_to(R)
   if any(x in rel.parts for x in ['node_modules','__pycache__','.git','.pytest_cache','releases','test-evidence']):continue
-  if rel.parts[0] not in {'lattice','ui','tests','runtime','docs'} and p.name not in {'main.py','run.py','requirements.txt','requirements-dev.txt','README_LEARNING.md','install_upgrade.py','build_release.py'}:continue
+  if rel.parts[0] not in {'lattice','ui','tests','docs'} and p.name not in {'main.py','run.py','requirements.txt','requirements-dev.txt','README_LEARNING.md','install_upgrade.py','build_release.py'}:continue
   if p.name in {'gui_probe_v1.py'}:continue
   z.write(p,str(rel))
 with zipfile.ZipFile(release/'lattice-learning-v1-validation.zip','w',zipfile.ZIP_DEFLATED) as z:

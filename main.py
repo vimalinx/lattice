@@ -92,7 +92,7 @@ def main():
     app.setDesktopFileName("lattice-studio")
     # Single instance: a second launch asks the running window to raise itself
     # instead of splitting UI state across two processes (one store, one set
-    # of ACP/Jupyter workers). --screenshot bypasses this for QA captures.
+    # of API/Jupyter workers). --screenshot bypasses this for QA captures.
     server=None
     if not args.screenshot:
         probe=QLocalSocket()

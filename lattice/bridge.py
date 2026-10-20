@@ -28,7 +28,6 @@ class Bridge(QObject):
         super().__init__(parent)
         self._init_log()
         self.store = store or Store()
-        self.workers = {}
 
     @staticmethod
     def _init_log():
@@ -113,11 +112,6 @@ class Bridge(QObject):
         if method=="file_open_external":
             path,_=d._safe_path(args["id"],args["path"])
             return QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
-        if method=="agent_permission":
-            w=self.workers.get(args["id"])
-            if w:
-                w.post("permission",request_id=args["request_id"],option_id=args.get("option_id"))
-            return True
         if method=="export":
             folder=self._folder_picker("选择 Markdown 导出目录")
             return d.export_markdown(folder) if folder else None
@@ -174,11 +168,4 @@ class Bridge(QObject):
         return {"count":count}
 
     def shutdown(self):
-        for w in self.workers.values():
-            if w.isRunning():
-                w.post("stop")
-                if not w.wait(1300):
-                    # AgentWorker has its own process-group cleanup in finally.
-                    w.running=False
-                    w.wait(1400)
         self.store.close()
