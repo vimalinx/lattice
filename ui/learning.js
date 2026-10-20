@@ -183,13 +183,16 @@ function notebookView(){
  lbutton(svg("plus",14)+' 文字与观察','nb-add','data-kind="markdown"','ghost')+'</div><p class="notebook-disclaimer">运行会在你本机的 Python 内核中执行代码。每份笔记本独立保留变量；重启内核后，历史输出仍在，变量需重新计算。</p></div></div>';
 }
 const convCache={};
-function conversationHtml(lane){
- const d=ld(),messages=lane==='tutor'?d.tutor_messages:d.flash_messages,key=lk(lt()?.id,lane),stream=L.streams[key]||'';
+const laneWho=lane=>(lane==='tutor'?tutorLabel():flashLabel())+(lane==='tutor'?' · 主讲':' · 快答');
+// Saved messages are cached apart from the live tail, so a streamed chunk only
+// re-renders the reply being written, not the whole conversation.
+function messagesHtml(lane){
+ const d=ld(),messages=lane==='tutor'?d.tutor_messages:d.flash_messages;
  const last=messages?.[messages.length-1];
- const ck=(lt()?.id||'')+'|'+(messages?.length||0)+'|'+(last?.id||'')+'|'+(last?.meta||'')+'|'+stream.length+'|'+(laneBusy(lane)?1:0)+'|'+(L.errors[key]||'')+'|'+tutorLabel()+'|'+flashLabel();
+ const ck=(lt()?.id||'')+'|'+(messages?.length||0)+'|'+(last?.id||'')+'|'+(last?.meta||'')+'|'+tutorLabel()+'|'+flashLabel();
  if(convCache[lane]?.key===ck)return convCache[lane].html;
- const who=(lane==='tutor'?tutorLabel():flashLabel())+(lane==='tutor'?' · 主讲':' · 快答');
- let html=(messages||[]).map(m=>{
+ const who=laneWho(lane);
+ const html=(messages||[]).map(m=>{
   let meta={};try{meta=JSON.parse(m.meta||'{}');}catch(_){}
   const incomplete=m.role==='assistant'&&meta.stop_reason&&meta.stop_reason!=='end_turn';
   return '<div class="learn-message '+(m.role==='user'?'from-user':'from-ai')+'"><div class="learn-message-meta"><span>'+esc(m.role==='user'?'你':who)+'</span><time>'+esc(fmtDate(m.created_at,true))+'</time></div>'+
@@ -199,10 +202,15 @@ function conversationHtml(lane){
   (lane==='tutor'&&/```(?:python|py)\s*\n/.test(m.content)?lbutton(svg("flask",12)+' 加入实验','l-message-code','data-id="'+esc(m.id)+'"','ghost sm'):'')+
   (lane==='flash'?lbutton('交给主讲深入讲','l-escalate','data-id="'+esc(m.id)+'"','ghost sm'):'')+'</div>':'')+'</div>';
  }).join('');
- if(stream)html+='<div class="learn-message from-ai streaming"><div class="learn-message-meta"><span>'+esc(who)+'</span><span>正在回答</span></div><div class="markdown">'+wrapCodeBlocks(replyHtml(stream))+'</div></div>';
+ convCache[lane]={key:ck,html};
+ return html;
+}
+function conversationHtml(lane){
+ const key=lk(lt()?.id,lane),stream=L.streams[key]||'';
+ let html=messagesHtml(lane);
+ if(stream)html+='<div class="learn-message from-ai streaming"><div class="learn-message-meta"><span>'+esc(laneWho(lane))+'</span><span>正在回答</span></div><div class="markdown">'+wrapCodeBlocks(replyHtml(stream))+'</div></div>';
  else if(laneBusy(lane))html+='<div class="learn-thinking"><span></span><span></span><span></span><b>'+esc(lane==='tutor'?'正在组织这个问题的下一步…':'正在解释…')+'</b></div>';
  if(L.errors[key])html+='<div class="learn-inline-error">'+esc(L.errors[key])+'</div>';
- convCache[lane]={key:ck,html};
  return html;
 }
 function tutorChatView(){
@@ -348,6 +356,20 @@ function showSelPop(rect){
  let x=Math.min(Math.max(8,rect.left+rect.width/2-w/2),window.innerWidth-w-8);
  let y=rect.top-h-8;if(y<8)y=rect.bottom+8;
  p.style.left=x+'px';p.style.top=Math.min(y,window.innerHeight-h-8)+'px';
+}
+// Chunks arrive far faster than anyone reads; coalesce them to a few redraws
+// a second and rewrite only the streaming bubble when it is already on screen.
+const streamFrames={};
+function patchStream(lane){
+ if(streamFrames[lane])return;
+ streamFrames[lane]=setTimeout(()=>requestAnimationFrame(()=>{
+  delete streamFrames[lane];
+  const b=el('#learn-chat-'+lane),live=b?.querySelector('.streaming .markdown');
+  if(!live)return patchChat(lane);
+  const stick=b.scrollHeight-b.scrollTop-b.clientHeight<130;
+  live.innerHTML=wrapCodeBlocks(replyHtml(L.streams[lk(lt()?.id,lane)]||''));
+  if(stick)b.scrollTop=b.scrollHeight;
+ }),80);
 }
 function patchChat(lane){const b=el('#learn-chat-'+lane);if(!b)return;const stick=b.scrollHeight-b.scrollTop-b.clientHeight<130;b.innerHTML=conversationHtml(lane);if(stick)b.scrollTop=b.scrollHeight;}
 function findCell(id){return ld()?.notebooks?.flatMap(n=>n.cells).find(c=>c.id===id);}
@@ -728,8 +750,8 @@ onEvent=async function(evt){
   if(evt.kind==='connection_test'){L.testResult=(evt.ok?'✓ ':'连接失败：')+evt.message;const b=el('#connection-test-result');if(b)b.textContent=L.testResult;toast(L.testResult,evt.ok?'info':'error');return;}
   const key=lk(evt.topic_id,evt.lane),same=evt.topic_id===lt()?.id;
   if(evt.kind==='permission'){if(S.permission)L.permissions.push(evt);else permissionModal(evt);return;}
-  if(evt.kind==='chunk'){L.streams[key]=(L.streams[key]||'')+evt.text;if(same)patchChat(evt.lane);return;}
-  if(evt.kind==='error'){L.localBusy.delete(key);L.errors[key]=evt.message;if(same)patchChat(evt.lane);L.testResult=evt.message;const b=el('#connection-test-result');if(b)b.textContent=evt.message;return;}
+  if(evt.kind==='chunk'){L.streams[key]=(L.streams[key]||'')+evt.text;if(same)patchStream(evt.lane);return;}
+  if(evt.kind==='error'){L.localBusy.delete(key);L.errors[key]=evt.message||'请求失败，没有收到错误说明。请重试。';if(same)patchChat(evt.lane);L.testResult=evt.message;const b=el('#connection-test-result');if(b)b.textContent=evt.message;return;}
   if(evt.kind==='ready'){ld().runtime.agents[evt.session_id]='ready';L.testResult='✓ ACP 已完成握手并建立真实会话。';const b=el('#connection-test-result');if(b)b.textContent=L.testResult;return;}
   if(evt.kind==='status'){ld().runtime.agents[evt.session_id]=evt.state;if(evt.state==='offline')L.localBusy.delete(key);const chip=el('.learn-agent-chip');if(chip&&evt.lane==='tutor'&&same)chip.innerHTML='<i></i> '+esc(tutorLabel())+' · '+esc(stateName[evt.state]||evt.state);return;}
   if(evt.kind==='tool'&&same){const b=el('#learn-chat-tutor');if(b)b.insertAdjacentHTML('beforeend','<div class="learning-tool-event">'+svg('terminal',12)+' '+esc(evt.title)+' · '+esc(evt.status)+'</div>');return;}

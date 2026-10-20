@@ -19,8 +19,13 @@ if os.name == 'posix':
             os.environ.setdefault('DBUS_SESSION_BUS_ADDRESS', 'unix:path='+str(runtime/'bus'))
     if os.environ.get('WAYLAND_DISPLAY'):
         os.environ.setdefault('QT_QPA_PLATFORM','wayland')
-# 2D editing does not require the discrete GPU. Keep explicit user overrides.
-os.environ.setdefault('QT_QUICK_BACKEND','software')
-os.environ.setdefault('QTWEBENGINE_CHROMIUM_FLAGS','--disable-gpu')
+# Software rendering repaints the whole window on the CPU and makes typing lag,
+# so render on the integrated GPU. Pin GL/EGL to Mesa so the web engine never
+# loads the NVIDIA vendor library and wakes a compute-only discrete GPU.
+# Explicit user overrides are kept.
+mesa=Path('/usr/share/glvnd/egl_vendor.d/50_mesa.json')
+if mesa.exists():
+    os.environ.setdefault('__EGL_VENDOR_LIBRARY_FILENAMES',str(mesa))
+    os.environ.setdefault('__GLX_VENDOR_LIBRARY_NAME','mesa')
 os.chdir(ROOT)
 runpy.run_path(str(ROOT/'main.py'),run_name='__main__')

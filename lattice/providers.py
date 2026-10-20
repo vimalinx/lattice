@@ -193,6 +193,14 @@ def endpoint(base, suffix):
 
 
 def clean_error(message, key=""):
+    if isinstance(message, BaseException):
+        # httpx transport errors often stringify to nothing; never show a blank error.
+        detail = str(message) or type(message).__name__
+        if isinstance(message, httpx.TimeoutException):
+            detail = "连接 API 超时（" + detail + "），请稍后重试或调大超时时间"
+        elif isinstance(message, httpx.TransportError):
+            detail = "连接 API 时网络中断（" + detail + "），请重试"
+        message = detail
     message = str(message)
     if key:
         message = message.replace(key, "[REDACTED]")
