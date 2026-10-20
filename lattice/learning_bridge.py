@@ -50,6 +50,7 @@ class LearningBridge(Bridge):
         self.workspace = {}
         self.turn_actions = {}
         self.turn_focus = {}
+        self.turn_carry = {}
         self.after_turn = {}
         self.deferred = []
         self.tool_server, self.tool_token = None, secrets.token_hex(16)
@@ -500,9 +501,12 @@ class LearningBridge(Bridge):
         if focus and focus != topic and lane == "tutor":
             # The turn that created or chose another topic belongs to that topic's thread.
             target = self.learning.threads(focus, self.providers.read()["tutor_agent"])["tutor_session"]
-            rows = self.store.db.execute("SELECT id FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 2", (ident,)).fetchall()
-            self.store.db.execute(f"UPDATE messages SET session_id=? WHERE id IN ({','.join('?' * len(rows))})", (target, *[r[0] for r in rows]))
+            # This turn's question and answer, plus the earlier messages the tutor chose to carry.
+            ids = [r[0] for r in self.store.db.execute("SELECT id FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 2", (ident,))]
+            ids += self.turn_carry.pop(ident, [])
+            self.store.db.execute(f"UPDATE messages SET session_id=? WHERE session_id=? AND id IN ({','.join('?' * len(ids))})", (target, ident, *ids))
             self.store.db.commit()
+        self.turn_carry.pop(ident, None)
         if focus:
             self.learning.focus(focus)
             evt["focus"] = focus

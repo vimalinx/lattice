@@ -98,7 +98,7 @@ function learningHeader(){
  '<button class="icon-btn sq" data-action="l-topic-branch" title="开一条兴趣分支">'+svg("git",14)+'</button>'+
  (t.parent_id?'<button class="icon-btn sq" data-action="l-topic-focus" data-id="'+esc(t.parent_id)+'" title="回到上级主线">'+svg("arrowup",14)+'</button>':'')+
  '<button class="icon-btn sq" data-action="l-topic-edit" title="编辑主题">'+svg("edit",14)+'</button>'+
- '<span class="topic-q" title="'+esc(t.question||'')+'">'+esc(t.question||'今天你想弄明白什么？')+'</span></div>'
+ '<span class="topic-q" title="'+esc(t.question||'')+'">'+esc(t.question||(isChat()?'想聊什么都行；需要时让 AI 建一个主题':'今天你想弄明白什么？'))+'</span></div>'
  :'<div class="topic-bar"><button class="btn primary sm" data-action="l-topic-new">'+svg("plus",14)+' 开始一个探索主题</button></div>';
  return '<header class="topbar learning-topbar"><h1 class="learning-page-title">'+esc(PAGES[S.view])+'</h1>'+topicBar+
  '<div class="learn-header-tools">'+'<span class="learn-agent-chip '+(laneBusy("tutor")?'working':'')+'"><i></i> '+esc(tutorLabel())+' · '+esc(laneBusy("tutor")?'正在思考':stateName[laneStatus("tutor")]||laneStatus("tutor"))+'</span>'+
@@ -107,6 +107,7 @@ function learningHeader(){
  lbutton(svg("settings",15),'nav','data-view="settings" title="设置"','ghost sm')+'</div></header>';
 }
 function d_topics(){return ld()?.topics||[];}
+function isChat(t=lt()){return !!t&&t.id===ld()?.chat_topic;}
 function tutorLabel(){return ld()?.providers?.tutor_label||'主讲';}
 function flashLabel(){return ld()?.providers?.flash_label||'快答';}
 /* A card never reviewed comes due one day after it was saved. */
@@ -274,7 +275,7 @@ function tutorChatView(){
  const messages=ld()?.tutor_messages||[];
  return '<div class="tutor-dialogue"><div class="tutor-dialogue-tools"><span>'+svg("bot",15)+' 主讲负责：讲清机制、安排实验、串联知识</span>'+(ld()?.providers?.tutor_agent==='api'?'':lbutton(svg("link",14)+' 连接 ACP','l-connect','','ghost sm'))+
  lbutton(svg("plus",14)+' 新会话','l-tutor-new','','ghost sm')+lbutton(svg("book",14)+' 提炼知识卡','l-tutor-task','data-task="capture"','ghost sm')+'</div><div class="learn-chat-scroll" id="learn-chat-tutor" data-scroll="chat-tutor" data-scroll-ns="'+esc(lt()?.id||'')+'">'+
- (messages.length||laneBusy('tutor')?conversationHtml('tutor'):'<div class="tutor-welcome"><div class="learn-empty-icon">'+svg("spark",30)+'</div><h2>不是从目录开始，<br>是从你想知道的事开始。</h2><p>'+esc(tutorLabel())+' 会参考当前课程、实验输出、快答讨论和知识卡。你不需要每次重新说明自己学到了哪里。</p><div>'+lbutton('为当前兴趣规划起点','l-tutor-task','data-task="plan"','primary')+'</div></div>')+
+ (messages.length||laneBusy('tutor')?conversationHtml('tutor'):isChat()?'<div class="tutor-welcome"><div class="learn-empty-icon">'+svg("spark",30)+'</div><h2>想到什么，直接说。</h2><p>'+esc(tutorLabel())+' 会跟着你的话题走，需要时去查你以前学过的内容。想把某段讨论单独整理成一个主题时，直接告诉它。</p></div>':'<div class="tutor-welcome"><div class="learn-empty-icon">'+svg("spark",30)+'</div><h2>不是从目录开始，<br>是从你想知道的事开始。</h2><p>'+esc(tutorLabel())+' 会参考当前课程、实验输出、快答讨论和知识卡。你不需要每次重新说明自己学到了哪里。</p><div>'+lbutton('为当前兴趣规划起点','l-tutor-task','data-task="plan"','primary')+'</div></div>')+
  '</div>'+composer('tutor')+'</div>';
 }
 function composer(lane){
@@ -483,7 +484,7 @@ function topicModal(branch=false,edit=false){
  '<label class="learn-form-label">我真正想知道的问题<textarea id="topic-question" class="field" rows="3">'+esc(t?.question||'')+'</textarea></label>'+
  '<label class="learn-form-label">所属主线<select id="topic-parent" class="field">'+topicOptions(branch?lt().id:t?.parent_id,'独立的探索主线')+'</select></label>'+
  (edit?'<label class="learn-form-label">状态<select id="topic-state" class="field">'+[['active','正在探索'],['parked','暂时搁置'],['completed','阶段完成']].map(([v,n])=>'<option value="'+esc(v)+'" '+(t.state===v?'selected':'')+'>'+n+'</option>').join('')+'</select></label>':'')+
- '<div class="modal-actions">'+lbutton('取消','modal-close','','ghost')+(edit?lbutton('删除这条探索','l-topic-delete','','ghost sm'):'')+lbutton(edit?'保存':'开始探索','l-topic-confirm',edit?'data-id="'+esc(t.id)+'"':'','primary')+'</div>');
+ '<div class="modal-actions">'+lbutton('取消','modal-close','','ghost')+(edit&&!isChat(t)?lbutton('删除这条探索','l-topic-delete','','ghost sm'):'')+lbutton(edit?'保存':'开始探索','l-topic-confirm',edit?'data-id="'+esc(t.id)+'"':'','primary')+'</div>');
 }
 function lessonModal(lesson=null){
  L.editingLesson=lesson;

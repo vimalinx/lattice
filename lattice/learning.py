@@ -15,6 +15,7 @@ from .store import words
 
 VERSION = 1
 SCHEMA_VERSION = 1
+CHAT_KEY = "chat_topic"
 STAGES = {"suggested", "seen", "explained", "applied"}
 RELATIONS = {"prerequisite", "part_of", "related", "applies_to", "contrasts"}
 TABLES = ("learn_settings", "learn_topics", "learn_lessons", "learn_cards", "learn_relations",
@@ -130,6 +131,7 @@ class LearningStore:
         self._migrate()
         if seed and not self.db.execute("SELECT 1 FROM learn_topics LIMIT 1").fetchone():
             self.seed()
+        self.chat_topic()
 
     def _migrate(self):
         """Track the schema in PRAGMA user_version. When the schema evolves, add
@@ -206,6 +208,17 @@ class LearningStore:
                parent, state, old.get("created_at", now()), now()))
             self.event("更新探索主题" if old else "开始新的探索", data.get("title", old.get("title", "")), ident)
         return self.one("learn_topics", ident)
+
+    def chat_topic(self):
+        """The always-present free conversation; topics are made from it only when the learner asks."""
+        ident = self.setting(CHAT_KEY)
+        if ident and self.db.execute("SELECT 1 FROM learn_topics WHERE id=?", (ident,)).fetchone():
+            return ident
+        ident = self.topic_save({"title": "随便聊", "question": ""})["id"]
+        self.set_setting(CHAT_KEY, ident)
+        if not self.setting("active_topic"):
+            self.focus(ident)
+        return ident
 
     def focus(self, ident):
         self.one("learn_topics", ident)
@@ -702,14 +715,15 @@ class LearningStore:
         return {"weak_points": weak, "recent_strengths": strong, "last_practice": dict(last) if last else None}
 
     def snapshot(self, topic_id=None):
-        topics = self.rows("SELECT * FROM learn_topics ORDER BY created_at")
+        chat = self.chat_topic()
+        topics = sorted(self.rows("SELECT * FROM learn_topics ORDER BY created_at"), key=lambda t: t["id"] != chat)
         topic_id = topic_id or self.setting("active_topic") or (topics[0]["id"] if topics else None)
         # A stored active_topic may point at a deleted topic; fall back instead
         # of letting one() fail the whole bootstrap.
         if topic_id and not any(t["id"] == topic_id for t in topics):
             topic_id = topics[0]["id"] if topics else None
         cards = [self.card(r["id"]) for r in self.rows("SELECT id FROM learn_cards ORDER BY updated_at DESC")]
-        result = {"version": VERSION, "topics": topics, "active_topic": topic_id, "cards": cards,
+        result = {"version": VERSION, "topics": topics, "active_topic": topic_id, "chat_topic": chat, "cards": cards,
                   "all_lessons": self.rows("SELECT * FROM learn_lessons ORDER BY topic_id, position"),
                   "all_notebooks": self.rows("SELECT id,title,topic_id FROM learn_notebooks ORDER BY updated_at DESC"),
                   "relations": self.rows("SELECT * FROM learn_relations ORDER BY created_at"),
@@ -807,7 +821,6 @@ class LearningStore:
 
     def seed(self):
         topic = self.topic_save({"title": "从 Python 到会学习的小模型", "question": "一个程序，怎样从数据里逐渐改变自己的判断？"})
-        self.focus(topic["id"])
         self.lesson_save({"topic_id": topic["id"], "title": "让一个数字，根据新见到的样本调整", "objective": "先观察调整方向，再解释每一行代码。", "state": "current",
             "body": "# 先看一个会改变的判断\n\n假设我们用一个数字 `p` 表示对下一次结果为 1 的估计。开始时，先取 `p = 0.5`。\n\n当你看到一个新的样本是 1，你希望这个估计往上调一点；看到 0，就往下调一点。问题来了：**一次该调多少？**\n\n先到「实验笔记」运行前两个单元格，把 `y` 从 1 改成 0，再运行第二格，看看结果向哪里移动。暂时不必记住定义。\n\n接着试着改 `eta`：它越大，新的样本对判断的影响就越明显。先试出这种感觉，再用自己的话描述。\n\n你可以选中一行代码，让右边的快答助手解释语法；需要继续推导时，再请 Codex 接着讲。\n\n> 这是内置的可编辑起点，不是 AI 已经为你生成的课程，也不代表你已经学过。"}, origin="builtin")
         nb = self.notebook_create(topic["id"], "实验 001 · 一个数字怎样学习")

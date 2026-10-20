@@ -189,7 +189,7 @@ def conversation(ctx, lane, topic_id=None, practice_id=None, limit=12):
     else:
         session = l.threads(topic_id or ctx.topic_id)[lane + "_session"]
     rows = ctx.store.messages(session)[-max(1, min(int(limit), 40)):]
-    return [{"role": m["role"], "content": m["content"][:8000], "at": m["created_at"]} for m in rows]
+    return [{"id": m["id"], "role": m["role"], "content": m["content"][:8000], "at": m["created_at"]} for m in rows]
 
 
 @tool("recent_changes", ROLES, "最近发生的事：学习者和各个 AI 做过的修改、运行、保存、练习和转交，最新的在前。",
@@ -231,16 +231,17 @@ def read_file(ctx, project_id, path):
 
 # ---- changing things ---------------------------------------------------------
 
-@tool("create_topic", {"tutor"}, "新建一个学习主题；parent_id 给出时作为那条主线下的兴趣分支。建好后，这一轮结束时界面会切到它，这轮对话也会归到它下面。",
-      {"title": S, "question": S, "parent_id": S}, ["title", "question"])
-def create_topic(ctx, title, question, parent_id=None):
+@tool("create_topic", {"tutor"}, "只在学习者要求时新建一个学习主题；parent_id 给出时作为那条主线下的兴趣分支。这一轮结束时界面会切到它，这一轮对话会归到它下面。carry_ids 是要一起带过去的更早消息的 id（先用 conversation 看清哪些问答属于这个主题，提问和回答都要带上；别的话题的消息留在原处）。",
+      {"title": S, "question": S, "parent_id": S, "carry_ids": {"type": "array", "items": {"type": "integer"}}}, ["title", "question"])
+def create_topic(ctx, title, question, parent_id=None, carry_ids=()):
     t = ctx.l.topic_save({"title": title, "question": question, "parent_id": parent_id or None})
     ctx.bridge.turn_focus[ctx.session_id] = t["id"]
+    ctx.bridge.turn_carry[ctx.session_id] = [int(i) for i in carry_ids][:200]
     ctx.act(("开了分支" if parent_id else "新建了主题") + f"「{t['title']}」", {"op": "delete_topic", "id": t["id"]}, "topic:" + t["id"])
     return _topic_brief(ctx.l, t)
 
 
-@tool("focus_topic", {"tutor"}, "把焦点切到另一个已有主题。这一轮结束时界面会切过去，这轮对话也会归到它下面。", {"topic_id": S}, ["topic_id"])
+@tool("focus_topic", {"tutor"}, "学习者要求回到另一个已有主题时，把焦点切过去。这一轮结束时界面会切过去，这一轮对话也会归到它下面。", {"topic_id": S}, ["topic_id"])
 def focus_topic(ctx, topic_id):
     t = ctx.l.one("learn_topics", topic_id)
     ctx.bridge.turn_focus[ctx.session_id] = topic_id

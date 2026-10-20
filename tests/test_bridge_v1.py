@@ -47,7 +47,8 @@ def test_snapshot_shape_is_stable_without_topics(tmp_path):
     snap = l.snapshot()
     for key in ("lessons", "notebooks", "threads", "tutor_messages", "flash_messages", "proposals"):
         assert key in snap
-    assert snap["active_topic"] is None
+    # Deleting every topic still leaves the free conversation to land on.
+    assert snap["active_topic"] == l.chat_topic() and snap["topics"][0]["title"] == "随便聊"
     s.close()
 
 
@@ -59,7 +60,8 @@ def test_snapshot_stale_active_topic_falls_back(model):
     model.db.commit()
     model.set_setting("active_topic", tid)
     snap = model.snapshot()
-    assert snap["active_topic"] is None
+    # The free conversation always exists, so a stale focus falls back to it.
+    assert snap["active_topic"] == model.chat_topic()
     assert snap["lessons"] == []
 
 
