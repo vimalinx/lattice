@@ -116,7 +116,7 @@ async function showRevision(id){
 }
 const PALETTE_COMMANDS=[
  ["新建知识笔记","new-note","document"],["新建知识卡","l-card-new","tag"],
- ["新建课程","l-lesson-new","book"],["新探索主题","l-topic-new","plus"],
+ ["新建课程","l-lesson-new","book"],
  ["打开知识网络","nav","git",'data-view="graph"'],["设置与数据","nav","settings",'data-view="settings"'],
  ["导入 Markdown","import","upload"],["导出 Markdown","export","download"],["导出学习档案","l-export","download"]];
 function commandPalette(){
@@ -308,7 +308,7 @@ function initInteractions(){
   if(el(".modal"))return;
   if(mod&&e.key.toLowerCase()==="k"){e.preventDefault();commandPalette();return;}
   if(mod&&e.key.toLowerCase()==="n"){e.preventDefault();
-   safe(()=>(S.view==="notes"||typeof topicModal!=="function")?createNote():topicModal());return;}
+   safe(()=>createNote());return;}
   if(mod&&e.key.toLowerCase()==="s"){
    e.preventDefault();safe(()=>{
    if(typeof LEARNING_PAGES!=="undefined"&&LEARNING_PAGES.has(S.view))return saveFocused();

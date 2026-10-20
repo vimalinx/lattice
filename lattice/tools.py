@@ -231,7 +231,7 @@ def read_file(ctx, project_id, path):
 
 # ---- changing things ---------------------------------------------------------
 
-@tool("create_topic", {"tutor"}, "只在学习者要求时新建一个学习主题；parent_id 给出时作为那条主线下的兴趣分支。这一轮结束时界面会切到它，这一轮对话会归到它下面。carry_ids 是要一起带过去的更早消息的 id（先用 conversation 看清哪些问答属于这个主题，提问和回答都要带上；别的话题的消息留在原处）。",
+@tool("create_topic", {"tutor"}, "新建一个学习主题；parent_id 给出时作为那条主线下的兴趣分支。这一轮结束时界面会切到它，这一轮对话会归到它下面。carry_ids 是要一起带过去的更早消息的 id（先用 conversation 看清哪些问答属于这个主题，提问和回答都要带上；别的话题的消息留在原处）。",
       {"title": S, "question": S, "parent_id": S, "carry_ids": {"type": "array", "items": {"type": "integer"}}}, ["title", "question"])
 def create_topic(ctx, title, question, parent_id=None, carry_ids=()):
     t = ctx.l.topic_save({"title": title, "question": question, "parent_id": parent_id or None})
@@ -241,7 +241,7 @@ def create_topic(ctx, title, question, parent_id=None, carry_ids=()):
     return _topic_brief(ctx.l, t)
 
 
-@tool("focus_topic", {"tutor"}, "学习者要求回到另一个已有主题时，把焦点切过去。这一轮结束时界面会切过去，这一轮对话也会归到它下面。", {"topic_id": S}, ["topic_id"])
+@tool("focus_topic", {"tutor"}, "把焦点切到另一个已有主题。这一轮结束时界面会切过去，这一轮对话也会归到它下面。", {"topic_id": S}, ["topic_id"])
 def focus_topic(ctx, topic_id):
     t = ctx.l.one("learn_topics", topic_id)
     ctx.bridge.turn_focus[ctx.session_id] = topic_id

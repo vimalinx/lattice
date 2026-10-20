@@ -16,7 +16,7 @@
 .learn-header-tools{display:flex;align-items:center;gap:8px;flex-shrink:1;min-width:0;overflow:hidden}
 .learn-header-tools .ws-toggle{flex-shrink:0}
 .topic-bar{display:flex;align-items:center;gap:6px;min-width:0;flex:1}
-.topic-select{max-width:220px;min-width:80px;border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 8px;font-size:11.5px;color:var(--text);text-overflow:ellipsis}
+.topic-name{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:320px}.topic-name small{font-weight:400;color:var(--subtle);font-size:11px}
 .icon-btn.sq{width:30px;min-width:30px;height:30px;padding:0}
 .topic-q{flex:1;min-width:0;font-size:11px;color:var(--subtle);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:4px}
 .learn-workspace,.knowledge-workspace{height:100%;display:flex;flex-direction:column;min-height:0;min-width:0}
@@ -212,7 +212,7 @@
 /* A reading-width toggle for tiled windows; the answer stays in the shared session. */
 @media(min-width:1750px){.lesson-reading{padding-left:70px;padding-right:70px}}
 @media(max-width:1180px){.topic-q{display:none}.tab-context{max-width:150px}.learn-title-row h1{font-size:19px}.knowledge-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.connection-grid{grid-template-columns:1fr}.lesson-reading{padding:24px 26px 34px}}
-@media(max-width:980px){.learn-header-tools .ws-toggle{padding:0 7px}.learn-header-tools .ws-toggle span{display:none}.learn-header-tools .learn-agent-chip{display:none}.topic-select{max-width:150px}}
+@media(max-width:980px){.learn-header-tools .ws-toggle{padding:0 7px}.learn-header-tools .ws-toggle span{display:none}.learn-header-tools .learn-agent-chip{display:none}.topic-name{max-width:150px}}
 @media(max-height:760px){.lesson-reading{padding-top:20px}.knowledge-heading{padding-top:14px}.flash-welcome{padding-top:18px}}
 @media(prefers-reduced-motion:reduce){.learn-agent-chip i,.learn-thinking>span,.toc-drawer{animation:none}.knowledge-card{transition:none}}
 

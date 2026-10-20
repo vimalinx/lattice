@@ -92,14 +92,10 @@ function replyHtml(body){return markdown(cleanReply(body));}
 
 function learningHeader(){
  const t=lt();
- const topicBar=t?'<div class="topic-bar">'+
- '<select id="learn-topic-select" aria-label="切换学习主题" class="topic-select">'+d_topics().map(x=>'<option value="'+esc(x.id)+'" '+(x.id===t.id?'selected':'')+'>'+esc((x.parent_id?'↳ ':'')+x.title)+'</option>').join('')+'</select>'+
- '<button class="icon-btn sq" data-action="l-topic-new" title="新探索主题">'+svg("plus",14)+'</button>'+
- '<button class="icon-btn sq" data-action="l-topic-branch" title="开一条兴趣分支">'+svg("git",14)+'</button>'+
- (t.parent_id?'<button class="icon-btn sq" data-action="l-topic-focus" data-id="'+esc(t.parent_id)+'" title="回到上级主线">'+svg("arrowup",14)+'</button>':'')+
- '<button class="icon-btn sq" data-action="l-topic-edit" title="编辑主题">'+svg("edit",14)+'</button>'+
- '<span class="topic-q" title="'+esc(t.question||'')+'">'+esc(t.question||(isChat()?'想聊什么都行；需要时让 AI 建一个主题':'今天你想弄明白什么？'))+'</span></div>'
- :'<div class="topic-bar"><button class="btn primary sm" data-action="l-topic-new">'+svg("plus",14)+' 开始一个探索主题</button></div>';
+ // Topics are made and switched by talking to the tutor; the header only says where you are.
+ const parent=t&&t.parent_id?d_topics().find(x=>x.id===t.parent_id):null;
+ const topicBar='<div class="topic-bar">'+(t?'<span class="topic-name" title="'+esc(t.question||'')+'">'+(parent?'<small>'+esc(parent.title)+' ›</small> ':'')+esc(t.title)+'</span>'+
+ (t.question?'<span class="topic-q" title="'+esc(t.question)+'">'+esc(t.question)+'</span>':''):'')+'</div>';
  return '<header class="topbar learning-topbar"><h1 class="learning-page-title">'+esc(PAGES[S.view])+'</h1>'+topicBar+
  '<div class="learn-header-tools">'+'<span class="learn-agent-chip '+(laneBusy("tutor")?'working':'')+'"><i></i> '+esc(tutorLabel())+' · '+esc(laneBusy("tutor")?'正在思考':stateName[laneStatus("tutor")]||laneStatus("tutor"))+'</span>'+
  lbutton(svg("download",15),'l-export','title="导出完整学习档案"','ghost sm')+
@@ -477,15 +473,6 @@ async function sendLearning(lane,message=null,task=''){
   await openContent({tutor:'dialogue',flash:'flash',practice:'practice'}[lane]);
  }catch(e){L.localBusy.delete(key);L.errors[key]=e.message;if(message==null)L.inputs[lane]=value;render();throw e;}
 }
-function topicModal(branch=false,edit=false){
- const t=edit?lt():null;
- modal(modalHead(edit?'调整当前探索':'从一个好奇开始')+'<p>给问题留出空间。可以独立探索，也可以作为现有主线的一条分支。</p>'+
- '<label class="learn-form-label">主题<input id="topic-title" class="field" value="'+esc(t?.title||'')+'" placeholder="例如：为什么概率可以用来生成一句话？"/></label>'+
- '<label class="learn-form-label">我真正想知道的问题<textarea id="topic-question" class="field" rows="3">'+esc(t?.question||'')+'</textarea></label>'+
- '<label class="learn-form-label">所属主线<select id="topic-parent" class="field">'+topicOptions(branch?lt().id:t?.parent_id,'独立的探索主线')+'</select></label>'+
- (edit?'<label class="learn-form-label">状态<select id="topic-state" class="field">'+[['active','正在探索'],['parked','暂时搁置'],['completed','阶段完成']].map(([v,n])=>'<option value="'+esc(v)+'" '+(t.state===v?'selected':'')+'>'+n+'</option>').join('')+'</select></label>':'')+
- '<div class="modal-actions">'+lbutton('取消','modal-close','','ghost')+(edit&&!isChat(t)?lbutton('删除这条探索','l-topic-delete','','ghost sm'):'')+lbutton(edit?'保存':'开始探索','l-topic-confirm',edit?'data-id="'+esc(t.id)+'"':'','primary')+'</div>');
-}
 function lessonModal(lesson=null){
  L.editingLesson=lesson;
  modal(modalHead(lesson?'编辑课程':'自己写一节课')+'<label class="learn-form-label">标题<input class="field" id="lesson-title" value="'+esc(lesson?.title||'')+'"/></label>'+
@@ -622,21 +609,7 @@ action=async function(target){
  case 'l-content-toggle':return toggleContent(a.dataset.kind,id);
  case 'l-content-collapse':return collapseContent();
   case 'l-ask-tutor':{const sel=L.selection;hideSelPop();return sendLearning('tutor',sel?'请结合当前学习主题，解释我选中的内容。':null);}
- case 'l-topic-new':return topicModal();
- case 'l-topic-branch':return topicModal(true);
- case 'l-topic-edit':return topicModal(false,true);
- case 'l-topic-confirm':{
-  const topic={title:el('#topic-title').value,question:el('#topic-question').value,parent_id:el('#topic-parent').value||null};if(id){topic.id=id;topic.state=el('#topic-state').value;}
-  const result=await rpc('learn_topic_save',{topic});closeModal();return focusTopic(result.id);
- }
  case 'l-topic-focus':return focusTopic(id);
- case 'l-topic-delete':{
-  if(!confirm('删除这条探索主线？知识卡会保留（改为不绑定主题），兴趣分支会并入上一级主线，课程、实验笔记与对话线程会一并删除。'))return;
-  const doomed=new Set((ld()?.notebooks||[]).flatMap(n=>n.cells.map(c=>c.id)));
-  for(const cid of [...L.drafts.keys()])if(doomed.has(cid)){clearTimeout(L.timers.get(cid));L.timers.delete(cid);L.drafts.delete(cid);}
-  const st=await rpc('learn_topic_delete',{id:lt().id});closeModal();adoptLearning(st);
-  L.lessonId=null;L.notebookId=null;return render();
- }
  case 'l-lesson-open':return openContent('lesson',id);
  case 'l-lesson-new':return lessonModal();
  case 'l-lesson-edit':{
@@ -849,7 +822,6 @@ onInput=async function(e){
 const originalOnChange=onChange;
 onChange=async function(e){
  const t=e.target;
- if(t.id==='learn-topic-select')return focusTopic(t.value);
  if(t.id==='cfg-tutor-agent'){all('.agent-fields').forEach(d=>d.hidden=d.dataset.agent==='acp'?t.value==='api':d.dataset.agent!==t.value);return;}
  if(['cfg-flash-api','cfg-tutor-api','cfg-practice-api'].includes(t.id)){const m=ld().providers.apis.find(x=>x.id===t.value)?.default_model;if(m)el('#cfg-'+t.dataset.lane+'-model').value=m;return;}
  if(t.id==='notebook-select'){await flushCells();L.notebookId=t.value;return render();}
