@@ -66,7 +66,8 @@ function topicsSection(){
 }
 function cardsSection(){
  const q=Side.cardQuery.trim().toLowerCase(),cards=(S.data.cards||[]).filter(c=>(!Side.stage||c.stage===Side.stage)&&(!q||c.title.toLowerCase().includes(q)));
- const due=new Set(((S.data.cards||[]).filter(c=>c.stage!=="suggested"&&(c.due?new Date(c.due)<=new Date():Date.now()-new Date(c.created)>=864e5))).map(c=>c.id));
+ // Whether a card is due is decided once, by the backend, for the UI and the agents alike.
+ const due=new Set((S.data.cards||[]).filter(c=>c.due_now).map(c=>c.id));
  return {tools:iconButton("plus","new-card","新知识卡"),
   body:(S.data.due?'<button class="side-banner" data-action="open-review">'+svg("history",13)+' '+S.data.due+' 张卡到期 · 开始回顾</button>':"")+
   '<input class="side-input" data-side-input="cards" placeholder="筛选卡片…" value="'+esc(Side.cardQuery)+'"/>'+

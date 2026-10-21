@@ -174,12 +174,27 @@ class Bridge(QObject):
                 "sandbox": {"ok": self.sandbox.available(), "why": self.sandbox.why_not()}, "migrated": self.lattice.migrated,
                 "problems": self.lattice.index.problems[:20]}
 
+    def catalog(self, kind, **filters):
+        """Everything of one kind, whatever panels are open. Vault material comes from the model; the rest is this machine's."""
+        if kind == "projects":
+            return self.lattice.projects()
+        if kind == "envs":
+            return [{"name": n, "definition": self.envs.definition_rel(n), "packages": self.envs.wanted(n), "ready": self.envs.ready(n)} for n in self.envs.names()]
+        if kind == "layouts":
+            ui = self.config.read()["ui"]
+            return [{"name": n, "default": n == ui.get("default_preset")} for n in (ui.get("presets") or {})]
+        return self.lattice.catalog(kind, **filters)
+
+    def rpc_list(self, kind, **filters):
+        return self.catalog(kind, **filters)
+
     def rpc_state(self):
         l = self.lattice
         docs = l.index.rows("SELECT id, kind, title, topic, path, updated FROM docs ORDER BY updated DESC LIMIT 3000")
-        return {"topics": l.topics(), "active_topic": l.active_topic(), "docs": docs, "projects": l.projects(), "cards": l.cards(),
-                "insights": [i for i in l.insights() if i["state"] == "active"],
-                "due": len(l.due_cards()), "practices": l.practices(), "busy": sorted(self.busy), "status": self.status,
+        cards = self.catalog("cards")
+        return {"topics": l.topics(), "active_topic": l.active_topic(), "docs": docs, "projects": self.catalog("projects"), "cards": cards,
+                "insights": self.catalog("insights", state="active"),
+                "due": sum(c["due_now"] for c in cards), "practices": self.catalog("practices"), "busy": sorted(self.busy), "status": self.status,
                 "kernels": self.kernel_states, "running": [{"run": k, "path": v["path"], "by": v["by"]} for k, v in self.runs.items()],
                 "agents": {name: AGENT_NAMES[name] for name in agents.NAMES}, "undone": sorted(l.undone())}
 

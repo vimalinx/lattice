@@ -207,6 +207,17 @@ def _run_brief(e):
     return {"at": e["at"][:16], "by": e["actor"], **{k: e["data"].get(k) for k in ("file", "cell", "state", "summary", "sandbox")}}
 
 
+LIST_KINDS = ["topics", "cards", "notes", "lessons", "insights", "notebooks", "practices", "threads", "files", "projects", "envs", "layouts"]
+
+
+@tool("list", ALL, "列出学习库里某一类东西的全部（和界面上开着什么无关）：topics 主题、cards 知识卡（含理解阶段和是否到期）、notes 笔记、lessons 课程、insights 薄弱点和做得好的地方、notebooks 实验笔记、practices 练习、threads 全部对话、files 代码和数据文件、projects 挂载的目录（只读）、envs Python 环境和包、layouts 学习者存过的界面布局。可以按 topic（给空字符串就是不属于任何主题的）、stage（卡片）、state、query（标题里包含）筛选。",
+      {"kind": {"type": "string", "enum": LIST_KINDS}, "topic": S, "stage": S, "state": S, "query": S, "limit": I}, ["kind"])
+def list_kind(ctx, kind, topic=None, stage=None, state=None, query=None, limit=200):
+    if kind in ("projects", "envs", "layouts"):
+        return ctx.bridge.catalog(kind)
+    return ctx.bridge.catalog(kind, topic=topic, stage=stage, state=state, query=query, limit=limit)
+
+
 @tool("search", ALL, "在学习库里搜索：文档（主题、卡片、课程、笔记、实验笔记）的标题和正文、文件名、以往对话。返回引用和片段，再用 read 读全文。代码内容的搜索用 shell 里的 rg。", {"query": S}, ["query"])
 def search(ctx, query):
     return ctx.l.search(query)
@@ -226,7 +237,7 @@ def conversation(ctx, agent="tutor", topic=None, thread=None, limit=12):
     return {"thread": ident, "messages": [{"id": m["id"], "role": m["role"], "content": m["content"][:8000], "at": m["at"][:16]} for m in rows]}
 
 
-@tool("due", {"tutor"}, "现在到期、需要回顾的知识卡。要回顾时用 lattice:cards 展示块（review 设为 true），自评由学习者自己点。")
+@tool("due", ALL, "现在到期、需要回顾的知识卡。要回顾时用 lattice:cards 展示块（review 设为 true），自评由学习者自己点。")
 def due(ctx):
     return [{k: c[k] for k in ("id", "title", "question", "due", "stage", "topic")} for c in ctx.l.due_cards()]
 
@@ -450,6 +461,7 @@ UI_OP = {"type": "object", "properties": {"do": {"type": "string", "enum": ["ope
       "- layout：整个替换布局。spec 是 {\"split\": \"h\"或\"v\", \"sizes\": [0.5, 0.5], \"parts\": [spec, ...]}，叶子是 {\"tabs\": [面板, ...]}；面板可以是已有面板的 id，也可以是一个 open 那样的对象。\n"
       "- preset：套用学习者存过的布局 name。sidebar：切到左栏的 section（topics、cards、notes、lessons、work、practice、files、search），open 为 false 时收起。\n"
       "- set：改外观，key 是 theme（dark / light）、font_size、code_font_size、density（compact / comfortable）。\n"
+      "界面只决定显示什么，不代表学习库里有什么：要知道有哪些卡片、笔记、主题、练习，用 list、graph 或 read 去查，不要从面板上推断。\n"
       "学习者可以一键还原你改动前的界面。正在打字的面板不要关、不要挪。", {"ops": {"type": "array", "items": UI_OP}}, ["ops"])
 def ui(ctx, ops):
     if not isinstance(ops, list) or not ops or len(ops) > 40:
@@ -459,6 +471,7 @@ def ui(ctx, ops):
         def finish(result):
             if isinstance(result, dict) and result.get("snapshot"):
                 ctx.act("调整了界面：" + "、".join(dict.fromkeys(o.get("do", "") for o in ops)), "ui:" + result["snapshot"], False)
+                result = {**result, "note": "这里只有面板的情况。学习库里有什么（卡片、笔记、主题、练习……）用 list、graph、read 查"}
             done(result)
         ctx.bridge.ui_request(ctx.agent, ops, finish)
     return Later(start)

@@ -938,6 +938,46 @@ class Lattice:
             routes = {k: v for k, v in routes.items() if k in family}
         return {"nodes": list(nodes.values()), "edges": edges, "routes": routes}
 
+    # ---- one catalog for everything: the UI's lists and the agents' list tool both read it ---------------
+    KINDS = ("topics", "cards", "notes", "lessons", "insights", "notebooks", "practices", "threads", "files")
+
+    def catalog(self, kind, topic=None, stage=None, state=None, query=None, limit=500):
+        """Every item of one kind, briefly, with the attributes that kind has. Filters: topic ('' for none), stage, state, query."""
+        if kind not in self.KINDS:
+            raise ValueError("kind 应为 " + "、".join(self.KINDS))
+        due = {c["id"] for c in self.due_cards()} if kind == "cards" else set()
+        if kind == "topics":
+            rows = [{k: t[k] for k in ("id", "title", "path", "question", "parent", "state", "created", "updated")} | {"route_steps": len(t["route"])}
+                    for t in self.topics()]
+        elif kind == "cards":
+            rows = [{**c, "due_now": c["id"] in due} for c in self.cards()]
+        elif kind == "practices":
+            rows = self.practices()
+        elif kind == "insights":
+            rows = [{k: i[k] for k in ("id", "kind", "title", "topic", "practice", "state", "created")} for i in self.insights()]
+        elif kind == "threads":
+            rows = [{**r, "messages": r.pop("n")} for r in self.index.rows(
+                """SELECT t.id, t.agent, t.title, t.topic, t.created, t.updated, json_extract(t.head,'$.practice.state') practice,
+                   (SELECT COUNT(*) FROM messages m WHERE m.thread=t.id) n FROM threads t ORDER BY t.updated DESC""")]
+        elif kind == "files":
+            rows = [{"path": r["path"]} for r in self.index.rows("SELECT path FROM files WHERE kind='file' ORDER BY path")]
+        else:
+            rows = []
+            for d in self.docs(kind[:-1]):
+                a = d["attrs"]
+                rows.append({"id": d["id"], "title": d["title"], "path": d["path"], "topic": d["topic"], "updated": d["updated"],
+                             **{k: a[k] for k in ("tags", "state", "objective") if a.get(k)}})
+        if topic is not None:
+            rows = [r for r in rows if (r.get("topic") or None) == (topic or None)]
+        if stage:
+            rows = [r for r in rows if r.get("stage") == stage]
+        if state:
+            rows = [r for r in rows if r.get("state") == state]
+        if query:
+            q = str(query).casefold()
+            rows = [r for r in rows if q in str(r.get("title") or r.get("path") or "").casefold()]
+        return rows[:max(1, min(int(limit), 2000))]
+
     def search(self, query, limit=40):
         q = "%" + text(query, 200).strip() + "%"
         if q == "%%":
