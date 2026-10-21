@@ -5,10 +5,9 @@
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <meta name="color-scheme" content="dark light"/>
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' qrc:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' qrc:; font-src 'self' data:"/>
-  <title>Lattice · 学习工作台</title>
+  <title>Lattice</title>
   <link rel="icon" href="./icon.svg" type="image/svg+xml"/>
   <link rel="stylesheet" href="./style.css"/>
-  <link rel="stylesheet" href="./learning.css"/>
   <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
   <script src="./vendor/marked.umd.js"></script>
   <script src="./vendor/purify.min.js"></script>
@@ -16,12 +15,15 @@
   <script defer src="./vendor/mermaid.min.js"></script>
 </head>
 <body>
-  <div id="app"><div class="boot"><div class="boot-symbol">✳</div><div>正在打开你的思考空间…</div></div></div>
+  <div id="app"><div class="boot"><div class="boot-symbol">✳</div><div>正在打开你的学习库…</div></div></div>
   <div id="overlays"></div>
   <div id="toast" role="status"></div>
   <script defer src="./core.js"></script>
-  <script defer src="./views.js"></script>
+  <script defer src="./dock.js"></script>
+  <script defer src="./blocks.js"></script>
+  <script defer src="./chat.js"></script>
+  <script defer src="./files.js"></script>
+  <script defer src="./panels.js"></script>
   <script defer src="./app.js"></script>
-  <script defer src="./learning.js"></script>
 </body>
 </html>

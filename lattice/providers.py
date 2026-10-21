@@ -1,7 +1,13 @@
-"""OpenAI-compatible API lanes for quick answers and the tutor. Credentials never cross WebChannel."""
+"""Machine-local configuration and the OpenAI-compatible API lanes. Credentials never cross WebChannel.
+
+providers.json holds everything that belongs to this machine rather than to the
+learning vault: API connections and keys, which model each agent uses, the web
+search backend, run timeouts and runner overrides.
+"""
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import os
 from pathlib import Path
@@ -17,7 +23,7 @@ from PySide6.QtCore import QThread, Signal
 LOG = logging.getLogger("lattice")
 
 # Fixed set of OpenAI-compatible connections; each keeps its own key. "{session}"
-# in a header value is replaced by the Lattice session id (OpenCode Go routes
+# in a header value is replaced by the Lattice thread id (OpenCode Go routes
 # and caches by x-opencode-session and rejects requests without it).
 APIS = {
     "deepseek": {"label": "DeepSeek", "base_url": "https://api.deepseek.com", "model": "deepseek-chat",
@@ -29,17 +35,32 @@ APIS = {
     "custom": {"label": "自定义", "base_url": "", "model": "", "headers": {}, "extra_body": {}, "env": ""},
 }
 API_FIELDS = {"base_url", "headers", "extra_body", "api_key"}
+AGENT_NAMES = {"tutor": "主讲", "flash": "快答", "coach": "练习教练", "organizer": "整理"}
+WEB_BACKENDS = {"duckduckgo": "DuckDuckGo（无需 Key）", "searxng": "SearXNG（自建地址）", "brave": "Brave Search API", "tavily": "Tavily API"}
+WEB_SECRETS = {"brave_key", "tavily_key"}
 DEFAULTS = {
-    "apis": {}, "flash_api": "commandcode", "flash_model": "deepseek/deepseek-v4.1-flash-fast", "flash_max_tokens": 4000,
-    "tutor_api": "commandcode", "tutor_model": "deepseek/deepseek-v4.1-flash", "tutor_max_tokens": 16000,
-    "practice_api": "commandcode", "practice_model": "deepseek/deepseek-v4.1-flash", "practice_max_tokens": 16000,
+    "apis": {},
+    "agents": {"tutor": {"api": "commandcode", "model": "deepseek/deepseek-v4.1-flash", "max_tokens": 16000},
+               "flash": {"api": "commandcode", "model": "deepseek/deepseek-v4.1-flash-fast", "max_tokens": 4000},
+               "coach": {"api": "commandcode", "model": "deepseek/deepseek-v4.1-flash", "max_tokens": 16000},
+               "organizer": {"api": "commandcode", "model": "deepseek/deepseek-v4.1-flash", "max_tokens": 8000}},
     "timeout": 120, "temperature": 0.35,
-    "kernel_name": "python3", "kernel_timeout": 120,
-    # Agents may run notebook code in the learner's own kernel (not a sandbox).
+    # Seconds a notebook cell, a file run and an agent's shell command may take.
+    "kernel_timeout": 120, "run_timeout": 120, "shell_timeout": 60,
+    # Agents run code and shell commands in the sandbox, never with the learner's own permissions.
     "agent_auto_run": True,
-    # Closing a scratch pad hands what was written to the organizer.
+    # Closing a file the learner just wrote hands it to the organizer.
     "agent_auto_organize": True,
+    # A missing Python module is installed into the vault's environment and the run repeated.
+    "auto_install": True,
+    "web": {"search": "duckduckgo", "searxng_url": "", "brave_key": "", "tavily_key": ""},
+    # File extension -> command template overriding lattice.runner.RUNNERS.
+    "runners": {},
+    # Extra read-only paths visible inside the sandbox (toolchains installed under home).
+    "sandbox_paths": [],
 }
+# Settings saved by earlier versions under flat names.
+LEGACY = {"tutor": "tutor", "flash": "flash", "practice": "coach"}
 
 
 def model_label(model):
@@ -47,20 +68,33 @@ def model_label(model):
     return str(model).rsplit("/", 1)[-1] or "未选择模型"
 
 
-class ProviderConfig:
+class Config:
     def __init__(self, path=None):
         self.path = Path(path) if path else Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "lattice/providers.json"
 
     def read(self):
-        result = json.loads(json.dumps(DEFAULTS))
+        result = copy.deepcopy(DEFAULTS)
+        saved = {}
         try:
             if self.path.exists():
                 saved = json.loads(self.path.read_text(encoding="utf-8"))
-                if isinstance(saved, dict):
-                    result.update({k: v for k, v in saved.items() if k in DEFAULTS})
         except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
             # A hand-edited or truncated config must not break the whole app state.
             LOG.warning("无法读取 providers.json，回退默认配置: %s", exc)
+        saved = saved if isinstance(saved, dict) else {}
+        for old, agent in LEGACY.items():
+            for field in ("api", "model", "max_tokens"):
+                if old + "_" + field in saved:
+                    result["agents"][agent][field] = saved[old + "_" + field]
+        for key, value in saved.items():
+            if key in ("agents", "web") and isinstance(value, dict):
+                for name, part in value.items():
+                    if key == "agents" and name in result["agents"] and isinstance(part, dict):
+                        result["agents"][name].update({k: v for k, v in part.items() if k in ("api", "model", "max_tokens")})
+                    elif key == "web" and name in result["web"]:
+                        result["web"][name] = part
+            elif key in DEFAULTS and key not in ("agents", "web"):
+                result[key] = value
         saved_apis = result["apis"] if isinstance(result["apis"], dict) else {}
         result["apis"] = {}
         for ident, spec in APIS.items():
@@ -74,21 +108,18 @@ class ProviderConfig:
         env = APIS.get(api, {}).get("env")
         return config["apis"].get(api, {}).get("api_key") or (os.environ.get(env, "") if env else "")
 
-    def lane(self, lane, config=None):
-        """Everything one API lane needs to send a request, key included."""
+    def agent(self, name, config=None):
+        """Everything one agent's API lane needs to send a request, key included."""
         config = config or self.read()
-        api = config[lane + "_api"]
-        return {**config["apis"][api], "api": api, "label": APIS[api]["label"], "api_key": self.key(api, config), "model": config[lane + "_model"],
-                "max_tokens": config[lane + "_max_tokens"], "timeout": config["timeout"], "temperature": config["temperature"]}
-
-    def label(self, lane, config=None):
-        config = config or self.read()
-        return model_label(config[lane + "_model"])
+        lane = config["agents"][name]
+        api = lane["api"] if lane["api"] in APIS else "commandcode"
+        return {**config["apis"][api], "api": api, "label": APIS[api]["label"], "api_key": self.key(api, config), "model": lane["model"],
+                "max_tokens": lane["max_tokens"], "timeout": config["timeout"], "temperature": config["temperature"]}
 
     def public(self):
         # Only known keys cross the bridge; keys never do.
         raw = self.read()
-        result = {k: raw[k] for k in DEFAULTS if k != "apis"}
+        result = {k: copy.deepcopy(raw[k]) for k in DEFAULTS if k not in ("apis", "agents", "web")}
         result["apis"] = []
         for ident, spec in APIS.items():
             api = raw["apis"][ident]
@@ -98,11 +129,11 @@ class ProviderConfig:
                                    **{k: api[k] for k in API_FIELDS - {"api_key"}},
                                    "has_key": saved or has_env,
                                    "key_source": "本机配置" if saved else ("环境变量 " + env) if has_env else "尚未配置"})
-        result["flash_label"], result["tutor_label"] = self.label("flash", raw), self.label("tutor", raw)
-        result["practice_label"] = self.label("practice", raw)
-        result["has_key"] = bool(self.key(raw["flash_api"], raw))
-        result["practice_ready"] = bool(self.key(raw["practice_api"], raw))
-        result["tutor_ready"] = bool(self.key(raw["tutor_api"], raw))
+        result["agents"] = {name: {**lane, "title": AGENT_NAMES[name], "label": model_label(lane["model"]), "ready": bool(self.key(lane["api"], raw))}
+                            for name, lane in raw["agents"].items()}
+        result["web"] = {k: v for k, v in raw["web"].items() if k not in WEB_SECRETS}
+        result["web"].update({k: bool(raw["web"].get(k)) for k in WEB_SECRETS})
+        result["web_backends"] = WEB_BACKENDS
         return result
 
     def save(self, changes):
@@ -113,7 +144,23 @@ class ProviderConfig:
             raise ValueError("未知配置项：" + ", ".join(unexpected))
         updated = self.read()
         for key, val in changes.items():
-            if key != "apis":
+            if key == "agents":
+                if not isinstance(val, dict) or set(val) - set(AGENT_NAMES):
+                    raise ValueError("未知的 AI")
+                for name, part in val.items():
+                    updated["agents"][name].update({k: v for k, v in part.items() if k in ("api", "model", "max_tokens")})
+            elif key == "web":
+                if not isinstance(val, dict) or set(val) - set(DEFAULTS["web"]) - {"clear"}:
+                    raise ValueError("联网设置含不支持的字段")
+                for k, v in val.items():
+                    if k in WEB_SECRETS and not v:
+                        continue  # an empty secret field keeps the saved one
+                    if k != "clear":
+                        updated["web"][k] = str(v).strip()
+                for k in val.get("clear") or []:
+                    if k in WEB_SECRETS:
+                        updated["web"][k] = ""
+            elif key != "apis":
                 updated[key] = val
         api_changes = changes.get("apis", {})
         if not isinstance(api_changes, dict) or set(api_changes) - set(APIS):
@@ -127,33 +174,7 @@ class ProviderConfig:
                 api["api_key"] = ""
             elif change.get("api_key"):
                 api["api_key"] = str(change["api_key"]).strip()
-        for ident, api in updated["apis"].items():
-            label = APIS[ident]["label"]
-            base = str(api["base_url"]).strip()
-            url = urlsplit(base)
-            if base and (url.scheme not in {"https", "http"} or not url.hostname or url.username or url.password or url.query or url.fragment):
-                raise ValueError(label + " 的 Base URL 必须是没有嵌入凭据、查询或片段的 HTTP(S) 地址")
-            api["base_url"] = base.rstrip("/")
-            if not isinstance(api["extra_body"], dict) or set(api["extra_body"]) & {"messages", "model", "stream", "max_tokens", "temperature"}:
-                raise ValueError(label + " 的附加参数应为 JSON 对象，不能覆盖 messages/model/stream/max_tokens/temperature")
-            if not isinstance(api["headers"], dict) or not all(isinstance(v, str) for v in api["headers"].values()) \
-                    or {k.casefold() for k in api["headers"]} & {"authorization", "content-type"}:
-                raise ValueError(label + " 的请求头应为字符串对象，不能覆盖 Authorization/Content-Type")
-        names = {"flash": "快答", "tutor": "主讲", "practice": "练习教练"}
-        for lane in names:
-            if updated[lane + "_api"] not in APIS:
-                raise ValueError("未知的 API 连接：" + str(updated[lane + "_api"]))
-            updated[lane + "_model"] = str(updated[lane + "_model"]).strip()
-            updated[lane + "_max_tokens"] = max(256, min(int(updated[lane + "_max_tokens"]), 64000))
-            if not updated["apis"][updated[lane + "_api"]]["base_url"]:
-                raise ValueError(names[lane] + "所选连接还没有 Base URL")
-            if not updated[lane + "_model"]:
-                raise ValueError("请填写" + names[lane] + "的模型名")
-        updated["timeout"] = max(5, min(int(updated["timeout"]), 600))
-        updated["temperature"] = max(0, min(float(updated["temperature"]), 2))
-        updated["kernel_timeout"] = max(3, min(int(updated["kernel_timeout"]), 3600))
-        updated["agent_auto_run"] = bool(updated["agent_auto_run"])
-        updated["agent_auto_organize"] = bool(updated["agent_auto_organize"])
+        self._check(updated)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(self.path.name + ".tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -167,6 +188,45 @@ class ProviderConfig:
             tmp.unlink(missing_ok=True)
             raise
         return self.public()
+
+    @staticmethod
+    def _check(updated):
+        for ident, api in updated["apis"].items():
+            label = APIS[ident]["label"]
+            base = str(api["base_url"]).strip()
+            url = urlsplit(base)
+            if base and (url.scheme not in {"https", "http"} or not url.hostname or url.username or url.password or url.query or url.fragment):
+                raise ValueError(label + " 的 Base URL 必须是没有嵌入凭据、查询或片段的 HTTP(S) 地址")
+            api["base_url"] = base.rstrip("/")
+            if not isinstance(api["extra_body"], dict) or set(api["extra_body"]) & {"messages", "model", "stream", "max_tokens", "temperature", "tools"}:
+                raise ValueError(label + " 的附加参数应为 JSON 对象，不能覆盖 messages/model/stream/max_tokens/temperature/tools")
+            if not isinstance(api["headers"], dict) or not all(isinstance(v, str) for v in api["headers"].values()) \
+                    or {k.casefold() for k in api["headers"]} & {"authorization", "content-type"}:
+                raise ValueError(label + " 的请求头应为字符串对象，不能覆盖 Authorization/Content-Type")
+        for name, lane in updated["agents"].items():
+            if lane["api"] not in APIS:
+                raise ValueError("未知的 API 连接：" + str(lane["api"]))
+            lane["model"] = str(lane["model"]).strip()
+            lane["max_tokens"] = max(256, min(int(lane["max_tokens"]), 64000))
+            if not updated["apis"][lane["api"]]["base_url"]:
+                raise ValueError(AGENT_NAMES[name] + "所选连接还没有 Base URL")
+            if not lane["model"]:
+                raise ValueError("请填写" + AGENT_NAMES[name] + "的模型名")
+        if updated["web"]["search"] not in WEB_BACKENDS:
+            raise ValueError("未知的搜索服务")
+        if updated["web"]["searxng_url"] and urlsplit(updated["web"]["searxng_url"]).scheme not in {"http", "https"}:
+            raise ValueError("SearXNG 地址应为 HTTP(S)")
+        updated["timeout"] = max(5, min(int(updated["timeout"]), 600))
+        updated["temperature"] = max(0, min(float(updated["temperature"]), 2))
+        for key in ("kernel_timeout", "run_timeout"):
+            updated[key] = max(3, min(int(updated[key]), 3600))
+        updated["shell_timeout"] = max(3, min(int(updated["shell_timeout"]), 600))
+        for key in ("agent_auto_run", "agent_auto_organize", "auto_install"):
+            updated[key] = bool(updated[key])
+        if not isinstance(updated["runners"], dict) or not all(re.fullmatch(r"\.[\w+-]{1,12}", k) and isinstance(v, str) for k, v in updated["runners"].items()):
+            raise ValueError("运行器应为「扩展名 → 命令」的对象，例如 {\".lua\": \"lua {file}\"}")
+        if not isinstance(updated["sandbox_paths"], list) or not all(isinstance(p, str) and p.startswith("/") for p in updated["sandbox_paths"]):
+            raise ValueError("沙箱额外可见路径应为绝对路径列表")
 
 
 def endpoint(base, suffix):
@@ -193,12 +253,12 @@ def clean_error(message, key=""):
 
 
 class ApiWorker(QThread):
-    """One streamed chat completion for either lane (or a /models connection test)."""
+    """One streamed chat completion with tool calls for an agent (or a /models connection test)."""
     event = Signal(dict)
 
-    def __init__(self, lane, topic_id, session_id, conn, messages, test=False, tools=None):
+    def __init__(self, agent, thread, conn, messages, test=False, tools=None):
         super().__init__()
-        self.lane, self.topic_id, self.session_id = lane, topic_id, session_id
+        self.agent, self.thread = agent, thread
         self.config, self.api_key, self.messages, self.test = conn, conn["api_key"], messages, test
         # Tool calls are executed on the GUI thread (it owns SQLite); results come back here.
         self.tools, self.tool_results, self.partial = tools or [], queue.Queue(), ""
@@ -209,8 +269,8 @@ class ApiWorker(QThread):
 
     def emit(self, kind, **data):
         if kind == "error":
-            LOG.warning("API worker %s: %s", self.session_id, data.get("message"))
-        self.event.emit({"type": "learning_agent", "lane": self.lane, "topic_id": self.topic_id, "session_id": self.session_id, "kind": kind, **data})
+            LOG.warning("API worker %s: %s", self.thread, data.get("message"))
+        self.event.emit({"type": "agent", "agent": self.agent, "thread": self.thread, "kind": kind, **data})
 
     def stop(self):
         self.cancelled.set()
@@ -313,9 +373,9 @@ class ApiWorker(QThread):
             if self.cancelled.is_set():
                 raise asyncio.CancelledError()
             if not self.api_key:
-                raise ValueError(self.config["label"] + " 尚未配置 API Key。请在「模型连接」中填写。")
+                raise ValueError(self.config["label"] + " 尚未配置 API Key。请在设置里填写。")
             config = self.config
-            session = self.session_id or "lattice-test"
+            session = self.thread or "lattice-test"
             headers = {**{k: v.replace("{session}", session) for k, v in config["headers"].items()},
                        "Authorization": "Bearer " + self.api_key, "Content-Type": "application/json"}
             timeout = httpx.Timeout(float(config["timeout"]), connect=12)
@@ -351,18 +411,18 @@ class ApiWorker(QThread):
                         if not calls:
                             break
                         rounds += 1
-                        if rounds > 30:
-                            raise ValueError("这一轮的工具调用超过 30 次，已停止")
+                        if rounds > 40:
+                            raise ValueError("这一轮的工具调用超过 40 次，已停止")
                         # Thinking-mode models need their reasoning replayed alongside the calls they made.
                         messages.append({"role": "assistant", "content": content or None, "tool_calls": calls,
                                          **({"reasoning_content": reasoning} if reasoning else {})})
                         for call in calls:
                             messages.append({"role": "tool", "tool_call_id": call["id"], "content": await self._tool(call)})
                     if not body.strip() and stop_reason == "max_tokens":
-                        raise ValueError("模型的思考用完了回复上限，还没开始回答。请在「模型连接」里调大回复上限。")
+                        raise ValueError("模型的思考用完了回复上限，还没开始回答。请在设置里调大回复上限。")
                     if body.strip() or stop_reason != "end_turn" or not thought or rounds or attempt:
                         break
-                    LOG.warning("API worker %s: answer was empty after reasoning; retrying once", self.session_id)
+                    LOG.warning("API worker %s: answer was empty after reasoning; retrying once", self.thread)
                 if not body.strip() and stop_reason == "end_turn" and not rounds:
                     raise ValueError("模型这次只思考、没有给出回答（已自动重试一次）。请再发一次。" if thought
                                      else "API 返回了空回答，请检查模型与附加参数")

@@ -1,42 +1,53 @@
-"""Workspace tools the learning agents call to read and change Lattice.
+"""The agents' tools, in three layers: a sandboxed shell, Lattice commands, and the web.
 
 Agents are told which tools exist and look things up themselves; nothing is
-pushed into their context. The API lanes call them as OpenAI-compatible
-tools. Every change to files becomes its own vault commit and journal entry,
-so the learner can undo it from the conversation.
-Learner-owned fields (stage, own understanding, own explanations, review
-self-ratings) and deletions are never exposed.
+pushed into their context. Structured state (the knowledge map, routes, the
+journal, insights) only changes through these commands. Every change to files
+becomes its own vault commit and journal entry, so the learner can undo it
+from the conversation. Learner-owned parts are never exposed for writing.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
+import json
+from pathlib import Path
 
-from .learning import now, readable_outputs, text, title as clean_title
+from .model import AGENT_RECORDS, LINK_KINDS, readable_outputs, text, title_of
+from .vault import APPEND_ONLY, kind_of, slug
 
-ROLES = {"tutor", "flash", "practice", "organizer"}
+ALL = {"tutor", "flash", "coach", "organizer"}
 
 
-class Deferred:
-    """A result that arrives later, e.g. when a notebook batch finishes."""
+class Later:
+    """A result that arrives later: `start(done)` begins the work and calls done(result) on the GUI thread."""
 
-    def __init__(self, notebook_id, cell_ids):
-        self.notebook_id, self.cell_ids = notebook_id, cell_ids
+    def __init__(self, start):
+        self.start = start
+
+
+class Turn:
+    """What one agent turn did, shown under its reply: actions, web sources, suggestions."""
+
+    def __init__(self):
+        self.actions, self.sources, self.suggestions, self.after, self.carry = [], [], [], [], []
+        self.focus = None
+        self.refocus = False
 
 
 class Context:
-    """Who is calling: role, the topic its conversation belongs to, and the turn's actions."""
+    """Who is calling: the agent, its conversation, the topic it is about, and the turn so far."""
 
-    def __init__(self, bridge, role, topic_id, session_id, practice_id=None):
-        self.bridge, self.role, self.topic_id = bridge, role, topic_id
-        self.session_id, self.practice_id = session_id, practice_id
-        self.l, self.store = bridge.learning, bridge.store
+    def __init__(self, bridge, agent, thread, topic, practice=None):
+        self.bridge, self.agent, self.thread, self.topic, self.practice = bridge, agent, thread, topic, practice
+        self.l = bridge.lattice
+        self.turn = bridge.turns.setdefault(thread, Turn())
 
-    def act(self, summary, undoable=True, ref=None):
-        """Journal one agent action. A change to files becomes its own vault commit, so undo is a revert."""
-        commit = self.l.vault.commit(f"{self.role}：{summary}", self.role) if undoable else None
-        ident = self.l.action_add(self.topic_id, self.role, summary, ref, commit, undoable)
+    def act(self, summary, ref=None, undoable=True):
+        """Record one agent action. A change to files becomes its own vault commit, so undo is a revert."""
+        commit = self.l.vault.commit(f"{self.agent}：{summary}", self.agent) if undoable else None
+        ident = self.l.action(self.agent, summary, ref, commit, self.topic, self.thread)
         action = {"id": ident, "summary": summary, "ref": ref, "undoable": bool(commit)}
-        self.bridge.turn_actions.setdefault(self.session_id, []).append(action)
+        self.turn.actions.append(action)
         return action
 
 
@@ -45,343 +56,509 @@ def _obj(props, required=()):
 
 
 S = {"type": "string"}
+I = {"type": "integer"}
+LIST = {"type": "array", "items": S}
 TOOLS = {}
 
 
-def tool(name, roles, description, params=None, required=()):
+def tool(name, agents, description, params=None, required=()):
     def wrap(fn):
-        TOOLS[name] = {"roles": set(roles), "description": description, "parameters": _obj(params or {}, required), "fn": fn}
+        TOOLS[name] = {"agents": set(agents), "description": description, "parameters": _obj(params or {}, required), "fn": fn}
         return fn
     return wrap
 
 
-def schemas(role):
-    """OpenAI-compatible tool list for one role."""
-    return [{"type": "function", "function": {"name": n, "description": t["description"], "parameters": t["parameters"]}}
-            for n, t in TOOLS.items() if role in t["roles"]]
+def schemas(names):
+    """OpenAI-compatible tool list for the tools an agent's definition names."""
+    return [{"type": "function", "function": {"name": n, "description": TOOLS[n]["description"], "parameters": TOOLS[n]["parameters"]}}
+            for n in names if n in TOOLS]
 
 
-def call(ctx, name, args):
+def call(ctx, allowed, name, args):
     spec = TOOLS.get(name)
-    if not spec or ctx.role not in spec["roles"]:
+    if not spec or name not in allowed:
         raise ValueError(f"没有可用的工具 {name}")
     if not isinstance(args, dict):
         raise ValueError("工具参数应为 JSON 对象")
     return spec["fn"](ctx, **args)
 
 
-# ---- reading ---------------------------------------------------------------
-
-def _topic_brief(l, t):
-    return {"id": t["id"], "title": t["title"], "question": t["question"], "parent_id": t["parent_id"], "state": t["state"]}
+def _brief(row):
+    return {k: row[k] for k in ("id", "title") if k in row}
 
 
-def _cell(c, full=True):
-    return {"id": c["id"], "kind": c["kind"], "source": c["source"] if full else c["source"][:400],
-            "output": readable_outputs(c["outputs"]) if c["kind"] == "code" else [],
-            "output_is_stale": c["stale"], "ran": c["execution_count"] is not None}
+def _path_of(ctx, ref):
+    """A vault path from a path, an id or kind:id."""
+    ref = str(ref).strip()
+    for prefix in ("file:", "notebook:", "note:", "card:", "lesson:", "topic:", "insight:"):
+        if ref.startswith(prefix):
+            ref = ref[len(prefix):]
+    if "/" in ref or "." in Path(ref).name:
+        return ref
+    located = ctx.l.index.locate(ref)
+    if located:
+        return located
+    return ctx.l.doc(ctx.l.resolve_ref(ref))["path"]
 
 
-@tool("look_around", ROLES, "看看学习者现在在哪：所在页面、正在打开的内容、当前焦点主题和它所在的主线、进行中的练习，以及是否允许你自动运行代码。")
-def look_around(ctx):
-    l, ws = ctx.l, ctx.bridge.workspace
-    topic = l.one("learn_topics", ctx.topic_id)
-    path, current = [], topic
-    while current["parent_id"]:
-        current = l.one("learn_topics", current["parent_id"])
-        path.append(current["title"])
-    practice = ctx.bridge._active_practice(ctx.topic_id)
-    return {"page": ws.get("page"), "open": ws.get("open"), "focus_topic": _topic_brief(l, topic), "main_lines": path,
-            "active_practice": practice and {"id": practice["id"], "title": practice["title"], "state": practice["state"]},
-            "auto_run_code": bool(ctx.bridge.providers.read()["agent_auto_run"]), "today": now()[:10]}
+def _guard(ctx, path):
+    """Files the agents may not write directly, and files the learner is typing in right now."""
+    _, rel = ctx.l.resolve(path)
+    if rel is None:
+        raise ValueError("挂载的外部目录对你只读；需要改的话用 suggest 提给学习者")
+    if rel.startswith(APPEND_ONLY) or rel.startswith(".lattice/") or rel == "AGENTS.md" or rel.startswith("agents/"):
+        raise ValueError("对话、轨迹、规则和 .lattice 只由 Lattice 和学习者维护")
+    if ctx.bridge.typing(rel):
+        raise ValueError("学习者正在编辑这个文件；不要直接改，用 suggest 提出修改建议")
+    return rel
 
 
-@tool("list_topics", ROLES, "列出所有学习主题（含分支关系和上次学习时间）。")
-def list_topics(ctx):
-    l = ctx.l
-    rows = l.rows("SELECT * FROM learn_topics ORDER BY created_at")
-    last = {r["topic_id"]: r["at"] for r in l.rows(
-        "SELECT t.topic_id, MAX(m.created_at) at FROM learn_threads t JOIN messages m ON m.session_id IN (t.tutor_session,t.flash_session) GROUP BY t.topic_id")}
-    chat = l.chat_topic()
-    return [{**_topic_brief(l, t), "last_studied": last.get(t["id"]), **({"default_conversation": True} if t["id"] == chat else {})} for t in rows]
+# ---- state ------------------------------------------------------------------------------------
+
+@tool("screen", ALL, "学习者此刻的界面：开着哪些面板、哪个在前台、每个文件看到哪一节或哪几格、光标和选中的内容、没保存的草稿、最近看过的文件和停留时间、正在运行什么和最近一次运行的结果。")
+def screen(ctx):
+    return ctx.bridge.screen_state()
 
 
-@tool("read", ROLES, "读取一样东西的全文。ref 形如 topic:<id>（含主题档案、课程、笔记本、知识卡、练习列表）、card:<id或标题>、lesson:<id>、note:<id>、notebook:<id>（全部单元格与真实输出）、cell:<id>、practice:<id>（练习依据、对话与复盘）。",
-      {"ref": S}, ["ref"])
-def read(ctx, ref):
-    l = ctx.l
-    kind, _, ident = str(ref).partition(":")
-    if kind == "topic":
-        t = l.one("learn_topics", ident)
-        return {**_topic_brief(l, t), "topic_notes": t["notes"],
-                "lessons": l.rows("SELECT id,title,objective,state FROM learn_lessons WHERE topic_id=? ORDER BY position", (ident,)),
-                "notebooks": l.rows("SELECT id,title FROM learn_notebooks WHERE topic_id=? ORDER BY created_at", (ident,)),
-                "cards": l.rows("SELECT id,title,stage FROM learn_cards WHERE topic_id=? ORDER BY updated_at DESC", (ident,)),
-                "practices": l.rows("SELECT id,title,state,next_focus FROM learn_practices WHERE topic_id=? ORDER BY created_at DESC", (ident,)),
-                "branches": l.rows("SELECT id,title FROM learn_topics WHERE parent_id=?", (ident,))}
-    if kind == "card":
-        c = l.card(l.resolve_card(ident))
-        return {k: c[k] for k in ("id", "title", "body", "understanding", "question", "stage", "topic_id", "tags", "due_at")} | {
-            "my_understanding_note": "understanding 和 stage 由学习者本人填写",
-            "evidence": [{k: e[k] for k in ("kind", "content", "run_id", "created_at")} for e in c["evidence"][:12]],
-            "relations": l.rows("""SELECT r.kind, s.title source, t.title target, r.reason FROM learn_relations r
-                JOIN learn_cards s ON s.id=r.source JOIN learn_cards t ON t.id=r.target WHERE r.source=? OR r.target=?""", (c["id"], c["id"]))}
-    if kind == "lesson":
-        return l.one("learn_lessons", ident)
-    if kind == "note":
-        note = ctx.store.get_note(ident)
-        if not note:
-            raise ValueError("找不到这篇笔记")
-        return note
-    if kind == "notebook":
-        nb = l.notebook(ident)
-        return {"id": nb["id"], "title": nb["title"], "topic_id": nb["topic_id"], "cells": [_cell(c) for c in nb["cells"]],
-                "kernel": ctx.bridge.notebook_states.get(ident, {}).get("state", "offline")}
-    if kind == "cell":
-        c = l.one("learn_cells", ident)
-        return next(_cell(x) for x in l.notebook(c["notebook_id"])["cells"] if x["id"] == ident)
+@tool("graph", ALL, "整张知识图：全部节点（id、种类、标题、所属主题、理解阶段、证据数、最近活动）、全部关系，以及每个主题的主干路线。给 topic 时只看这个主题和它的分支，加上直接相连的节点。用它判断学习者在哪、学过什么、该往哪走。",
+      {"topic": S})
+def graph(ctx, topic=None):
+    g = ctx.l.graph(topic or None)
+    nodes = [{k: v for k, v in n.items() if v not in (None, "", 0) or k == "evidence"} for n in g["nodes"]]
+    for n in nodes:
+        n["last"] = (n.get("last") or "")[:16]
+    return {"nodes": nodes, "edges": [{k: e[k] for k in ("id", "source", "target", "kind") if k in e} | ({"why": e["why"]} if e.get("why") else {}) for e in g["edges"]],
+            "routes": g["routes"], "active_topic": ctx.topic}
+
+
+@tool("read", ALL, "读一样东西的全文。ref 可以是：文件路径（学习库里的相对路径，或挂载目录里的绝对路径；from/to 取其中几行）；文档 id 或 topic:/card:/lesson:/note:/insight:<id>（主题会带上它的路线、档案和里面的内容）；实验笔记的路径或 id（全部单元格和真实输出）；practice:<id>（练习依据、对话、练习文件和运行记录）；run:<id>（一次运行的完整输出）；message:<id>。",
+      {"ref": S, "from": I, "to": I}, ["ref"])
+def read(ctx, ref, **span):
+    l, ref = ctx.l, str(ref).strip()
+    kind, _, ident = ref.partition(":")
     if kind == "practice":
         p = l.practice(ident)
-        return {k: p[k] for k in ("id", "title", "state", "seed", "notebook_id", "next_focus")} | {
-            "dialogue": [{"role": m["role"], "content": m["content"]} for m in p["messages"]],
-            "insights": [{k: i[k] for k in ("kind", "title", "detail", "state")} for i in p["insights"]]}
-    raise ValueError("ref 应形如 topic:<id>、card:<id>、lesson:<id>、note:<id>、notebook:<id>、cell:<id> 或 practice:<id>")
+        return {**{k: p[k] for k in ("id", "title", "state", "seed", "goal", "file", "next_focus") if k in p},
+                "dialogue": [{"role": m["role"], "content": m["content"]} for m in l.messages(ident)],
+                "file_content": _file(ctx, p["file"]) if p.get("file") else None,
+                "runs": [_run_brief(e) for e in l.journal("ran", ref=p["file"], limit=8)],
+                "insights": [{k: i[k] for k in ("kind", "title", "detail", "state")} for i in p["insights"]]}
+    if kind == "run":
+        return {"id": ident, "outputs": readable_outputs(ctx.bridge.run_outputs(ident), 20000)}
+    if kind == "message":
+        row = l.index.one("SELECT m.*, t.title FROM messages m JOIN threads t ON t.id=m.thread WHERE m.id=?", (int(ident),))
+        if not row:
+            raise ValueError("找不到这条消息")
+        return {"id": row["id"], "thread": row["thread"], "conversation": row["title"], "role": row["role"], "content": row["content"], "at": row["at"]}
+    path = _path_of(ctx, ref)
+    _, rel = l.resolve(path)
+    k = kind_of(rel) if rel else "file"
+    if k == "topic":
+        t = l.topic(_id_at(l, rel))
+        inside = l.index.rows("SELECT id, kind, title, path FROM docs WHERE topic=? ORDER BY kind, updated DESC", (t["id"],))
+        return {**{k2: t[k2] for k2 in ("id", "title", "question", "parent", "state", "route", "path")}, "topic_notes": t["notes"],
+                "contents": inside, "branches": [_brief(x) for x in l.topics() if x["parent"] == t["id"]],
+                "practices": l.practices(t["id"]), "insights": l.insights(t["id"], "active")}
+    if k == "card":
+        c = l.card(_id_at(l, rel))
+        return {**{k2: c[k2] for k2 in ("id", "path", "title", "topic", "body", "question", "tags", "stage", "due", "reviews")},
+                "my_understanding": c["mine"], "note": "stage、due、reviews 和「我的理解」只由学习者填写",
+                "links": [{k2: x[k2] for k2 in ("id", "source", "source_title", "target", "target_title", "kind", "why")} for x in c["links"]],
+                "evidence": [_entry(e) for e in c["evidence"]]}
+    if k == "notebook":
+        nb = l.notebook(rel)
+        state = ctx.bridge.kernel_state(nb["id"])
+        return {"path": rel, "id": nb["id"], "title": nb["title"], "topic": nb["topic"], "kernel": state,
+                "cells": [{"id": c["id"], "kind": c["kind"], "source": c["source"], "output": readable_outputs(c["outputs"]),
+                           "output_is_stale": c["stale"], "ran": c["count"] is not None} for c in nb["cells"]]}
+    if k in ("lesson", "note", "insight"):
+        row = l.doc(_id_at(l, rel))
+        return {"id": row["id"], "path": rel, "kind": k, "title": row["title"], "attrs": row["attrs"], "body": row["body"],
+                "links": [{k2: x[k2] for k2 in ("id", "source", "target", "kind", "why")} for x in l.links_of(row["id"])]}
+    return _file(ctx, path, span.get("from"), span.get("to"))
 
 
-@tool("search", ROLES, "在全部学习资料里搜索：知识卡、课程、笔记、主题、实验单元格和以往对话。返回引用和片段，再用 read 读全文。",
-      {"query": S}, ["query"])
+def _id_at(l, rel):
+    row = l.index.one("SELECT id FROM files WHERE path=?", (rel,))
+    if not row or not row["id"]:
+        raise ValueError("这个文件还没有被索引：" + rel)
+    return row["id"]
+
+
+def _file(ctx, path, start=None, end=None):
+    got = ctx.l.read_file(path, 400000)
+    if got.get("binary"):
+        return {"path": got["path"], "binary": True, "size": got["size"], "note": "二进制文件；可以用 shell 里的工具查看"}
+    lines = got["content"].splitlines()
+    if start or end:
+        start, end = max(1, int(start or 1)), min(len(lines), int(end or len(lines)))
+        return {"path": got["path"], "from": start, "to": end, "lines": len(lines), "content": "\n".join(lines[start - 1:end])}
+    content = got["content"]
+    if len(content) > 60000:
+        content = content[:60000] + f"\n…（文件共 {len(lines)} 行，后面没有返回；用 from/to 读其余部分）"
+    return {"path": got["path"], "lines": len(lines), "content": content}
+
+
+def _entry(e):
+    return {"at": e["at"][:16], "actor": e["actor"], "type": e["type"], "refs": e["refs"], "data": e["data"]}
+
+
+def _run_brief(e):
+    return {"at": e["at"][:16], "by": e["actor"], **{k: e["data"].get(k) for k in ("file", "cell", "state", "summary", "sandbox")}}
+
+
+@tool("search", ALL, "在学习库里搜索：文档（主题、卡片、课程、笔记、实验笔记）的标题和正文、文件名、以往对话。返回引用和片段，再用 read 读全文。代码内容的搜索用 shell 里的 rg。", {"query": S}, ["query"])
 def search(ctx, query):
-    l, q = ctx.l, "%" + text(query, 200).strip() + "%"
-    if q == "%%":
-        raise ValueError("请给出搜索词")
-    hits = []
-    for kind, sql in (("card", "SELECT id, title, body||' '||understanding AS body FROM learn_cards WHERE title LIKE ? OR body LIKE ? OR understanding LIKE ?"),
-                      ("lesson", "SELECT id, title, body FROM learn_lessons WHERE title LIKE ? OR body LIKE ? OR objective LIKE ?"),
-                      ("note", "SELECT id, title, body FROM notes WHERE title LIKE ? OR body LIKE ? OR tags LIKE ?"),
-                      ("topic", "SELECT id, title, question AS body FROM learn_topics WHERE title LIKE ? OR question LIKE ? OR id LIKE ?"),
-                      ("cell", "SELECT c.id, n.title, c.source AS body FROM learn_cells c JOIN learn_notebooks n ON n.id=c.notebook_id WHERE c.source LIKE ? OR n.title LIKE ? OR c.id LIKE ?")):
-        for r in l.rows(sql + " LIMIT 8", (q, q, q)):
-            hits.append({"ref": kind + ":" + r["id"], "title": r["title"], "excerpt": _excerpt(r["body"], query)})
-    for r in l.rows("""SELECT m.id, m.role, m.content, s.title FROM messages m JOIN sessions s ON s.id=m.session_id
-                       WHERE m.content LIKE ? ORDER BY m.id DESC LIMIT 6""", (q,)):
-        hits.append({"ref": "message:" + str(r["id"]), "title": r["title"] + " · " + r["role"], "excerpt": _excerpt(r["content"], query)})
-    return hits
+    return ctx.l.search(query)
 
 
-def _excerpt(body, query, width=160):
-    body = str(body or "")
-    at = body.casefold().find(str(query).casefold())
-    start = max(0, at - width // 3) if at >= 0 else 0
-    return body[start:start + width].replace("\n", " ")
+@tool("journal", ALL, "读学习轨迹（最新的在前）。types 可选：asked、answered、judged、explained、ran、viewed、wrote、staged、reviewed、detour、bridged、insight、organized、searched、installed、action。ref 筛出和某个 id 或文件路径有关的记录；since 是 ISO 日期时间。",
+      {"types": LIST, "ref": S, "since": S, "actor": S, "limit": I})
+def journal(ctx, types=None, ref=None, since=None, actor=None, limit=40):
+    return [_entry(e) for e in ctx.l.journal(types, ref, since, None, actor, min(int(limit), 200))]
 
 
-@tool("conversation", ROLES, "读取一段对话的最近消息。lane 为 tutor（主讲）、flash（快答）或 practice（练习，需给 practice_id）；不给 topic_id 时用当前主题。",
-      {"lane": {"type": "string", "enum": ["tutor", "flash", "practice"]}, "topic_id": S, "practice_id": S, "limit": {"type": "integer"}}, ["lane"])
-def conversation(ctx, lane, topic_id=None, practice_id=None, limit=12):
-    l = ctx.l
-    if lane == "practice":
-        if not practice_id:
-            raise ValueError("读取练习对话需要 practice_id")
-        session = l.one("learn_practices", practice_id)["session_id"]
-    else:
-        session = l.threads(topic_id or ctx.topic_id)[lane + "_session"]
-    rows = ctx.store.messages(session)[-max(1, min(int(limit), 40)):]
-    return [{"id": m["id"], "role": m["role"], "content": m["content"][:8000], "at": m["created_at"]} for m in rows]
+@tool("conversation", ALL, "读一段对话的最近消息（带消息 id）。agent 是 tutor（主讲）或 flash（快答），topic 不给就是当前主题，给空字符串就是默认对话；或者直接给 thread（例如练习的 id）。",
+      {"agent": {"type": "string", "enum": ["tutor", "flash", "coach"]}, "topic": S, "thread": S, "limit": I})
+def conversation(ctx, agent="tutor", topic=None, thread=None, limit=12):
+    ident = thread or ctx.l.thread_for(agent, ctx.topic if topic is None else (topic or None))
+    rows = ctx.l.messages(ident, max(1, min(int(limit), 60)))
+    return {"thread": ident, "messages": [{"id": m["id"], "role": m["role"], "content": m["content"][:8000], "at": m["at"][:16]} for m in rows]}
 
 
-@tool("recent_changes", ROLES, "最近发生的事：学习者和各个 AI 做过的修改、运行、保存、练习和转交，最新的在前。",
-      {"limit": {"type": "integer"}})
-def recent_changes(ctx, limit=20):
-    rows = ctx.l.rows("SELECT kind,title,detail,target,at FROM events ORDER BY id DESC LIMIT ?", (max(1, min(int(limit), 60)),))
-    actions = ctx.l.rows("SELECT actor,summary,ref,state,created_at FROM learn_actions ORDER BY created_at DESC LIMIT ?", (max(1, min(int(limit), 60)),))
-    return {"events": rows, "ai_actions": actions}
+@tool("due", {"tutor"}, "现在到期、需要回顾的知识卡。要回顾时用 lattice:cards 展示块（review 设为 true），自评由学习者自己点。")
+def due(ctx):
+    return [{k: c[k] for k in ("id", "title", "question", "due", "stage", "topic")} for c in ctx.l.due_cards()]
 
 
-@tool("learner_profile", ROLES, "练习复盘记下的薄弱点、做得好的地方，以及最近一次练习后定下的讲解重点（含当前主题的上级主线）。",
-      {"topic_id": S})
-def learner_profile(ctx, topic_id=None):
-    return ctx.l.learner_profile(topic_id or ctx.topic_id)
+# ---- the shell ------------------------------------------------------------------------------------
+
+@tool("shell", {"tutor", "coach", "organizer"}, "在沙箱里运行一条 bash 命令，工作目录是学习库：用来查看、搜索、分析和按规矩组织文件（ls、rg、cat、head、git log、python…）。学习库可写，挂载的外部目录只读，不联网，看不到家目录的其余部分。Python 用学习库的环境。命令有时限，输出过长会截断。命令改动的文件会作为一次可撤销的操作提交；改到只归学习者的部分会被自动退回。",
+      {"command": S, "timeout": I}, ["command"])
+def shell(ctx, command, timeout=None):
+    command = text(command, 20000)
+    bridge = ctx.bridge
+    limit = max(3, min(int(timeout or bridge.config.read()["shell_timeout"]), 600))
+
+    def start(done):
+        def finish(result):
+            if isinstance(result, Exception):
+                return done({"error": str(result)})
+            restored = ctx.l.police()
+            changed = [rel for _, rel in ctx.l.vault.changes()]
+            ctx.l.index.sync()
+            if changed:
+                ctx.act(f"用命令行改了 {len(changed)} 个文件", "file:" + changed[0] if len(changed) == 1 else None)
+                bridge.changed(changed)
+            done({**result, "changed_files": changed[:50], **({"restored": restored} if restored else {})})
+        bridge.background(lambda: bridge.agent_shell(command, limit), finish)
+    return Later(start)
 
 
-@tool("due_cards", {"tutor"}, "列出现在到期、需要回顾的知识卡。回顾时由你提问，记不记得住由学习者自己在界面里点。")
-def due_cards(ctx):
-    # Same rule as the knowledge page: a card never reviewed comes due a day after it was saved.
-    cards = ctx.l.rows("SELECT id,title,question,due_at,created_at,stage FROM learn_cards WHERE stage!='suggested'")
-    current = datetime.now().astimezone()
-    return [c for c in cards if (datetime.fromisoformat(c["due_at"]) if c["due_at"] else datetime.fromisoformat(c["created_at"]) + timedelta(days=1)) <= current]
+# ---- the web --------------------------------------------------------------------------------------
+
+@tool("web_search", {"tutor", "flash", "coach"}, "联网搜索。返回标题、链接和摘要；需要细读时用 web_fetch。什么时候需要查、信哪个来源由你判断；用到的内容在回复里注明出处。", {"query": S}, ["query"])
+def web_search(ctx, query):
+    from . import web
+
+    def start(done):
+        def finish(result):
+            if isinstance(result, Exception):
+                return done({"error": "搜索失败：" + str(result)})
+            ctx.l.record("searched", {"query": result["query"], "backend": result["backend"], "urls": [r["url"] for r in result["results"]][:8]},
+                         ctx.agent, [ctx.thread])
+            ctx.turn.sources += [{"title": r["title"], "url": r["url"]} for r in result["results"][:5]]
+            done(result)
+        ctx.bridge.background(lambda: web.search(ctx.bridge.config.read()["web"], query), finish)
+    return Later(start)
 
 
-@tool("list_files", {"tutor"}, "列出学习者挂载的代码目录；给 project_id 时列出该目录里的文件（path 为相对路径）。只读。",
-      {"project_id": S, "path": S})
-def list_files(ctx, project_id=None, path=""):
-    if not project_id:
-        return ctx.store.projects()
-    return ctx.store.project_files(project_id, path)
+@tool("web_fetch", {"tutor", "flash", "coach"}, "读一个网页的正文（转成纯文本，过长会截断）。不能读本机和局域网地址。", {"url": S}, ["url"])
+def web_fetch(ctx, url):
+    from . import web
+
+    def start(done):
+        def finish(result):
+            if isinstance(result, Exception):
+                return done({"error": "读取失败：" + str(result)})
+            ctx.l.record("searched", {"url": result["url"], "title": result["title"]}, ctx.agent, [ctx.thread])
+            ctx.turn.sources.append({"title": result["title"] or result["url"], "url": result["url"]})
+            done(result)
+        ctx.bridge.background(lambda: web.fetch(url), finish)
+    return Later(start)
 
 
-@tool("read_file", {"tutor"}, "读取挂载目录里的一个文本文件。只读。", {"project_id": S, "path": S}, ["project_id", "path"])
-def read_file(ctx, project_id, path):
-    content = ctx.store.file_read(project_id, path)
-    ctx.act(f"读取了文件 {path}", False)
-    return content
+# ---- topics and the map ---------------------------------------------------------------------------
+
+@tool("create_topic", {"tutor"}, "新建一个学习主题；parent 给出时作为那条主线下的分支。这一轮结束时界面会切到它，这一轮的问答会归到它下面。carry_ids 是要一起带过去的更早消息的 id（先用 conversation 看清哪些问答属于这个主题，提问和回答都要带上；别的话题的消息留在原处）。route 可以顺便给出主干路线。",
+      {"title": S, "question": S, "parent": S, "carry_ids": {"type": "array", "items": I},
+       "route": {"type": "array", "items": _obj({"title": S, "ref": S, "why": S}, ["title"])}}, ["title", "question"])
+def create_topic(ctx, title, question, parent=None, carry_ids=(), route=None):
+    t = ctx.l.topic_save({"title": title, "question": question, "parent": parent or None, **({"route": route} if route else {})}, ctx.agent)
+    ctx.turn.focus, ctx.turn.refocus = t["id"], True
+    ctx.turn.carry = [int(i) for i in carry_ids][:200]
+    ctx.act(("开了分支" if parent else "新建了主题") + f"「{t['title']}」", "topic:" + t["id"])
+    return {"id": t["id"], "title": t["title"], "path": t["path"]}
 
 
-# ---- changing things ---------------------------------------------------------
-
-@tool("create_topic", {"tutor"}, "新建一个学习主题；parent_id 给出时作为那条主线下的兴趣分支。这一轮结束时界面会切到它，这一轮对话会归到它下面。carry_ids 是要一起带过去的更早消息的 id（先用 conversation 看清哪些问答属于这个主题，提问和回答都要带上；别的话题的消息留在原处）。",
-      {"title": S, "question": S, "parent_id": S, "carry_ids": {"type": "array", "items": {"type": "integer"}}}, ["title", "question"])
-def create_topic(ctx, title, question, parent_id=None, carry_ids=()):
-    t = ctx.l.topic_save({"title": title, "question": question, "parent_id": parent_id or None})
-    ctx.bridge.turn_focus[ctx.session_id] = t["id"]
-    ctx.bridge.turn_carry[ctx.session_id] = [int(i) for i in carry_ids][:200]
-    ctx.act(("开了分支" if parent_id else "新建了主题") + f"「{t['title']}」", True, "topic:" + t["id"])
-    return _topic_brief(ctx.l, t)
+@tool("focus_topic", {"tutor"}, "把焦点切到另一个已有主题（给空字符串就是回到默认对话）。这一轮结束时界面会切过去，这一轮的问答也会归到它下面；carry_ids 是要一起带过去的更早消息的 id（比如你刚出的题和学习者之前的提问），用法同 create_topic。",
+      {"topic": S, "carry_ids": {"type": "array", "items": I}}, ["topic"])
+def focus_topic(ctx, topic, carry_ids=()):
+    t = ctx.l.topic(topic) if topic else None
+    ctx.turn.focus, ctx.turn.refocus = (t["id"] if t else None), True
+    ctx.turn.carry = [int(i) for i in carry_ids][:200]
+    ctx.act(f"切换到主题「{t['title']}」" if t else "回到默认对话", "topic:" + t["id"] if t else None, False)
+    return {"id": t["id"], "title": t["title"]} if t else {"default_conversation": True}
 
 
-@tool("focus_topic", {"tutor"}, "把焦点切到另一个已有主题。这一轮结束时界面会切过去，这一轮对话也会归到它下面。", {"topic_id": S}, ["topic_id"])
-def focus_topic(ctx, topic_id):
-    t = ctx.l.one("learn_topics", topic_id)
-    ctx.bridge.turn_focus[ctx.session_id] = topic_id
-    ctx.act(f"切换到主题「{t['title']}」", False, "topic:" + topic_id)
-    return _topic_brief(ctx.l, t)
+@tool("update_topic", {"tutor"}, "更新一个主题（不给 topic 就是当前主题）：notes 整篇替换主题档案（讲到了哪里、学习者留下的疑问、接下来往哪走；这是跨天续讲的记忆，保持精炼）；也可以改 question 和 state（active / parked / completed）。",
+      {"topic": S, "notes": S, "question": S, "state": {"type": "string", "enum": ["active", "parked", "completed"]}})
+def update_topic(ctx, topic=None, notes=None, question=None, state=None):
+    ident = topic or ctx.topic
+    if not ident:
+        raise ValueError("默认对话没有主题档案；先建一个主题")
+    change = {k: v for k, v in (("notes", notes), ("question", question), ("state", state)) if v is not None}
+    t = ctx.l.topic_save({"id": ident, **change}, ctx.agent)
+    ctx.act("更新了主题档案" if notes is not None else "更新了主题", "topic:" + ident)
+    return {"id": t["id"], "title": t["title"]}
 
 
-@tool("update_topic_notes", {"tutor"}, "改写当前主题的档案：讲到了哪里、学习者留下的疑问、接下来往哪走。这是跨天续讲时的长期记忆，整篇替换，保持精炼。",
-      {"notes": S}, ["notes"])
-def update_topic_notes(ctx, notes):
-    ctx.l.set_topic_notes(ctx.topic_id, notes)
-    ctx.act("更新了主题档案", True, "topic:" + ctx.topic_id)
-    return {"ok": True}
+@tool("route", {"tutor"}, "写下或调整一个主题的主干路线：按顺序给出全部关键节点（整条替换）。每一站有 title，可以用 ref 指向已有的卡片、课程或文件，why 说明这一站为什么在这里。",
+      {"topic": S, "steps": {"type": "array", "items": _obj({"title": S, "ref": S, "why": S}, ["title"])}}, ["steps"])
+def route(ctx, steps, topic=None):
+    ident = topic or ctx.topic
+    if not ident:
+        raise ValueError("默认对话没有路线；先建一个主题")
+    for step in steps:
+        if step.get("ref"):
+            step["ref"] = ctx.l.resolve_ref(step["ref"])
+    ctx.l.topic_save({"id": ident, "route": steps}, ctx.agent)
+    ctx.act(f"把主干路线定为 {len(steps)} 站", "topic:" + ident)
+    return {"topic": ident, "steps": len(steps)}
 
 
-@tool("save_knowledge", {"tutor", "organizer"}, "把已经讲过、学习者也回应过的内容存进学习档案（直接保存，学习者可以撤销）。lessons 是值得以后回看的完整讲解；cards 一张一个脱离对话也成立的知识点，已有同名卡时内容作为补充附上；relations 的 kind 为 prerequisite/part_of/related/applies_to/contrasts；notes 是依赖情境的经验。",
-      {"lessons": {"type": "array", "items": _obj({"title": S, "objective": S, "body": S}, ["title", "body"])},
-       "cards": {"type": "array", "items": _obj({"title": S, "body": S, "question": S, "tags": {"type": "array", "items": S}}, ["title", "body"])},
-       "relations": {"type": "array", "items": _obj({"source": S, "target": S, "kind": S, "reason": S}, ["source", "target", "kind"])},
-       "notes": {"type": "array", "items": _obj({"title": S, "body": S, "folder": S}, ["title", "body"])}})
-def save_knowledge(ctx, lessons=(), cards=(), relations=(), notes=()):
-    l, topic, done = ctx.l, ctx.topic_id, {"lessons": [], "cards": [], "supplements": [], "relations": [], "notes": []}
-    payload = l.validate_payload({"lessons": list(lessons), "cards": list(cards), "relations": list(relations), "notes": list(notes)})
-    for item in payload["lessons"]:
-        done["lessons"].append(l.lesson_save({**item, "topic_id": topic}, origin=ctx.role)["id"])
-    for item in payload["cards"]:
-        old = l.db.execute("SELECT id FROM learn_cards WHERE canonical=?", (item["title"].strip().casefold(),)).fetchone()
-        if old:
-            l.card_supplement(old[0], item.get("body", ""), ctx.role)
-            done["supplements"].append(old[0])
-        else:
-            done["cards"].append(l.card_save({**item, "topic_id": topic, "stage": "seen", "provenance": {"lane": ctx.role}}, origin=ctx.role)["id"])
-    for r in payload["relations"]:
-        done["relations"].append(l.relation_add(**r))
-    for item in payload["notes"]:
-        done["notes"].append(ctx.store.save_note({"title": clean_title(item["title"]), "body": text(item["body"]),
-                                                  "folder": text(item.get("folder") or "经验", 80), "tags": ["AI"]})["id"])
-    parts = [f"{len(done[k])} {n}" for k, n in (("lessons", "节课"), ("cards", "张卡"), ("supplements", "条卡片补充"),
-                                                ("relations", "条关系"), ("notes", "篇经验文档")) if done[k]]
-    first = ("lesson:" + done["lessons"][0]) if done["lessons"] else ("card:" + done["cards"][0]) if done["cards"] else None
-    ctx.act("保存了 " + "、".join(parts), True, first)
-    return done
-
-
-def _notebook_for(ctx, notebook_id):
-    l = ctx.l
-    if ctx.role == "practice":
-        own = l.one("learn_practices", ctx.practice_id)["notebook_id"]
-        if notebook_id and notebook_id != own:
-            raise ValueError("练习教练只能写这次练习的笔记本")
-        return own
-    if notebook_id:
-        if l.one("learn_notebooks", notebook_id)["topic_id"] != ctx.topic_id:
-            raise ValueError("只能写当前主题的笔记本")
-        return notebook_id
-    practice_nbs = {r["notebook_id"] for r in l.rows("SELECT notebook_id FROM learn_practices WHERE topic_id=?", (ctx.topic_id,))}
-    rows = [r["id"] for r in l.rows("SELECT id FROM learn_notebooks WHERE topic_id=? ORDER BY created_at", (ctx.topic_id,)) if r["id"] not in practice_nbs]
-    return rows[0] if rows else l.notebook_create(ctx.topic_id)["id"]
-
-
-@tool("write_cell", {"tutor", "practice", "organizer"}, "在实验笔记里新增或改写一个单元格（kind 为 code 或 markdown）。给 cell_id 时改写那一格；不给 notebook_id 时，主讲写进当前主题的实验笔记，练习教练写进这次练习的笔记本。想看结果就接着调用 run_cells。",
-      {"source": S, "kind": {"type": "string", "enum": ["code", "markdown"]}, "notebook_id": S, "cell_id": S}, ["source"])
-def write_cell(ctx, source, kind="code", notebook_id=None, cell_id=None):
-    l = ctx.l
-    if cell_id:
-        old = l.one("learn_cells", cell_id)
-        nb = _notebook_for(ctx, old["notebook_id"])
-        cell = l.cell_save({"id": cell_id, "source": source, "kind": kind})
-        ctx.act("改写了一个单元格", True, "cell:" + cell_id)
-    else:
-        nb = _notebook_for(ctx, notebook_id)
-        cell = l.cell_save({"notebook_id": nb, "kind": kind, "source": source})
-        ctx.act("写了一个" + ("代码" if kind == "code" else "文字") + "单元格", True, "cell:" + cell["id"])
-    ctx.bridge.changed(ctx.topic_id)
-    return {"cell_id": cell["id"], "notebook_id": nb}
-
-
-@tool("run_cells", {"tutor", "practice"}, "在学习者本机的 Jupyter 内核里运行单元格并等待真实输出。不给 cell_ids 时运行整本笔记本。学习者关掉自动运行时，这个工具会拒绝，请让学习者自己点运行。",
-      {"notebook_id": S, "cell_ids": {"type": "array", "items": S}})
-def run_cells(ctx, notebook_id=None, cell_ids=None):
-    if not ctx.bridge.providers.read()["agent_auto_run"]:
-        raise ValueError("学习者关闭了自动运行代码。请告诉学习者在实验笔记里自己运行，再读取输出。")
-    nb = _notebook_for(ctx, notebook_id)
-    cells = [c for c in ctx.l.notebook(nb)["cells"] if c["kind"] == "code" and (not cell_ids or c["id"] in cell_ids)]
-    if not cells:
-        raise ValueError("没有可以运行的代码单元格")
-    ctx.bridge.run_notebook(nb, cell_ids=[c["id"] for c in cells])
-    ctx.act(f"运行了 {len(cells)} 个单元格", False, "notebook:" + nb)
-    return Deferred(nb, [c["id"] for c in cells])
-
-
-@tool("start_practice", {"tutor"}, "开一个练习分支：练习教练会带着学习者在一份专属笔记本里一步步实现刚讲过的内容。lesson 写清这次练习依据的讲解要点（教练只看得到它），goal 是练习要达到的目标。每个主题同时只能有一个进行中的练习。",
-      {"lesson": S, "goal": S}, ["lesson", "goal"])
-def start_practice(ctx, lesson, goal):
-    seed = text(lesson, 20000).strip() + "\n\n**练习目标：** " + text(goal, 1000).strip()
-    practice = ctx.l.practice_create(ctx.topic_id, seed, name=text(goal, 1000).strip().rstrip("。"))
-    ctx.bridge.after_turn.setdefault(ctx.session_id, []).append(lambda: ctx.bridge.practice_send(practice["id"], task="start"))
-    ctx.act(f"开了练习「{practice['title']}」", False, "practice:" + practice["id"])
-    return {"practice_id": practice["id"], "title": practice["title"]}
-
-
-@tool("record_insight", {"tutor"}, "记下学习者的一个薄弱点（kind=weak）或做得好的地方（kind=strength），需有对话或运行记录里的证据。之后各个 AI 都能通过 learner_profile 看到。",
-      {"kind": {"type": "string", "enum": ["weak", "strength"]}, "title": S, "detail": S}, ["kind", "title", "detail"])
-def record_insight(ctx, kind, title, detail):
-    ident = ctx.l.insight_add(ctx.topic_id, kind, title, detail)
-    ctx.act(("记下薄弱点" if kind == "weak" else "记下做得好的地方") + f"「{title}」", True, "insight:" + ident)
+@tool("link", {"tutor", "organizer"}, "在知识图上加一条关系。source 是一个文档（主题、卡片、课程、笔记），target 是另一个文档或 file:<路径>；都可以用 id 或标题。kind：prerequisite（source 是 target 的前置）、part_of（source 是 target 的一部分）、related、applies_to、contrasts、explains（source 解释了 target 的什么，岔路接回主干时用）。why 写清理由。",
+      {"source": S, "target": S, "kind": {"type": "string", "enum": sorted(LINK_KINDS)}, "why": S}, ["source", "target", "kind"])
+def link(ctx, source, target, kind, why=""):
+    ident = ctx.l.link(source, target, kind, why, ctx.agent)
+    ctx.act(f"在知识图上加了一条「{kind}」关系", None)
     return {"id": ident}
 
 
-@tool("resolve_insight", {"tutor"}, "学习者已经用证据表明克服了某个薄弱点时，把它标记为已克服。", {"id": S}, ["id"])
-def resolve_insight(ctx, id):
-    ctx.l.insight_resolve(id)
-    ctx.act("把一个薄弱点标为已克服", True, "insight:" + id)
+@tool("unlink", {"tutor", "organizer"}, "去掉知识图上的一条关系（id 来自 graph 或 read）。", {"id": S}, ["id"])
+def unlink(ctx, id):
+    ctx.l.unlink(id[2:] if id.startswith("r:") else id)
+    ctx.act("去掉了一条关系")
     return {"ok": True}
+
+
+@tool("save_knowledge", {"tutor", "organizer"}, "把已经讲过、学习者也回应过的内容存进学习库（直接保存，学习者可以撤销）。lessons 是值得以后回看的完整讲解；cards 一张一个脱离对话也成立的知识点（已有同名卡时内容作为补充附在后面）；notes 是依赖情境的经验；relations 同 link。都归到当前主题下。",
+      {"lessons": {"type": "array", "items": _obj({"title": S, "objective": S, "body": S}, ["title", "body"])},
+       "cards": {"type": "array", "items": _obj({"title": S, "body": S, "question": S, "tags": LIST}, ["title", "body"])},
+       "notes": {"type": "array", "items": _obj({"title": S, "body": S, "folder": S}, ["title", "body"])},
+       "relations": {"type": "array", "items": _obj({"source": S, "target": S, "kind": S, "why": S}, ["source", "target", "kind"])}})
+def save_knowledge(ctx, lessons=(), cards=(), notes=(), relations=()):
+    l, done = ctx.l, {"lessons": [], "cards": [], "supplements": [], "notes": [], "relations": []}
+    if len(lessons) > 5 or len(cards) > 10 or len(notes) > 5 or len(relations) > 30:
+        raise ValueError("一次最多 5 节课、10 张卡、5 篇文档、30 条关系")
+    if not (lessons or cards or notes or relations):
+        raise ValueError("没有可以保存的内容")
+    for item in lessons:
+        done["lessons"].append(l.lesson_save({**item, "topic": ctx.topic}, ctx.agent)["id"])
+    for item in cards:
+        existed = l.index.one("SELECT id FROM docs WHERE kind='card' AND lower(title)=lower(?)", (title_of(item["title"]),))
+        card = l.card_save({**item, "topic": ctx.topic, "stage": "seen"}, ctx.agent)
+        done["supplements" if existed else "cards"].append(card["id"])
+    for item in notes:
+        rel = l.note_create(item["title"], item["body"], item.get("folder") or "经验", ["AI"], ctx.agent, ctx.topic)
+        done["notes"].append(rel)
+    for r in relations:
+        done["relations"].append(l.link(r["source"], r["target"], r["kind"], r.get("why", ""), ctx.agent))
+    parts = [f"{len(done[k])} {n}" for k, n in (("lessons", "节课"), ("cards", "张卡"), ("supplements", "条卡片补充"),
+                                                ("notes", "篇经验文档"), ("relations", "条关系")) if done[k]]
+    first = ("lesson:" + done["lessons"][0]) if done["lessons"] else ("card:" + (done["cards"] or done["supplements"])[0]) if (done["cards"] or done["supplements"]) \
+        else ("file:" + done["notes"][0]) if done["notes"] else None
+    ctx.act("保存了 " + "、".join(parts), first)
+    return done
+
+
+@tool("record", {"tutor", "coach"}, "写一条学习轨迹。type：judged（对学习者某个回答或某段代码的判断和理由）、explained（讲了哪个概念、讲到什么深度）、detour（从主干哪里岔出去、为什么）、bridged（岔路和主干接上了什么）。refs 是相关的 id 或文件路径。",
+      {"type": {"type": "string", "enum": sorted(AGENT_RECORDS)}, "summary": S, "detail": S, "refs": LIST}, ["type", "summary"])
+def record(ctx, type, summary, detail="", refs=()):
+    if type not in AGENT_RECORDS:
+        raise ValueError("只能记 " + "、".join(sorted(AGENT_RECORDS)))
+    entry = ctx.l.record(type, {"summary": text(summary, 1000), "detail": text(detail, 4000)}, ctx.agent,
+                         [*refs, *([ctx.topic] if ctx.topic else []), ctx.thread])
+    return {"id": entry["id"]}
+
+
+@tool("insight", {"tutor"}, "记下学习者的一个薄弱点（kind=weak）或做得好的地方（kind=strength），需要对话、运行记录或作答里的证据；或者在学习者已经用证据表明克服了某个薄弱点时，给出 resolve（它的 id）把它划掉。",
+      {"kind": {"type": "string", "enum": ["weak", "strength"]}, "title": S, "detail": S, "resolve": S})
+def insight(ctx, kind=None, title=None, detail="", resolve=None):
+    if resolve:
+        ctx.l.insight_resolve(resolve, ctx.agent)
+        ctx.act("把一个薄弱点标为已克服", "insight:" + resolve)
+        return {"ok": True}
+    if not kind or not title:
+        raise ValueError("记录要给出 kind 和 title；划掉要给出 resolve")
+    ident = ctx.l.insight_add(ctx.topic, kind, title, detail, ctx.practice, ctx.agent)
+    ctx.act(("记下薄弱点" if kind == "weak" else "记下做得好的地方") + f"「{title}」", "insight:" + ident)
+    return {"id": ident}
+
+
+# ---- practices ----------------------------------------------------------------------------------
+
+@tool("start_practice", {"tutor"}, "开一个练习：练习教练会带着学习者在一个专属的练习文件里一步步实现刚讲过的内容。lesson 写清这次练习依据的讲解要点（教练只看得到它），goal 是练习要达到的目标，file_type 是练习文件的扩展名（.py、.ipynb、.c、.rs、.js…，按内容选，默认 .py）。",
+      {"lesson": S, "goal": S, "file_type": S}, ["lesson", "goal"])
+def start_practice(ctx, lesson, goal, file_type=".py"):
+    p = ctx.l.practice_create(ctx.topic, lesson, goal, file_type if file_type.startswith(".") else "." + file_type, None, ctx.agent)
+    ctx.turn.after.append(lambda: ctx.bridge.practice_send(p["id"], task="start"))
+    ctx.act(f"开了练习「{p['title']}」", "practice:" + p["id"])
+    return {"practice": p["id"], "title": p["title"], "file": p["file"]}
 
 
 @tool("finish_practice_review", {"tutor"}, "复盘一次练习时调用一次：记下这次练习暴露的薄弱点和做得好的地方（各附证据），以及接下来讲解的重点，并把练习标记为已复盘。",
-      {"practice_id": S, "next_focus": S,
+      {"practice": S, "next_focus": S,
        "weak_points": {"type": "array", "items": _obj({"title": S, "detail": S}, ["title", "detail"])},
        "strengths": {"type": "array", "items": _obj({"title": S, "detail": S}, ["title", "detail"])}},
-      ["practice_id", "next_focus", "weak_points", "strengths"])
-def finish_practice_review(ctx, practice_id, next_focus, weak_points, strengths):
-    p = ctx.l.insights_record(practice_id, {"weak_points": weak_points, "strengths": strengths, "next_focus": next_focus})
-    ctx.bridge.reviews.pop(ctx.topic_id, None)
-    ctx.act(f"复盘了练习，记下 {len(weak_points)} 个薄弱点", True, "practice:" + practice_id)
+      ["practice", "next_focus", "weak_points", "strengths"])
+def finish_practice_review(ctx, practice, next_focus, weak_points, strengths):
+    p = ctx.l.practice_review(practice, weak_points, strengths, next_focus, ctx.agent)
+    ctx.bridge.reviews.pop(practice, None)
+    ctx.act(f"复盘了练习，记下 {len(weak_points)} 个薄弱点", "practice:" + practice)
     return {"state": p["state"]}
 
 
-@tool("tidy_note", {"tutor", "organizer"}, "整理一篇笔记：给出标题、整理后的正文（Markdown，可用 [[标题]] 连到已有的卡片或笔记）、文件夹和标签。整篇替换；原文留在学习库的 git 历史里，学习者也可以撤销。",
-      {"note_id": S, "title": S, "body": S, "folder": S, "tags": {"type": "array", "items": S}}, ["note_id", "title", "body"])
-def tidy_note(ctx, note_id, title, body, folder=None, tags=None):
-    old = ctx.store.get_note(note_id)
-    if not old:
-        raise ValueError("找不到这篇笔记")
-    note = ctx.store.save_note({"id": note_id, "title": title, "body": text(body), "folder": folder or old["folder"],
-                                "tags": tags if tags is not None else old["tags"], "pinned": old["pinned"]})
-    ctx.act(f"整理了笔记「{note['title']}」", True, "note:" + note_id)
-    return {"note_id": note_id, "title": note["title"], "folder": note["folder"]}
-
-
-@tool("hand_to_tutor", {"flash"}, "发现学习者缺的是一整块基础、不是一个小障碍时，转交给主讲系统讲。summary 写清学习者卡在哪里、你已经解释了什么。",
-      {"summary": S}, ["summary"])
+@tool("hand_to_tutor", {"flash"}, "发现学习者缺的是一整块基础、不是一个小障碍时，转交给主讲系统讲。summary 写清学习者卡在哪里、你已经解释了什么。", {"summary": S}, ["summary"])
 def hand_to_tutor(ctx, summary):
-    ctx.store.emit("handoff", "快答转交主讲", text(summary, 3000), ctx.topic_id)
-    ctx.act("转交给主讲：" + text(summary, 3000)[:60], False, "handoff:" + ctx.topic_id)
+    ctx.act("转交给主讲：" + text(summary, 3000)[:80], "handoff:" + (ctx.topic or ""), False)
+    ctx.l.record("action", {"summary": "快答转交主讲", "handoff": text(summary, 3000), "topic": ctx.topic}, ctx.agent, [ctx.thread])
     return {"ok": True}
+
+
+# ---- the learner's side ----------------------------------------------------------------------------
+
+@tool("open", {"tutor", "flash", "coach"}, "在学习者自己的面板里打开一个文件，用来指给 TA 看：line 定位到某一行，highlight 高亮一段原文，cell 定位到实验笔记的某一格。不移动、不关闭学习者已有的面板。",
+      {"file": S, "line": I, "highlight": S, "cell": S}, ["file"])
+def open_file(ctx, file, line=None, highlight=None, cell=None):
+    path = _path_of(ctx, file)
+    absolute, rel = ctx.l.resolve(path)
+    if not absolute.exists():
+        raise ValueError("文件不存在：" + path)
+    ctx.bridge.announce({"type": "open", "path": rel or str(absolute), "line": line, "highlight": highlight, "cell": cell, "agent": ctx.agent})
+    ctx.act("在你那边打开了 " + (rel or str(absolute)).rsplit("/", 1)[-1], "file:" + (rel or str(absolute)), False)
+    return {"opened": rel or str(absolute)}
+
+
+@tool("suggest", {"tutor", "coach"}, "对学习者的一个文件提修改建议：old 是文件里现有的一段原文（必须只出现一次；不给 old 表示把 new 加到文件末尾），new 是改成什么，why 一句话说明。建议显示在你的回复下面，学习者点了才应用。",
+      {"file": S, "old": S, "new": S, "why": S}, ["file", "new"])
+def suggest(ctx, file, new, old="", why=""):
+    path = _path_of(ctx, file)
+    got = ctx.l.read_file(path, 4 * 1024 * 1024)
+    if got.get("binary"):
+        raise ValueError("不能对二进制文件提建议")
+    if old and got["content"].count(old) != 1:
+        raise ValueError("old 必须在文件里恰好出现一次（现在出现了 %d 次）" % got["content"].count(old))
+    item = {"id": f"s{len(ctx.turn.suggestions) + 1}", "file": got["path"], "old": text(old), "new": text(new), "why": text(why, 500)}
+    ctx.turn.suggestions.append(item)
+    return {"suggestion": item["id"], "note": "已显示给学习者，等 TA 决定"}
+
+
+def _write(ctx, rel, content, summary):
+    """Write a file for an agent; a card's learner-owned parts are put back. Returns a note when that happened."""
+    before = ctx.l.vault.read_text(rel) if ctx.l.vault.path(rel).exists() else None
+    ctx.l.write_file(rel, content)
+    restored = kind_of(rel) == "card" and before is not None and ctx.l.keep_owned(rel, before)
+    ctx.l.index.reindex(rel)
+    ctx.bridge.changed([rel])
+    ctx.act(summary, "file:" + rel)
+    return {"restored": "理解阶段、回顾安排和「我的理解」只归学习者，这几处已还原"} if restored else {}
+
+
+@tool("edit", {"tutor", "coach", "organizer"}, "直接改学习库里的一个文件：把 old（必须只出现一次）换成 new。只用于你自己的示例和实验文件、整理学习者刚写完的东西，或者学习者明确让你改的时候；其余情况用 suggest。",
+      {"file": S, "old": S, "new": S}, ["file", "old", "new"])
+def edit(ctx, file, old, new):
+    rel = _guard(ctx, _path_of(ctx, file))
+    content = ctx.l.vault.read_text(rel)
+    if content.count(old) != 1:
+        raise ValueError("old 必须在文件里恰好出现一次（现在出现了 %d 次）" % content.count(old))
+    return {"file": rel, **_write(ctx, rel, content.replace(old, text(new), 1), "改了 " + rel.rsplit("/", 1)[-1])}
+
+
+@tool("write", {"tutor", "coach", "organizer"}, "新建或整篇改写学习库里的一个文件（不给目录时放进 code/）。Markdown 文档要保留开头的属性块。规则同 edit。",
+      {"file": S, "content": S}, ["file", "content"])
+def write(ctx, file, content):
+    path = str(file).strip()
+    if "/" not in path:
+        path = "code/" + slug(path, 120)
+    rel = _guard(ctx, path)
+    existed = ctx.l.vault.path(rel).exists()
+    return {"file": rel, "created": not existed, **_write(ctx, rel, text(content, 2_000_000), ("改写了 " if existed else "新建了 ") + rel.rsplit("/", 1)[-1])}
+
+
+@tool("write_cell", {"tutor", "coach", "organizer"}, "在实验笔记里新增或改写一个单元格（kind 为 code 或 markdown）。notebook 是路径或 id；不给时写进当前练习的笔记本，或者当前主题最近的实验笔记（没有就新建一本）。给 cell 时改写那一格；after 指定插在哪一格后面。想看结果就接着用 run。",
+      {"source": S, "kind": {"type": "string", "enum": ["code", "markdown"]}, "notebook": S, "cell": S, "after": S}, ["source"])
+def write_cell(ctx, source, kind="code", notebook=None, cell=None, after=None):
+    l = ctx.l
+    if notebook:
+        path = _path_of(ctx, notebook)
+    elif ctx.practice and l.practice(ctx.practice).get("file", "").endswith(".ipynb"):
+        path = l.practice(ctx.practice)["file"]
+    else:
+        recent = l.index.one("SELECT path FROM docs WHERE kind='notebook' AND topic IS ? ORDER BY updated DESC LIMIT 1", (ctx.topic,))
+        path = recent["path"] if recent else l.notebook_create("实验笔记" if not ctx.topic else l.doc(ctx.topic)["title"] + " · 实验", ctx.topic)
+    rel = _guard(ctx, path)
+    ident = l.cell_save(rel, text(source, 400000), kind, cell, after, ctx.agent)
+    ctx.bridge.changed([rel])
+    ctx.act(("改写了一个单元格" if cell else "写了一个" + ("代码" if kind == "code" else "文字") + "单元格"), "cell:" + rel + "#" + ident)
+    return {"notebook": rel, "cell": ident}
+
+
+@tool("run", {"tutor", "coach"}, "运行一个文件并等它结束，取回真实输出：.py、.ipynb（cells 指定单元格，不给就全部）、.c、.cpp、.rs、.go、.js、.ts、.sh 等。在沙箱里执行（不联网）；缺 Python 包时会自动装上再跑一次。学习者关掉了「允许 AI 运行代码」时会拒绝，这时请学习者自己点运行。",
+      {"file": S, "cells": LIST}, ["file"])
+def run(ctx, file, cells=None):
+    bridge = ctx.bridge
+    if not bridge.config.read()["agent_auto_run"]:
+        raise ValueError("学习者关闭了「允许 AI 运行代码」。请学习者自己点运行，再读取输出。")
+    path = _path_of(ctx, file)
+    absolute, rel = ctx.l.resolve(path)
+    if not absolute.is_file():
+        raise ValueError("文件不存在：" + path)
+
+    def start(done):
+        def finish(result):
+            outputs = result.get("outputs") or []
+            readable = "\n".join(readable_outputs(outputs, 6000))
+            done({"state": result.get("state"), "exit_code": result.get("exit_code"), "seconds": result.get("seconds"),
+                  "output": readable[-12000:], "figures": sum(1 for o in outputs if "image/png" in (o.get("data") or {})),
+                  **({"cells": result["cells"]} if result.get("cells") else {}), **({"note": result["note"]} if result.get("note") else {})})
+        try:
+            bridge.run_for_agent(ctx, rel or str(absolute), cells, finish)
+        except Exception as exc:
+            done({"error": str(exc)})
+    return Later(start)
+
+
+@tool("install", {"tutor", "coach"}, "往学习库的 Python 环境装包（只装预编译的 wheel），并写进环境定义 envs/<env>.txt，学习者可以撤销。env 默认 default。", {"packages": LIST, "env": S}, ["packages"])
+def install(ctx, packages, env="default"):
+    bridge = ctx.bridge
+
+    def start(done):
+        def finish(result):
+            if isinstance(result, Exception):
+                return done({"error": "安装失败：" + str(result)[-1200:]})
+            added, out = result
+            ctx.l.index.sync()
+            ctx.l.record("installed", {"env": env, "packages": list(packages), "added": added}, ctx.agent, ["envs/" + env + ".txt"])
+            ctx.act(f"往环境「{env}」装了 " + "、".join(packages), "file:envs/" + env + ".txt")
+            done({"installed": list(packages), "added_to_definition": added, "log": out[-600:]})
+        bridge.background(lambda: bridge.envs.install(env or "default", packages, binary_only=True), finish)
+    return Later(start)
+
+
+def today():
+    return datetime.now().astimezone().strftime("%Y-%m-%d %A")
+
+
+def dump(value):
+    return json.dumps(value, ensure_ascii=False, default=str)

@@ -17,15 +17,13 @@ os.environ['XDG_DATA_HOME'] = str(DEMO / 'data')
 os.environ['XDG_CONFIG_HOME'] = str(DEMO / 'config')
 os.environ['LATTICE_VAULT'] = str(DEMO / 'vault')
 
-from lattice.store import Store
-from lattice.learning import LearningStore
+from lattice.model import Lattice
 
 for old in ('data', 'vault'):
     if (DEMO / old).exists():
         shutil.rmtree(DEMO / old)
 
-store = Store(DEMO / 'vault')
-learn = LearningStore(store)
+learn = Lattice(DEMO / 'vault')
 
 # ---------- Notes with [[wikilinks]] -> note-link graph ----------
 NOTES = [
@@ -44,8 +42,7 @@ NOTES = [
 ]
 note_ids = {}
 for title, body, folder in NOTES:
-    n = store.save_note({"title": title, "body": body, "folder": folder})
-    note_ids[title] = n["id"]
+    note_ids[title] = learn.note_create(title, body, folder)
 
 # ---------- Topics & lessons ----------
 t1 = learn.topic_save({"title": "一个数字怎样学习", "question": "如何让一个数字自己学会逼近答案？"})
@@ -87,7 +84,7 @@ flowchart TB
     ("把规则写成代码", "把更新规则沉淀为可复用函数。", "把 `p = p + eta*(y-p)` 封成 `step(p,y,eta)`，然后批量跑 100 个样本看均值轨迹。"),
 ]
 for i, (title, obj, body) in enumerate(LESSONS_T1):
-    learn.lesson_save({"topic_id": t1["id"], "title": title, "objective": obj, "body": body,
+    learn.lesson_save({"topic": t1["id"], "title": title, "objective": obj, "body": body,
                        "state": "done" if i == 0 else ("current" if i == 1 else "draft")})
 
 LESSONS_T2 = [
@@ -95,7 +92,7 @@ LESSONS_T2 = [
     ("学会倒着走", "反向过程：训练网络逐步去噪。", "网络学习预测每一步加入的噪声，采样时从纯噪声出发逐步还原。"),
 ]
 for title, obj, body in LESSONS_T2:
-    learn.lesson_save({"topic_id": t2["id"], "title": title, "objective": obj, "body": body})
+    learn.lesson_save({"topic": t2["id"], "title": title, "objective": obj, "body": body})
 
 # ---------- Knowledge cards + relations ----------
 CARDS = {
@@ -117,9 +114,9 @@ CARDS = {
 }
 card_ids = {}
 for i, (title, (stage, underst)) in enumerate(CARDS.items()):
-    c = learn.card_save({"title": title, "body": underst, "understanding": underst,
+    c = learn.card_save({"title": title, "body": underst, "mine": underst,
                          "question": "它是怎么影响收敛的？" if stage == "suggested" else "",
-                         "stage": stage, "topic_id": t1["id"], "tags": ["优化", "demo"]})
+                         "stage": stage, "topic": t1["id"], "tags": ["优化", "demo"]})
     card_ids[title] = c["id"]
 
 REL = [
@@ -139,12 +136,13 @@ REL = [
     ("参数更新", "学习曲线", "related", "每步更新产生曲线上的一个点"),
 ]
 for a, b, kind, reason in REL:
-    learn.relation_add(card_ids[a], card_ids[b], kind, reason)
+    learn.link(card_ids[a], card_ids[b], kind, reason)
+learn.topic_save({"id": t1["id"], "route": [{"title": t, "ref": card_ids[t]} for t in ("损失函数", "梯度方向", "参数更新", "学习率", "过冲震荡", "学习曲线")]})
 
 # ---------- Tutor / flash conversations (mermaid + code block) ----------
-threads = learn.threads(t1["id"])
-store.append_message(threads["tutor_session"], "user", "学习率和梯度到底啥关系？我老是混。")
-store.append_message(threads["tutor_session"], "assistant", """好问题。一句话：**梯度告诉你往哪走，学习率告诉你走多远。**
+tutor, flash = learn.thread_for("tutor", t1["id"]), learn.thread_for("flash", t1["id"])
+learn.append_message(tutor, "user", "学习率和梯度到底啥关系？我老是混。")
+learn.append_message(tutor, "assistant", """好问题。一句话：**梯度告诉你往哪走，学习率告诉你走多远。**
 
 ```mermaid
 graph LR
@@ -166,27 +164,23 @@ for y in [1, 1, 0, 1]:
 
 建议去实验笔记把 `eta` 改成 0.9 再跑一遍——你会看到 `p` 在目标值两侧来回跳，那就是"过冲"。""")
 
-store.append_message(threads["flash_session"], "user", "eta 一般取多大？")
-store.append_message(threads["flash_session"], "assistant", "没有通用值，常见起点是 0.01～0.3；在你的单变量实验里 0.1 收敛最快。看一眼学习曲线，震荡就调小、爬不动就调大。")
+learn.append_message(flash, "user", "eta 一般取多大？")
+learn.append_message(flash, "assistant", "没有通用值，常见起点是 0.01～0.3；在你的单变量实验里 0.1 收敛最快。看一眼学习曲线，震荡就调小、爬不动就调大。")
 
 # ---------- Notebook ----------
-nb = learn.notebook_create(t1["id"], "实验 001 · 学习率对比")
-learn.cell_save({"notebook_id": nb["id"], "kind": "markdown",
-                 "source": "## 观察 → 改变 → 解释\n先逐格执行，再把 `eta` 改成一个离谱的数（比如 1.5）。"})
-learn.cell_save({"notebook_id": nb["id"], "kind": "code",
-                 "source": "p = 0.5\neta = 0.2\ny = 1\np"})
-learn.cell_save({"notebook_id": nb["id"], "kind": "code",
-                 "source": "for i in range(8):\n    p = p + eta * (y - p)\n    print(f'step {i+1}: p = {p:.3f}')"})
-learn.cell_save({"notebook_id": nb["id"], "kind": "markdown",
-                 "source": "## 写下你的观察\n我改变了什么？结果变大了还是变小了？"})
+nb = learn.notebook_create("实验 001 · 学习率对比", t1["id"])
+learn.cell_save(nb, "## 观察 → 改变 → 解释\n先逐格执行，再把 `eta` 改成一个离谱的数（比如 1.5）。", "markdown")
+learn.cell_save(nb, "p = 0.5\neta = 0.2\ny = 1\np")
+learn.cell_save(nb, "for i in range(8):\n    p = p + eta * (y - p)\n    print(f'step {i+1}: p = {p:.3f}')")
+learn.cell_save(nb, "## 写下你的观察\n我改变了什么？结果变大了还是变小了？", "markdown")
 
-snap = learn.snapshot()
 print(f"demo home : {DEMO}")
 print(f"notes     : {len(note_ids)} (link graph ready)")
-print(f"topics    : {len(snap['topics'])} · lessons: {len(snap['all_lessons'])}")
-print(f"cards     : {len(snap['cards'])} · relations: {len(snap['relations'])}")
-print(f"notebook  : {len(learn.notebook(nb['id'])['cells'])} cells · messages: {len(snap['tutor_messages'])}+{len(snap['flash_messages'])}")
-store.close()
+print(f"topics    : {len(learn.topics())} · lessons: {len(learn.docs('lesson'))}")
+print(f"cards     : {len(learn.cards())} · relations: {len(learn.index.rows('SELECT id FROM links'))}")
+print(f"notebook  : {len(learn.notebook(nb)['cells'])} cells · messages: {len(learn.messages(tutor))}+{len(learn.messages(flash))}")
+learn.vault.commit("演示数据", "lattice")
+learn.db.close()
 
 if '--launch' in sys.argv:
     from PySide6.QtCore import Qt, QTimer

@@ -14,8 +14,7 @@ from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
-from lattice.learning_bridge import LearningBridge as Bridge
-from lattice.store import APP_HOME
+from lattice.bridge import APP_HOME, Bridge
 
 ROOT=Path(__file__).resolve().parent
 

@@ -1,4 +1,9 @@
-"""A persistent Jupyter kernel per notebook, never a simulated Python result."""
+"""A persistent Jupyter kernel per notebook, never a simulated Python result.
+
+The kernel runs the notebook's own Python environment. A sandboxed kernel is
+started through bubblewrap and talks over unix sockets, because the sandbox has
+no network, not even loopback to the host.
+"""
 from __future__ import annotations
 
 import copy
@@ -19,11 +24,12 @@ MAX_OUTPUT = 8_000_000
 class NotebookWorker(QThread):
     event = Signal(dict)
 
-    def __init__(self, notebook_id, directory, kernel_name="python3", timeout=120):
+    def __init__(self, notebook_id, directory, python, timeout=120, wrap=None, sockets=None):
         super().__init__()
         self.notebook_id = notebook_id
         self.directory = Path(directory)
-        self.kernel_name = kernel_name
+        # python may be a callable: preparing the environment can take a while, so it happens here, off the GUI thread.
+        self.python, self.wrap, self.sockets = python, wrap, sockets
         self.timeout = max(3, min(int(timeout), 3600))
         self.commands = queue.Queue()
         self.cancelled = threading.Event()
@@ -55,9 +61,24 @@ class NotebookWorker(QThread):
 
     def _setup(self):
         from jupyter_client import KernelManager
+        from jupyter_client.kernelspec import KernelSpec
         self.directory.mkdir(parents=True, exist_ok=True)
         self.emit("status", state="starting")
-        self.km = KernelManager(kernel_name=self.kernel_name)
+        python = self.python(lambda message: self.emit("status", state="starting", message=message)) if callable(self.python) else self.python
+        wrap = self.wrap
+
+        class Manager(KernelManager):
+            def format_kernel_cmd(self, extra_arguments=None):
+                command = [python, "-m", "ipykernel_launcher", "-f", self.connection_file]
+                return wrap(command) if wrap else command
+        options = {}
+        if self.sockets:
+            Path(self.sockets).mkdir(parents=True, exist_ok=True)
+            options = {"transport": "ipc", "ip": str(Path(self.sockets) / self.epoch[:8]),
+                       "connection_file": str(Path(self.sockets) / (self.epoch[:8] + ".json"))}
+        self.km = Manager(**options)
+        # Interrupts travel as a message, so they reach a kernel inside the sandbox too.
+        self.km._kernel_spec = KernelSpec(argv=[], display_name="Python", language="python", interrupt_mode="message", env={})
         self.km.start_kernel(cwd=str(self.directory))
         self.client = self.km.blocking_client()
         self.client.start_channels()

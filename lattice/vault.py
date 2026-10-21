@@ -2,7 +2,8 @@
 
 Everything else (the SQLite index, the UI) is derived from these files and can
 be rebuilt. Markdown carries its attributes as YAML frontmatter, notebooks in
-metadata.lattice, conversations and the journal as JSON lines.
+metadata.lattice, conversations and the journal as JSON lines. Any other file
+(code, data) is kept exactly as it is and referred to by its path.
 """
 from __future__ import annotations
 
@@ -16,18 +17,27 @@ import subprocess
 import yaml
 
 VAULT_PATH = Path(os.environ.get("LATTICE_VAULT") or Path.home() / "Lattice")
-# Where each kind lives by default. Folders are for people; meaning comes from attributes.
-FOLDERS = {"topic": "topics", "card": "cards", "lesson": "lessons", "note": "notes", "insight": "insights",
-           "notebook": "notebooks", "thread": "threads", "journal": "journal"}
-KIND_OF_FOLDER = {v: k for k, v in FOLDERS.items()}
+# Markdown kinds take their meaning from the folder they sit in; everything else is a plain file.
+MD_KINDS = {"topics": "topic", "cards": "card", "lessons": "lesson", "notes": "note", "insights": "insight"}
+FOLDERS = (*MD_KINDS, "notebooks", "code", "data", "envs", "threads", "journal")
+SKIP_DIRS = {".git", ".lattice", "__pycache__", "node_modules", ".venv", "venv", "target", ".ipynb_checkpoints"}
 IGNORED = """.lattice/index.db*
 .lattice/settings.json
 .lattice/state.json
 .lattice/runs/
 .lattice/venvs/
+.lattice/kernels/
+.lattice/scratch/
+__pycache__/
+*.pyc
+node_modules/
+target/
+.venv/
+.ipynb_checkpoints/
 """
 # Journal and conversations only ever grow; undoing an agent's change never rewrites them.
 APPEND_ONLY = ("journal/", "threads/")
+TEXT_LIMIT = 4 * 1024 * 1024
 
 
 def now():
@@ -39,11 +49,25 @@ def slug(title, limit=60):
     return re.sub(r"\s+", " ", name)[:limit].rstrip()
 
 
+def kind_of(rel):
+    top = rel.split("/", 1)[0]
+    if rel.endswith(".jsonl") and top in ("threads", "journal"):
+        return "thread" if top == "threads" else "journal"
+    if rel.endswith(".ipynb"):
+        return "notebook"
+    if rel.endswith(".md") and top in MD_KINDS:
+        return MD_KINDS[top]
+    return "file"
+
+
 def split_frontmatter(source):
     if source.startswith("---\n"):
         end = source.find("\n---", 4)
         if end >= 0:
-            attrs = yaml.safe_load(source[4:end]) or {}
+            try:
+                attrs = yaml.safe_load(source[4:end]) or {}
+            except yaml.YAMLError:
+                attrs = None
             if isinstance(attrs, dict):
                 return attrs, source[end + 4:].strip("\n")
     return {}, source.rstrip("\n")
@@ -64,11 +88,13 @@ class Vault:
         self.root = Path(root).expanduser()
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / ".lattice").mkdir(exist_ok=True)
-        for folder in FOLDERS.values():
+        for folder in FOLDERS:
             (self.root / folder).mkdir(exist_ok=True)
         ignore = self.root / ".gitignore"
-        if not ignore.exists():
-            ignore.write_text(IGNORED, encoding="utf-8")
+        lines = ignore.read_text(encoding="utf-8").splitlines() if ignore.exists() else []
+        missing = [line for line in IGNORED.splitlines() if line not in lines]
+        if missing:
+            ignore.write_text("\n".join(lines + missing) + "\n", encoding="utf-8")
         # What we last wrote or indexed, so a scan only reports outside edits.
         self.known = {}
         self.pending = set()
@@ -99,15 +125,25 @@ class Vault:
         st = self.path(rel).stat()
         return st.st_mtime_ns, st.st_size
 
+    def mtime(self, rel):
+        """A file's version stamp, as a string: nanoseconds do not survive a JavaScript number."""
+        try:
+            return str(self.path(rel).stat().st_mtime_ns)
+        except OSError:
+            return None
+
     # ---- reading and writing -------------------------------------------------
     def read_text(self, rel):
         return self.path(rel).read_text(encoding="utf-8")
 
     def write_text(self, rel, content):
+        self.write_bytes(rel, content.encode("utf-8"))
+
+    def write_bytes(self, rel, data):
         target = self.path(rel)
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_name("." + target.name + ".tmp")
-        tmp.write_text(content, encoding="utf-8")
+        tmp.write_bytes(data)
         os.replace(tmp, target)
         self.known[rel] = self._stat(rel)
         self.pending.add(rel)
@@ -121,18 +157,27 @@ class Vault:
         self.pending.add(rel)
 
     def remove(self, rel):
-        self.path(rel).unlink(missing_ok=True)
-        self.known.pop(rel, None)
+        target = self.path(rel)
+        if target.is_dir():
+            for sub in sorted(target.rglob("*"), reverse=True):
+                sub.rmdir() if sub.is_dir() else sub.unlink()
+            target.rmdir()
+        else:
+            target.unlink(missing_ok=True)
+        self.known = {k: v for k, v in self.known.items() if k != rel and not k.startswith(rel + "/")}
         self.pending.add(rel)
 
     def move(self, old, new):
         if old == new:
             return new
         target = self.path(new)
+        if target.exists():
+            raise VaultError("目标已存在：" + new)
         target.parent.mkdir(parents=True, exist_ok=True)
         os.replace(self.path(old), target)
         self.known.pop(old, None)
-        self.known[new] = self._stat(new)
+        if target.is_file():
+            self.known[new] = self._stat(new)
         self.pending |= {old, new}
         return new
 
@@ -162,14 +207,15 @@ class Vault:
         self.write_text(rel, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records))
 
     # ---- finding changes ----------------------------------------------------------
-    def files(self):
-        for folder in FOLDERS.values():
-            base = self.root / folder
-            for current, dirs, names in os.walk(base):
-                dirs[:] = sorted(d for d in dirs if not d.startswith("."))
-                for name in sorted(names):
-                    if not name.startswith(".") and not name.endswith(".tmp"):
-                        yield self.rel(Path(current) / name)
+    def files(self, folder=""):
+        base = self.path(folder) if folder else self.root
+        for current, dirs, names in os.walk(base):
+            dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS)
+            for name in sorted(names):
+                if not name.startswith(".") and not name.endswith(".tmp"):
+                    path = Path(current) / name
+                    if not path.is_symlink():
+                        yield self.rel(path)
 
     def scan(self):
         """Files changed, added or removed outside Lattice since we last looked."""
@@ -199,6 +245,16 @@ class Vault:
             raise VaultError((result.stderr or result.stdout).strip()[:400] or "git 失败")
         return result.stdout
 
+    def changes(self):
+        """Uncommitted paths as (status, path), renames split into a delete and an add."""
+        self.git("add", "-A")
+        out = []
+        for line in self.git("diff", "--cached", "--name-status", "--no-renames").splitlines():
+            status, _, rel = line.partition("\t")
+            if rel:
+                out.append((status[0], rel))
+        return out
+
     def commit(self, message, actor="me"):
         """Commit everything changed; returns the commit id, or None when nothing changed."""
         self.git("add", "-A")
@@ -210,11 +266,17 @@ class Vault:
         self.pending.clear()
         return self.git("rev-parse", "HEAD").strip()
 
-    def _at(self, commit, rel):
+    def head(self):
+        return self.git("rev-parse", "HEAD", check=False).strip() or None
+
+    def at(self, commit, rel):
         try:
             return self.git("show", f"{commit}:{rel}")
         except VaultError:
             return None  # the file did not exist there
+
+    def touched(self, commit):
+        return [line.split("\t")[-1] for line in self.git("show", "--name-status", "--no-renames", "--format=", commit).splitlines() if line]
 
     def revert(self, commit):
         """Undo one commit's content changes, file by file.
@@ -222,15 +284,14 @@ class Vault:
         Journal and conversations stay as they are. A file changed again after the
         commit is a conflict: nothing is touched and the learner is told."""
         self.commit("我的编辑", "me")
-        names = [line.split("\t")[-1] for line in self.git("show", "--name-status", "--no-renames", "--format=", commit).splitlines() if line]
-        touched = [rel for rel in names if not rel.startswith(APPEND_ONLY)]
+        touched = [rel for rel in self.touched(commit) if not rel.startswith(APPEND_ONLY)]
         before = {}
         for rel in touched:
             target = self.path(rel)
-            now_text = target.read_text(encoding="utf-8") if target.exists() else None
-            if now_text != self._at(commit, rel):
+            now_text = target.read_text(encoding="utf-8", errors="replace") if target.exists() else None
+            if now_text != self.at(commit, rel):
                 raise VaultError("这一步之后这些内容又被改过，没法自动撤销；可以手动改回去")
-            before[rel] = self._at(commit + "^", rel)
+            before[rel] = self.at(commit + "^", rel)
         for rel, content in before.items():
             if content is None:
                 self.remove(rel)
@@ -240,25 +301,27 @@ class Vault:
             self.commit("撤销：" + self.git("log", "-1", "--format=%s", commit).strip(), "me")
         return touched
 
-    def history(self, ident, folder, limit=200):
-        """Committed versions of the file carrying `id: ident`, newest first.
-
-        Follows the id rather than the path: a retitled note moves to a new file and
-        git cannot always tell that it is a rename."""
-        paths = {line for line in self.git("log", "--format=", "--name-only", "-G", f"^id: {re.escape(ident)}$", "--", folder, check=False).splitlines() if line}
-        if not paths:
-            return []
-        out = self.git("log", f"-{limit}", "--name-only", "--format=\x1e%H\x1f%aI\x1f%an\x1f%s", "--", *sorted(paths), check=False)
+    def _log(self, args, paths, keep):
+        out = self.git("log", "-200", "--name-only", "--format=\x1e%H\x1f%aI\x1f%an\x1f%s", *args, "--", *paths, check=False)
         versions = []
         for block in out.split("\x1e")[1:]:
             head, _, names = block.partition("\n")
             commit, at, author, subject = head.split("\x1f")
-            for path in (n for n in names.splitlines() if n in paths):
-                content = self._at(commit, path)
-                if content and f"\nid: {ident}\n" in content:
+            for path in (n for n in names.splitlines() if n):
+                if keep(commit, path):
                     versions.append({"commit": commit, "at": at, "author": author, "subject": subject, "path": path})
                     break
         return versions
 
-    def show(self, commit, rel):
-        return self.git("show", f"{commit}:{rel}")
+    def history(self, rel, ident=None):
+        """Committed versions of a file, newest first.
+
+        A file with an id is followed by that id: a retitled note moves to a new
+        path and git cannot always tell that it is a rename."""
+        if not ident:
+            return self._log(["--follow"], [rel], lambda c, p: True)
+        folder = rel.split("/", 1)[0]
+        paths = {line for line in self.git("log", "--format=", "--name-only", "-G", f"^id: {re.escape(ident)}$", "--", folder, check=False).splitlines() if line}
+        if not paths:
+            return []
+        return self._log([], sorted(paths), lambda c, p: p in paths and f"\nid: {ident}\n" in (self.at(c, p) or ""))

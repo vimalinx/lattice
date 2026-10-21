@@ -21,7 +21,7 @@ def run_code(w,events,code,rid):
     events.clear();w.submit([{'id':rid,'cell_id':rid,'source':code}]);spin(lambda:any(e['kind']=='batch_finished' for e in events))
     return next(e for e in events if e['kind']=='run_finished')
 with tempfile.TemporaryDirectory() as tmp:
-    events=[];w=NotebookWorker('test-notebook',tmp,timeout=12);w.event.connect(events.append);w.start()
+    events=[];w=NotebookWorker('test-notebook',tmp,sys.executable,timeout=12);w.event.connect(events.append);w.start()
     try:
         spin(lambda:any(e.get('state')=='ready' for e in events))
         r=run_code(w,events,'x=40\nx','one');check('real Jupyter execute_result',r['state']=='completed' and '40' in json.dumps(r['outputs']))
@@ -55,7 +55,7 @@ server=ThreadingHTTPServer(('127.0.0.1',0),Handler);threading.Thread(target=serv
 try:
     for mode in ['ok','truncated','error','slow']:
         events=[];cfg={'label':'test','base_url':f'http://127.0.0.1:{server.server_port}/{mode}','model':'test-flash','headers':{},'extra_body':{},'api_key':'sk-test-secret','max_tokens':400,'timeout':60,'temperature':0.35}
-        f=ApiWorker('flash','topic','session',cfg,[{'role':'user','content':'变量是什么'}]);f.event.connect(events.append);f.start()
+        f=ApiWorker('flash','session',cfg,[{'role':'user','content':'变量是什么'}]);f.event.connect(events.append);f.start()
         try:
             if mode=='slow':spin(lambda:any(e['kind']=='chunk' for e in events));t=time.monotonic();f.stop()
             spin(lambda:any(e['kind']=='finished' for e in events),15)
@@ -65,7 +65,7 @@ try:
             if mode=='error':check('HTTP errors redact credentials',end['stop_reason']=='error' and 'sk-test-secret' not in json.dumps(events))
             if mode=='slow':check('Flash cancellation interrupts pending network read',end['stop_reason']=='cancelled' and time.monotonic()-t<3)
         finally:f.stop();f.wait(5000);app.processEvents()
-    events=[];f=ApiWorker('flash','','',cfg,[],test=True);f.event.connect(events.append);f.start();spin(lambda:any(e['kind']=='connection_test' for e in events));f.wait(5000)
+    events=[];f=ApiWorker('flash','',cfg,[],test=True);f.event.connect(events.append);f.start();spin(lambda:any(e['kind']=='connection_test' for e in events));f.wait(5000)
     check('API settings connection test reads /models',any(e.get('ok') and e.get('model_found') for e in events))
 finally:server.shutdown()
 print('RUNTIME_RESULT',json.dumps({'passed':len(results),'checks':results},ensure_ascii=False),flush=True)

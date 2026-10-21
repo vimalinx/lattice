@@ -1,24 +1,17 @@
 "use strict";
-/* Lattice UI Core - no remote web services; all data passes through QWebChannel. */
-const S = {
-  bridge:null, data:null, view:"learning", theme:localStorage.getItem("lattice-theme")||"dark",
-  noteId:null, note:null, noteMode:"split", noteFilter:"", noteFolder:"All", sidebarCollapsed:localStorage.getItem("lattice-sidebar-collapsed")==="true",
-  noteDirty:false,noteTimer:null,
-  projectId:null,treePath:"",filePath:null,fileContent:"",fileDirty:false,
-  graphFilter:"all",
-  toastTimer:null, commandOpen:false, modalSnap:null
-};
-const el=(s)=>document.querySelector(s);
-const all=(s)=>Array.from(document.querySelectorAll(s));
+/* Lattice UI core: no remote services; all data passes through QWebChannel. */
+const S={bridge:null,theme:localStorage.getItem("lattice-theme")||"dark",data:null,config:null,toastTimer:null};
+const el=s=>document.querySelector(s);
+const all=(s,root=document)=>Array.from(root.querySelectorAll(s));
 function esc(v){return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
+function h(html){const t=document.createElement("template");t.innerHTML=html.trim();return t.content.firstElementChild;}
 function fmtDate(iso,full=false){
-  if(!iso)return "—";
-  const date=new Date(iso);
-  if(Number.isNaN(date.getTime()))return String(iso);
-  return full ? date.toLocaleString("zh-CN",{year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) :
-    date.toLocaleDateString("zh-CN",{month:"short",day:"numeric"});
+ if(!iso)return "—";
+ const d=new Date(iso);if(Number.isNaN(d.getTime()))return String(iso);
+ return full?d.toLocaleString("zh-CN",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):d.toLocaleDateString("zh-CN",{month:"short",day:"numeric"});
 }
-function shorten(text,len=70){text=String(text||"").replace(/\s+/g," ");return text.length>len?text.slice(0,len)+"…":text;}
+function shorten(t,n=70){t=String(t||"").replace(/\s+/g," ");return t.length>n?t.slice(0,n)+"…":t;}
+function baseName(p){return String(p||"").split("/").pop();}
 function svg(name,size=18){
  const paths={
   home:'<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-6v-7H10v7H4a1 1 0 0 1-1-1z"/>',
@@ -74,7 +67,12 @@ function svg(name,size=18){
   filter:'<path d="M3 4h18l-7 8v7l-4 2v-9L3 4Z"/>',
   shield:'<path d="M12 2 4 5v6c0 5 3.5 8.3 8 11 4.5-2.7 8-6 8-11V5Z"/><path d="m9 12 2 2 4-4"/>',
   copy:'<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V4H5v12h3"/>',
-  more:'<path d="M12 5v.01M12 12v.01M12 19v.01"/>'
+  more:'<path d="M12 5v.01M12 12v.01M12 19v.01"/>',
+  sliders:'<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  float:'<rect x="3" y="8" width="13" height="13" rx="2"/><path d="M8 8V4h13v13h-5"/>',
+  undo:'<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+  map:'<path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15m6-12v15"/>',
+  card:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 9h10M7 13h6"/>'
  };
  return '<svg viewBox="0 0 24 24" width="'+esc(size)+'" height="'+esc(size)+'" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(paths[name]||paths.spark)+'</svg>';
 }
@@ -84,69 +82,21 @@ function logo(){
 /* ```mermaid fenced blocks render as diagrams instead of code. */
 marked.use({renderer:{code(t){if((t.lang||"").trim().toLowerCase()==="mermaid")return '<div class="mermaid">'+esc(t.text)+'</div>';return false;}}});
 let _mmTimer=null,_mmSeq=0,_mmInited=false;
-function scheduleMermaid(){clearTimeout(_mmTimer);_mmTimer=setTimeout(runMermaid,40);}
+function scheduleMermaid(){clearTimeout(_mmTimer);_mmTimer=setTimeout(runMermaid,60);}
 async function runMermaid(){
  if(typeof mermaid==="undefined")return;
- if(!_mmInited){_mmInited=true;
-  try{mermaid.initialize({startOnLoad:false,theme:"dark",securityLevel:"strict",fontFamily:"inherit"});}
-  catch(_){return;}
- }
+ if(!_mmInited){_mmInited=true;try{mermaid.initialize({startOnLoad:false,theme:S.theme==="dark"?"dark":"default",securityLevel:"strict",fontFamily:"inherit"});}catch(_){return;}}
  for(const n of all(".mermaid:not([data-processed='true'])")){
-  n.dataset.processed="true";
-  const src=n.textContent;
+  n.dataset.processed="true";const src=n.textContent;
   try{const out=await mermaid.render("mm"+(++_mmSeq),src);n.innerHTML=out.svg;}
-  catch(_){n.innerHTML='<pre class="mermaid-error">'+esc(src)+'</pre><small class="mermaid-errnote">图表语法未能解析</small>';}
+  catch(_){n.innerHTML='<pre class="mermaid-error">'+esc(src)+'</pre><small class="muted">图表语法未能解析</small>';}
  }
-}
-/* Live widgets (cytoscape + resize observers) are rebuilt every render; the old
-   DOM is dropped wholesale, so instances must be torn down explicitly or they
-   leak listeners and keep observing detached nodes. */
-const LIVE={cys:new Set(),ros:new Set()};
-/* Stop a cy now, destroy it after the next frame: force-layout frames already
-   queued before stop() flush a style batch on the next tick, and destroying the
-   instance first nulls the renderer underneath them (cy.notify on null). */
-function retireCy(c){
- try{c.__layout&&c.__layout.stop();}catch(_){ }
- requestAnimationFrame(()=>{try{if(!c.destroyed())c.destroy();}catch(_){ }});
-}
-function teardownLive(){
- LIVE.ros.forEach(r=>{try{r.disconnect();}catch(_){}});LIVE.ros.clear();
- LIVE.cys.forEach(retireCy);LIVE.cys.clear();
-}
-/* Shared Cytoscape mount: each container gets one instance, rebuilt per render. */
-function mountCytoscape(container,{elements,style,layout,onTapNode,onTapEdge}){
- if(!container||typeof cytoscape==="undefined")return null;
- if(container.__cy){LIVE.cys.delete(container.__cy);retireCy(container.__cy);container.__cy=null;}
- if(container.__ro){LIVE.ros.delete(container.__ro);container.__ro.disconnect();container.__ro=null;}
- const cy=cytoscape({container,elements,style,wheelSensitivity:.25,minZoom:.25,maxZoom:3});
- // Keep a handle on the running layout: finishing callbacks fire after
- // destroy() otherwise and hit null internals (cy.notify).
- const lay=cy.layout(layout);cy.__layout=lay;lay.run();
- if(onTapNode)cy.on("tap","node",e=>onTapNode(e.target));
- if(onTapEdge)cy.on("tap","edge",e=>onTapEdge(e.target));
- cy.on("mouseover","node",e=>{cy.elements().addClass("faded");e.target.closedNeighborhood().removeClass("faded");});
- cy.on("mouseout","node",()=>cy.elements().removeClass("faded"));
- container.__cy=cy;LIVE.cys.add(cy);
- container.__ro=new ResizeObserver(()=>{if(container.__cy!==cy||cy.destroyed())return;cy.resize();cy.fit(undefined,26);});
- container.__ro.observe(container);LIVE.ros.add(container.__ro);
- return cy;
-}
-/* Post-render mounts for views that embed live widgets. */
-function runAfterRender(){
- if(typeof mountKnowledgeGraph==="function")mountKnowledgeGraph();
- scheduleMermaid();
 }
 function markdown(text){
  const src=String(text||""),codes=[];
  const masked=src.replace(/(`+)([\s\S]*?)\1/g,m=>{codes.push(m);return "\u0000"+(codes.length-1)+"\u0000";});
- const linked=masked.replace(/\[\[([^\]]+)\]\]/g,(_,name)=>
-   '<a class="wikilink" data-wiki="'+esc(name)+'">'+esc(name)+'</a>')
-   .replace(/\u0000(\d+)\u0000/g,(_,i)=>codes[+i]);
- try{
-  const out=DOMPurify.sanitize(marked.parse(linked,{breaks:true,gfm:true}),{ADD_ATTR:["data-wiki"]});
-  if(out.includes('class="mermaid"'))scheduleMermaid();
-  return out;
- }
+ const linked=masked.replace(/\[\[([^\]]+)\]\]/g,(_,name)=>'<a class="wikilink" data-wiki="'+esc(name)+'">'+esc(name)+'</a>').replace(/\u0000(\d+)\u0000/g,(_,i)=>codes[+i]);
+ try{const out=DOMPurify.sanitize(marked.parse(linked,{breaks:true,gfm:true}),{ADD_ATTR:["data-wiki"]});if(out.includes('class="mermaid"'))scheduleMermaid();return out;}
  catch(_){return '<pre>'+esc(text)+'</pre>';}
 }
 async function rpc(method,args={},timeout=240000){
@@ -155,102 +105,44 @@ async function rpc(method,args={},timeout=240000){
   let done=false;
   const timer=timeout>0?setTimeout(()=>{if(!done){done=true;reject(new Error("本地调用超时："+method));}},timeout):null;
   S.bridge.request(JSON.stringify(Object.assign({method},args)),raw=>{
-    if(done)return;done=true;if(timer)clearTimeout(timer);
-    try{let r=JSON.parse(raw);if(r.ok)resolve(r.data);else reject(new Error(r.error||"未知错误"));}
-    catch(err){reject(err);}
+   if(done)return;done=true;if(timer)clearTimeout(timer);
+   try{const r=JSON.parse(raw);if(r.ok)resolve(r.data);else{const e=new Error(r.error||"未知错误");e.conflict=!!r.conflict;reject(e);}}catch(err){reject(err);}
   });
  });
 }
 function toast(text,type="info"){
  const box=el("#toast");if(!box)return;
- box.textContent=text;box.classList.add("visible");
- box.style.borderColor=type==="error"?"var(--red)":"var(--line)";
- clearTimeout(S.toastTimer);S.toastTimer=setTimeout(()=>box.classList.remove("visible"),3700);
+ box.textContent=text;box.className="visible"+(type==="error"?" error":"");
+ clearTimeout(S.toastTimer);S.toastTimer=setTimeout(()=>box.className="",3800);
 }
-async function safe(fn){
- try{return await fn();}catch(e){console.error(e);toast(e.message||String(e),"error");return null;}
+async function safe(fn){try{return await fn();}catch(e){console.error(e);toast(e.message||String(e),"error");return null;}}
+function button(label,action,attrs="",variant=""){return '<button class="btn '+variant+'" data-action="'+esc(action)+'" '+attrs+'>'+label+'</button>';}
+function iconButton(icon,action,title,attrs=""){return '<button class="icon" data-action="'+esc(action)+'" title="'+esc(title)+'" aria-label="'+esc(title)+'" '+attrs+'>'+svg(icon,15)+'</button>';}
+function modal(content,size=""){
+ el("#overlays").innerHTML='<div class="modal-backdrop" data-dismiss="1"><div class="modal '+size+'" role="dialog" aria-modal="true">'+content+'</div></div>';
+ return el("#overlays .modal");
 }
-const NAV_ITEMS=[
- ["learning","学习对话","bot"],["practice","练习","code"],["classroom","课程","book"],
- ["notebook","实验笔记","flask"],["notes","知识笔记","document"],
- ["knowledge","知识卡","tag"],["graph","知识网络","git"],["flash","即时答疑","spark"]
-];
-function nav(name,label,icon){
- const active=S.view===name;
- return '<button class="nav-link'+(active?' active':'')+'" data-action="nav" data-view="'+esc(name)+'" title="'+esc(label)+'" aria-label="'+esc(label)+'"'+(active?' aria-current="page"':'')+'>'+svg(icon,18)+'<span>'+esc(label)+'</span></button>';
+function closeModal(){el("#overlays").innerHTML="";}
+function modalHead(title){return '<div class="modal-top"><h2>'+esc(title)+'</h2>'+iconButton("close","modal-close","关闭")+'</div>';}
+function emptyState(icon,title,desc){return '<div class="empty"><div class="empty-icon">'+svg(icon,30)+'</div><h3>'+esc(title)+'</h3><p>'+esc(desc)+'</p></div>';}
+function stripAnsi(t){return String(t||"").replace(/\x1b\[[0-9;]*m/g,"");}
+function joined(v){return Array.isArray(v)?v.join(""):String(v||"");}
+/* Run and kernel outputs share one shape (nbformat outputs). Kernel HTML is sanitized, never executed. */
+function outputHtml(outputs){
+ return (outputs||[]).map(o=>{
+  if(o.output_type==="stream")return '<pre class="out-text'+(o.name==="stderr"?" stderr":"")+'">'+esc(stripAnsi(joined(o.text)))+'</pre>';
+  if(o.output_type==="error")return '<pre class="out-error">'+esc(stripAnsi((o.traceback||[]).length?o.traceback.join("\n"):(o.ename+": "+o.evalue)))+'</pre>';
+  const d=o.data||{};
+  if(d["image/png"])return '<img class="out-image" alt="运行输出的图像" src="data:image/png;base64,'+esc(joined(d["image/png"]))+'"/>';
+  if(d["image/jpeg"])return '<img class="out-image" alt="运行输出的图像" src="data:image/jpeg;base64,'+esc(joined(d["image/jpeg"]))+'"/>';
+  if(d["text/html"])return '<div class="out-html">'+DOMPurify.sanitize(joined(d["text/html"]),{ALLOWED_TAGS:["table","thead","tbody","tr","td","th","div","span","p","b","strong","em","br","pre","code"],ALLOWED_ATTR:["colspan","rowspan"]})+'</div>';
+  if(d["text/markdown"])return '<div class="markdown">'+markdown(joined(d["text/markdown"]))+'</div>';
+  return d["text/plain"]?'<pre class="out-text">'+esc(joined(d["text/plain"]))+'</pre>':"";
+ }).join("");
 }
-const PAGES={settings:"设置与数据",...Object.fromEntries(NAV_ITEMS.map(([id,label])=>[id,label]))};
-function sidebar(){
- return '<aside class="sidebar" aria-label="主导航"><div class="brand"><div class="brand-icon">'+logo()+'</div><div class="brand-text"><div class="brand-name">lattice<span style="color:var(--accent)">.</span></div></div></div>'+
- '<button class="sidebar-toggle" data-action="sidebar-toggle" title="'+(S.sidebarCollapsed?'展开导航':'折叠导航')+'" aria-label="'+(S.sidebarCollapsed?'展开导航':'折叠导航')+'" aria-expanded="'+!S.sidebarCollapsed+'">'+svg('sidebar',18)+'<span>折叠导航</span></button>'+
- '<nav class="nav-list">'+NAV_ITEMS.map(x=>nav(...x)).join('')+'</nav><div class="side-spacer"></div><div class="side-foot">'+
- '<button data-action="search" title="全局搜索 · Ctrl K" aria-label="全局搜索">'+svg('search')+'<span>全局搜索</span></button>'+nav('settings','设置与数据','settings')+'</div></aside>';
-}
-function header(){
- const title=PAGES[S.view]||"工作台";
- return '<header class="topbar"><div class="breadcrumb"><span class="rootcrumb">工作空间</span>'+
- '<span class="chevron">'+svg("chevron",12)+'</span><strong>'+esc(title)+'</strong></div>'+
- '<div class="toolbar">'+
- '<button class="top-search" data-action="search">'+svg("search",15)+'<span>搜索笔记、知识卡、课程</span><span class="kbd">Ctrl K</span></button>'+
- '<button class="icon-btn" title="切换明暗主题" data-action="theme">'+svg(S.theme==="dark"?"sun":"moon")+'</button>'+
- 
- '</div></header>';
-}
-function refreshSidebar(){
- const root=el('#root');if(!root)return;
- root.classList.toggle('nav-collapsed',S.sidebarCollapsed);
- root.querySelectorAll('.sidebar [data-view]').forEach(button=>{
-  const active=button.dataset.view===S.view;
-  button.classList.toggle('active',active);
-  if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
- });
- const toggle=root.querySelector('.sidebar-toggle');
- if(toggle){
-  const label=S.sidebarCollapsed?'展开导航':'折叠导航';
-  toggle.title=label;toggle.setAttribute('aria-label',label);
-  toggle.setAttribute('aria-expanded',String(!S.sidebarCollapsed));
- }
-}
-
-function modal(content,size="",guard=true){
- el("#overlays").innerHTML='<div class="modal-backdrop" data-dismiss="true"><div class="modal '+size+'" role="dialog" aria-modal="true">'+content+'</div></div>';
- S.modalSnap=guard?all(".modal input,.modal textarea,.modal select").map(i=>({el:i,v:i.type==="checkbox"||i.type==="radio"?i.checked:i.value})):null;
-}
-function modalDirty(){
- if(!S.modalSnap)return false;
- return S.modalSnap.some(s=>{const v=s.el.type==="checkbox"||s.el.type==="radio"?s.el.checked:s.el.value;return v!==s.v;});
-}
-function requestCloseModal(){
- if(modalDirty()&&!confirm("窗口里有未保存的修改，确定关闭？"))return;
- closeModal();
-}
-function closeModal(){
- el("#overlays").innerHTML="";S.commandOpen=false;S.modalSnap=null;
-}
-/* Preserve scroll positions across innerHTML re-renders. Tag scrollable regions with
-   data-scroll="key" data-scroll-ns="<view/tab it belongs to>". Positions only restore
-   when the namespace still matches — view/tab switches start at the top. */
-function scrollSnapshot(){
- const m={};
- all("[data-scroll]").forEach(n=>{m[n.dataset.scroll]={ns:n.dataset.scrollNs||"",top:n.scrollTop,
-   atBottom:n.scrollHeight-n.scrollTop-n.clientHeight<130};});
- return m;
-}
-function scrollRestore(m,forceKey){
- all("[data-scroll]").forEach(n=>{
-  const s=m[n.dataset.scroll];
-  if(!s||s.ns!==(n.dataset.scrollNs||""))return;
-  if(s.atBottom||n.dataset.scroll===forceKey)n.scrollTop=n.scrollHeight;
-  else n.scrollTop=s.top;
- });
-}
-function modalHead(title){
- return '<div class="modal-top"><h2>'+esc(title)+'</h2><button class="icon-btn" data-action="modal-close" title="关闭">'+svg("close")+'</button></div>';
-}
-function button(label,action,extra="",variant=""){
- return '<button class="btn '+variant+'" data-action="'+esc(action)+'" '+extra+'>'+label+'</button>';
-}
-function emptyState(icon,title,desc,actionLabel,action){
- return '<div class="empty-state"><div class="symbol">'+svg(icon,33)+'</div><h2>'+esc(title)+'</h2>'+
- '<p>'+esc(desc)+'</p>'+(actionLabel?button(actionLabel,action,'','primary'):"")+'</div>';
-}
+const stageName={suggested:"待探索",seen:"接触过",explained:"能解释",applied:"能应用"};
+const stageColor={suggested:"#5b6675",seen:"#e0be88",explained:"#b5a8fa",applied:"#83e2c7"};
+const linkName={prerequisite:"是前置",part_of:"是一部分",related:"有关联",applies_to:"应用于",contrasts:"对比",explains:"解释了",branch_of:"分支自",mentions:"提到"};
+const kindName={topic:"主题",card:"知识卡",lesson:"课程",note:"笔记",insight:"薄弱点",notebook:"实验笔记",file:"文件"};
+const journalName={asked:"提问",answered:"作答",judged:"AI 判断",explained:"讲解",ran:"运行",viewed:"查看",wrote:"写作",staged:"理解阶段",reviewed:"回顾",detour:"岔开",bridged:"接回主干",insight:"薄弱点",organized:"整理",searched:"联网",installed:"装包",action:"AI 动作",undo:"撤销"};
+function who(actor){return actor==="me"?"我":({tutor:"主讲",flash:"快答",coach:"练习教练",organizer:"整理",lattice:"Lattice",app:"Lattice"})[actor]||actor;}
