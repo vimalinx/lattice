@@ -2,21 +2,18 @@
 
 Agents are told which tools exist and look things up themselves; nothing is
 pushed into their context. The API lanes call them as OpenAI-compatible
-tools. Every write is
-journaled in learn_actions so the learner can undo it from the conversation.
+tools. Every change to files becomes its own vault commit and journal entry,
+so the learner can undo it from the conversation.
 Learner-owned fields (stage, own understanding, own explanations, review
 self-ratings) and deletions are never exposed.
 """
 from __future__ import annotations
 
-import json
-
 from datetime import datetime, timedelta
 
-from .learning import dump, now, readable_outputs, text, title as clean_title, uid
+from .learning import now, readable_outputs, text, title as clean_title
 
 ROLES = {"tutor", "flash", "practice", "organizer"}
-NOTE_KEY = "topic_notes:"
 
 
 class Deferred:
@@ -34,12 +31,11 @@ class Context:
         self.session_id, self.practice_id = session_id, practice_id
         self.l, self.store = bridge.learning, bridge.store
 
-    def act(self, summary, undo=None, ref=None):
-        ident = uid()
-        with self.l.transaction():
-            self.l.db.execute("INSERT INTO learn_actions(id,topic_id,actor,summary,ref,undo,state,created_at) VALUES(?,?,?,?,?,?,?,?)",
-                              (ident, self.topic_id, self.role, summary, ref, dump(undo) if undo else None, "done", now()))
-        action = {"id": ident, "summary": summary, "ref": ref, "undoable": bool(undo)}
+    def act(self, summary, undoable=True, ref=None):
+        """Journal one agent action. A change to files becomes its own vault commit, so undo is a revert."""
+        commit = self.l.vault.commit(f"{self.role}：{summary}", self.role) if undoable else None
+        ident = self.l.action_add(self.topic_id, self.role, summary, ref, commit, undoable)
+        action = {"id": ident, "summary": summary, "ref": ref, "undoable": bool(commit)}
         self.bridge.turn_actions.setdefault(self.session_id, []).append(action)
         return action
 
@@ -117,7 +113,7 @@ def read(ctx, ref):
     kind, _, ident = str(ref).partition(":")
     if kind == "topic":
         t = l.one("learn_topics", ident)
-        return {**_topic_brief(l, t), "topic_notes": l.setting(NOTE_KEY + ident, ""),
+        return {**_topic_brief(l, t), "topic_notes": t["notes"],
                 "lessons": l.rows("SELECT id,title,objective,state FROM learn_lessons WHERE topic_id=? ORDER BY position", (ident,)),
                 "notebooks": l.rows("SELECT id,title FROM learn_notebooks WHERE topic_id=? ORDER BY created_at", (ident,)),
                 "cards": l.rows("SELECT id,title,stage FROM learn_cards WHERE topic_id=? ORDER BY updated_at DESC", (ident,)),
@@ -226,7 +222,7 @@ def list_files(ctx, project_id=None, path=""):
 @tool("read_file", {"tutor"}, "读取挂载目录里的一个文本文件。只读。", {"project_id": S, "path": S}, ["project_id", "path"])
 def read_file(ctx, project_id, path):
     content = ctx.store.file_read(project_id, path)
-    ctx.act(f"读取了文件 {path}", ref=None)
+    ctx.act(f"读取了文件 {path}", False)
     return content
 
 
@@ -238,7 +234,7 @@ def create_topic(ctx, title, question, parent_id=None, carry_ids=()):
     t = ctx.l.topic_save({"title": title, "question": question, "parent_id": parent_id or None})
     ctx.bridge.turn_focus[ctx.session_id] = t["id"]
     ctx.bridge.turn_carry[ctx.session_id] = [int(i) for i in carry_ids][:200]
-    ctx.act(("开了分支" if parent_id else "新建了主题") + f"「{t['title']}」", {"op": "delete_topic", "id": t["id"]}, "topic:" + t["id"])
+    ctx.act(("开了分支" if parent_id else "新建了主题") + f"「{t['title']}」", True, "topic:" + t["id"])
     return _topic_brief(ctx.l, t)
 
 
@@ -246,17 +242,15 @@ def create_topic(ctx, title, question, parent_id=None, carry_ids=()):
 def focus_topic(ctx, topic_id):
     t = ctx.l.one("learn_topics", topic_id)
     ctx.bridge.turn_focus[ctx.session_id] = topic_id
-    ctx.act(f"切换到主题「{t['title']}」", None, "topic:" + topic_id)
+    ctx.act(f"切换到主题「{t['title']}」", False, "topic:" + topic_id)
     return _topic_brief(ctx.l, t)
 
 
 @tool("update_topic_notes", {"tutor"}, "改写当前主题的档案：讲到了哪里、学习者留下的疑问、接下来往哪走。这是跨天续讲时的长期记忆，整篇替换，保持精炼。",
       {"notes": S}, ["notes"])
 def update_topic_notes(ctx, notes):
-    key = NOTE_KEY + ctx.topic_id
-    old = ctx.l.setting(key, "")
-    ctx.l.set_setting(key, text(notes, 8000).strip())
-    ctx.act("更新了主题档案", {"op": "setting", "key": key, "value": old}, "topic:" + ctx.topic_id)
+    ctx.l.set_topic_notes(ctx.topic_id, notes)
+    ctx.act("更新了主题档案", True, "topic:" + ctx.topic_id)
     return {"ok": True}
 
 
@@ -267,31 +261,25 @@ def update_topic_notes(ctx, notes):
        "notes": {"type": "array", "items": _obj({"title": S, "body": S, "folder": S}, ["title", "body"])}})
 def save_knowledge(ctx, lessons=(), cards=(), relations=(), notes=()):
     l, topic, done = ctx.l, ctx.topic_id, {"lessons": [], "cards": [], "supplements": [], "relations": [], "notes": []}
-    payload = l.validate_payload({"version": 1, "lessons": list(lessons), "cards": list(cards), "relations": list(relations), "notes": list(notes)})
-    with l.transaction():
-        for item in payload["lessons"]:
-            done["lessons"].append(l.lesson_save({**item, "topic_id": topic}, origin=ctx.role)["id"])
-        for item in payload["cards"]:
-            old = l.db.execute("SELECT id FROM learn_cards WHERE canonical=?", (item["title"].strip().casefold(),)).fetchone()
-            if old:
-                # AI text never overwrites the learner's own card; it is attached as a supplement.
-                l.evidence_add(old[0], "question", "补充解释（AI）：\n" + item.get("body", ""))
-                done["supplements"].append(l.db.execute("SELECT id FROM learn_evidence WHERE card_id=? ORDER BY rowid DESC LIMIT 1", (old[0],)).fetchone()[0])
-            else:
-                done["cards"].append(l.card_save({**item, "topic_id": topic, "stage": "seen", "provenance": {"lane": ctx.role}}, origin=ctx.role)["id"])
-        for r in payload["relations"]:
-            l.relation_add(**r)
-            done["relations"].append(l.db.execute("SELECT id FROM learn_relations WHERE source=? AND target=? AND kind=?",
-                                                  (l.resolve_card(r["source"]), l.resolve_card(r["target"]), r["kind"])).fetchone()[0])
-        for item in payload["notes"]:
-            note_id, t = uid(), now()
-            l.db.execute("INSERT INTO notes(id,title,body,folder,tags,pinned,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
-                         (note_id, clean_title(item["title"]), text(item["body"]), text(item.get("folder") or "经验", 80), dump(["AI"]), 0, t, t))
-            done["notes"].append(note_id)
+    payload = l.validate_payload({"lessons": list(lessons), "cards": list(cards), "relations": list(relations), "notes": list(notes)})
+    for item in payload["lessons"]:
+        done["lessons"].append(l.lesson_save({**item, "topic_id": topic}, origin=ctx.role)["id"])
+    for item in payload["cards"]:
+        old = l.db.execute("SELECT id FROM learn_cards WHERE canonical=?", (item["title"].strip().casefold(),)).fetchone()
+        if old:
+            l.card_supplement(old[0], item.get("body", ""), ctx.role)
+            done["supplements"].append(old[0])
+        else:
+            done["cards"].append(l.card_save({**item, "topic_id": topic, "stage": "seen", "provenance": {"lane": ctx.role}}, origin=ctx.role)["id"])
+    for r in payload["relations"]:
+        done["relations"].append(l.relation_add(**r))
+    for item in payload["notes"]:
+        done["notes"].append(ctx.store.save_note({"title": clean_title(item["title"]), "body": text(item["body"]),
+                                                  "folder": text(item.get("folder") or "经验", 80), "tags": ["AI"]})["id"])
     parts = [f"{len(done[k])} {n}" for k, n in (("lessons", "节课"), ("cards", "张卡"), ("supplements", "条卡片补充"),
                                                 ("relations", "条关系"), ("notes", "篇经验文档")) if done[k]]
     first = ("lesson:" + done["lessons"][0]) if done["lessons"] else ("card:" + done["cards"][0]) if done["cards"] else None
-    ctx.act("保存了 " + "、".join(parts), {"op": "knowledge", **done}, first)
+    ctx.act("保存了 " + "、".join(parts), True, first)
     return done
 
 
@@ -319,11 +307,11 @@ def write_cell(ctx, source, kind="code", notebook_id=None, cell_id=None):
         old = l.one("learn_cells", cell_id)
         nb = _notebook_for(ctx, old["notebook_id"])
         cell = l.cell_save({"id": cell_id, "source": source, "kind": kind})
-        ctx.act("改写了一个单元格", {"op": "cell_source", "id": cell_id, "source": old["source"]}, "cell:" + cell_id)
+        ctx.act("改写了一个单元格", True, "cell:" + cell_id)
     else:
         nb = _notebook_for(ctx, notebook_id)
         cell = l.cell_save({"notebook_id": nb, "kind": kind, "source": source})
-        ctx.act("写了一个" + ("代码" if kind == "code" else "文字") + "单元格", {"op": "delete_cell", "id": cell["id"]}, "cell:" + cell["id"])
+        ctx.act("写了一个" + ("代码" if kind == "code" else "文字") + "单元格", True, "cell:" + cell["id"])
     ctx.bridge.changed(ctx.topic_id)
     return {"cell_id": cell["id"], "notebook_id": nb}
 
@@ -338,7 +326,7 @@ def run_cells(ctx, notebook_id=None, cell_ids=None):
     if not cells:
         raise ValueError("没有可以运行的代码单元格")
     ctx.bridge.run_notebook(nb, cell_ids=[c["id"] for c in cells])
-    ctx.act(f"运行了 {len(cells)} 个单元格", None, "notebook:" + nb)
+    ctx.act(f"运行了 {len(cells)} 个单元格", False, "notebook:" + nb)
     return Deferred(nb, [c["id"] for c in cells])
 
 
@@ -348,25 +336,22 @@ def start_practice(ctx, lesson, goal):
     seed = text(lesson, 20000).strip() + "\n\n**练习目标：** " + text(goal, 1000).strip()
     practice = ctx.l.practice_create(ctx.topic_id, seed, name=text(goal, 1000).strip().rstrip("。"))
     ctx.bridge.after_turn.setdefault(ctx.session_id, []).append(lambda: ctx.bridge.practice_send(practice["id"], task="start"))
-    ctx.act(f"开了练习「{practice['title']}」", None, "practice:" + practice["id"])
+    ctx.act(f"开了练习「{practice['title']}」", False, "practice:" + practice["id"])
     return {"practice_id": practice["id"], "title": practice["title"]}
 
 
 @tool("record_insight", {"tutor"}, "记下学习者的一个薄弱点（kind=weak）或做得好的地方（kind=strength），需有对话或运行记录里的证据。之后各个 AI 都能通过 learner_profile 看到。",
       {"kind": {"type": "string", "enum": ["weak", "strength"]}, "title": S, "detail": S}, ["kind", "title", "detail"])
 def record_insight(ctx, kind, title, detail):
-    ident = uid()
-    with ctx.l.transaction():
-        ctx.l.db.execute("INSERT INTO learn_insights(id,topic_id,practice_id,kind,title,detail,created_at) VALUES(?,?,?,?,?,?,?)",
-                         (ident, ctx.topic_id, None, kind, clean_title(title), text(detail, 2000), now()))
-    ctx.act(("记下薄弱点" if kind == "weak" else "记下做得好的地方") + f"「{title}」", {"op": "delete_insight", "id": ident})
+    ident = ctx.l.insight_add(ctx.topic_id, kind, title, detail)
+    ctx.act(("记下薄弱点" if kind == "weak" else "记下做得好的地方") + f"「{title}」", True, "insight:" + ident)
     return {"id": ident}
 
 
 @tool("resolve_insight", {"tutor"}, "学习者已经用证据表明克服了某个薄弱点时，把它标记为已克服。", {"id": S}, ["id"])
 def resolve_insight(ctx, id):
     ctx.l.insight_resolve(id)
-    ctx.act("把一个薄弱点标为已克服", {"op": "insight_active", "id": id})
+    ctx.act("把一个薄弱点标为已克服", True, "insight:" + id)
     return {"ok": True}
 
 
@@ -378,11 +363,11 @@ def resolve_insight(ctx, id):
 def finish_practice_review(ctx, practice_id, next_focus, weak_points, strengths):
     p = ctx.l.insights_record(practice_id, {"weak_points": weak_points, "strengths": strengths, "next_focus": next_focus})
     ctx.bridge.reviews.pop(ctx.topic_id, None)
-    ctx.act(f"复盘了练习，记下 {len(weak_points)} 个薄弱点", None, "practice:" + practice_id)
+    ctx.act(f"复盘了练习，记下 {len(weak_points)} 个薄弱点", True, "practice:" + practice_id)
     return {"state": p["state"]}
 
 
-@tool("tidy_note", {"tutor", "organizer"}, "整理一篇笔记：给出标题、整理后的正文（Markdown，可用 [[标题]] 连到已有的卡片或笔记）、文件夹和标签。整篇替换；原文会留在笔记的修订历史里，学习者也可以撤销。",
+@tool("tidy_note", {"tutor", "organizer"}, "整理一篇笔记：给出标题、整理后的正文（Markdown，可用 [[标题]] 连到已有的卡片或笔记）、文件夹和标签。整篇替换；原文留在学习库的 git 历史里，学习者也可以撤销。",
       {"note_id": S, "title": S, "body": S, "folder": S, "tags": {"type": "array", "items": S}}, ["note_id", "title", "body"])
 def tidy_note(ctx, note_id, title, body, folder=None, tags=None):
     old = ctx.store.get_note(note_id)
@@ -390,7 +375,7 @@ def tidy_note(ctx, note_id, title, body, folder=None, tags=None):
         raise ValueError("找不到这篇笔记")
     note = ctx.store.save_note({"id": note_id, "title": title, "body": text(body), "folder": folder or old["folder"],
                                 "tags": tags if tags is not None else old["tags"], "pinned": old["pinned"]})
-    ctx.act(f"整理了笔记「{note['title']}」", {"op": "note", "note": {k: old[k] for k in ("id", "title", "body", "folder", "tags", "pinned")}}, "note:" + note_id)
+    ctx.act(f"整理了笔记「{note['title']}」", True, "note:" + note_id)
     return {"note_id": note_id, "title": note["title"], "folder": note["folder"]}
 
 
@@ -398,47 +383,5 @@ def tidy_note(ctx, note_id, title, body, folder=None, tags=None):
       {"summary": S}, ["summary"])
 def hand_to_tutor(ctx, summary):
     ctx.store.emit("handoff", "快答转交主讲", text(summary, 3000), ctx.topic_id)
-    ctx.act("转交给主讲：" + text(summary, 3000)[:60], None, "handoff:" + ctx.topic_id)
+    ctx.act("转交给主讲：" + text(summary, 3000)[:60], False, "handoff:" + ctx.topic_id)
     return {"ok": True}
-
-
-# ---- undo ------------------------------------------------------------------------
-
-def undo(bridge, action_id):
-    l = bridge.learning
-    a = l.one("learn_actions", action_id)
-    if a["state"] != "done" or not a["undo"]:
-        raise ValueError("这个操作不能撤销")
-    u = json.loads(a["undo"])
-    op = u["op"]
-    if op == "delete_topic":
-        bridge.topic_delete(u["id"])
-    elif op == "setting":
-        l.set_setting(u["key"], u["value"])
-    elif op == "knowledge":
-        with l.transaction():
-            for ident in u["relations"]:
-                l.db.execute("DELETE FROM learn_relations WHERE id=?", (ident,))
-            for ident in u["supplements"]:
-                l.db.execute("DELETE FROM learn_evidence WHERE id=?", (ident,))
-            for ident in u["cards"]:
-                l.db.execute("DELETE FROM learn_cards WHERE id=?", (ident,))
-            for ident in u["lessons"]:
-                l.db.execute("DELETE FROM learn_lessons WHERE id=?", (ident,))
-            for ident in u["notes"]:
-                l.db.execute("DELETE FROM notes WHERE id=?", (ident,))
-    elif op == "delete_cell":
-        l.cell_delete(u["id"])
-    elif op == "cell_source":
-        l.cell_save({"id": u["id"], "source": u["source"]})
-    elif op == "note":
-        bridge.store.save_note(u["note"])
-    elif op == "delete_insight":
-        with l.transaction():
-            l.db.execute("DELETE FROM learn_insights WHERE id=?", (u["id"],))
-    elif op == "insight_active":
-        with l.transaction():
-            l.db.execute("UPDATE learn_insights SET state='active' WHERE id=?", (u["id"],))
-    with l.transaction():
-        l.db.execute("UPDATE learn_actions SET state='undone' WHERE id=?", (action_id,))
-    return True

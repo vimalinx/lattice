@@ -85,7 +85,7 @@ class Bridge(QObject):
         if method=="notes":
             return d.list_notes(args.get("query",""),args.get("folder",""))
         if method=="save_note":
-            return d.save_note(args["note"], revise=not args.get("draft"))
+            return d.save_note(args["note"])
         if method=="delete_note":
             return d.delete_note(args["id"])
         if method=="revisions":
@@ -119,8 +119,8 @@ class Bridge(QObject):
             folder=self._folder_picker("从已有 Markdown 笔记目录导入（仅复制，不修改原目录）")
             return self.import_markdown(folder) if folder else None
         if method=="open_folder":
-            requested=Path(args.get("path") or str(APP_HOME)).resolve()
-            allowed={APP_HOME.resolve()}
+            requested=Path(args.get("path") or str(self.store.root)).resolve()
+            allowed={APP_HOME.resolve(),self.store.root.resolve()}
             allowed|={Path(p["path"]).resolve() for p in self.store.projects()}
             if requested not in allowed:
                 raise ValueError("只能打开应用数据目录或已挂载的项目目录")

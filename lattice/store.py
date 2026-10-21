@@ -1,4 +1,9 @@
-"""Lattice local-first SQLite model: notes, revisions, mounted folders and AI sessions."""
+"""Notes, conversations, events and mounted folders, stored as files in the vault.
+
+The SQLite database is only an index of the vault: every table here is filled
+from files and can be dropped and rebuilt. Kinds register an indexer; the
+learning model adds its own on top of the ones defined here.
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -9,9 +14,12 @@ import re
 import sqlite3
 import uuid
 
+from .vault import KIND_OF_FOLDER, Vault, VAULT_PATH, now as vault_now, split_frontmatter
+
 DATA_HOME = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
+# Machine-local state that is not learning data: logs, web profile, the pre-vault database.
 APP_HOME = DATA_HOME / "lattice"
-DB_PATH = APP_HOME / "lattice.db"
+LEGACY_DB = APP_HOME / "lattice.db"
 
 
 def stamp():
@@ -30,121 +38,189 @@ def words(body: str):
     return list(dict.fromkeys(re.findall(r"\[\[([^\]]+)\]\]", body or "")))
 
 
+def journal_path(at):
+    day = at[:10]
+    return f"journal/{day[:4]}/{day}.jsonl"
+
+
 class Store:
-    def __init__(self, path: Path | str = DB_PATH, seed: bool = True):
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, root: Path | str = VAULT_PATH):
+        self.vault = Vault(root)
+        self.root = self.vault.root
+        self.path = self.root / ".lattice" / "index.db"
         self.db = sqlite3.connect(str(self.path))
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA busy_timeout=3000")
-        self.db.execute("PRAGMA foreign_keys=ON")
         self.db.executescript("""
+        CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY, id TEXT, kind TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS files_id ON files(id);
         CREATE TABLE IF NOT EXISTS notes(
           id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '',
           folder TEXT NOT NULL DEFAULT 'Knowledge', tags TEXT NOT NULL DEFAULT '[]',
-          pinned INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS revisions(
-          id INTEGER PRIMARY KEY AUTOINCREMENT, note_id TEXT NOT NULL,
-          title TEXT, body TEXT, created_at TEXT NOT NULL,
-          FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
-        );
+          pinned INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS events(
           id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
-          title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
-          target TEXT DEFAULT '', at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS projects(
-          id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE,
-          created_at TEXT NOT NULL
-        );
+          title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', target TEXT DEFAULT '', at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS sessions(
           id TEXT PRIMARY KEY, agent TEXT NOT NULL, title TEXT NOT NULL,
-          project_id TEXT, remote_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-        );
+          project_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS messages(
-          id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
-          role TEXT NOT NULL, content TEXT NOT NULL, meta TEXT NOT NULL DEFAULT '{}',
-          created_at TEXT NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
-        );
+          id INTEGER PRIMARY KEY, session_id TEXT NOT NULL,
+          role TEXT NOT NULL, content TEXT NOT NULL, meta TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_revision_note ON revisions(note_id, id DESC);
         CREATE INDEX IF NOT EXISTS idx_events_time ON events(id DESC);
         CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id,id);
         """)
         self.db.commit()
-        if seed:
-            self._seed()
+        # kind -> function(rel, unindex=False); journal entry type -> function(entry)
+        self.indexers = {"note": self._index_note, "thread": self._index_thread, "journal": self._index_journal}
+        self.journal_indexers = {"event": self._index_event}
+        self.index_tables = ["files", "notes", "events", "sessions", "messages"]
+        self.settings_path = self.root / ".lattice" / "settings.json"
 
-    def _seed(self):
-        if self.db.execute("SELECT count(*) FROM notes").fetchone()[0]:
+    # ---- index ------------------------------------------------------------------------
+    def kind_of(self, rel):
+        return KIND_OF_FOLDER.get(rel.split("/", 1)[0])
+
+    def reindex(self, rel):
+        kind = self.kind_of(rel)
+        indexer = self.indexers.get(kind)
+        if not indexer:
             return
-        self.save_note({
-            "title": "从这里开始 · 一张可以生长的工作台",
-            "folder": "Home", "tags": ["起点"],
-            "body": """# 欢迎来到 Lattice
+        self._unindex(rel)
+        if self.vault.path(rel).exists():
+            indexer(rel)
+        self.db.commit()
 
-这是你的本地 AI 学习与创造工作台。这里连接**理解、实验、行动与历史**。
+    def _unindex(self, rel):
+        row = self.db.execute("SELECT id, kind FROM files WHERE path=?", (rel,)).fetchone()
+        if row:
+            self.indexers[row["kind"]](rel, unindex=row["id"])
+        self.db.execute("DELETE FROM files WHERE path=?", (rel,))
 
-### 一种工作的节奏
-从真实困惑出发，先形成直觉和可证伪的猜测，再在实验笔记里构造一个足够小的实验，把真实结果带回自己的理解里。
+    def unindex(self, rel):
+        self._unindex(rel)
+        self.db.commit()
 
-- **笔记**留住想法，而不是复制大段答案。
-- **版本历史**让你比较从前的理解与现在的判断。
-- **知识网络**由 `[[双向链接]]` 自动组织。
+    def adopt(self, rel, kind, attrs, body):
+        """A Markdown file made outside Lattice gets an id and a kind written into it once, so links stay stable."""
+        if attrs.get("id"):
+            return attrs
+        attrs = {"id": identifier(), "kind": kind, "title": attrs.get("title") or Path(rel).stem, **attrs,
+                 "created": attrs.get("created") or stamp()}
+        attrs["id"] = attrs["id"] or identifier()
+        self.vault.write_md(rel, attrs, body)
+        return attrs
 
-试试在笔记中输入 `[[Attention]]`，然后在「知识网络」里观察连接。
+    def register(self, rel, ident, kind):
+        self.db.execute("INSERT OR REPLACE INTO files VALUES(?,?,?)", (rel, ident, kind))
 
-> 这些是示例内容，不代表你已经完成了相关学习。
-""",
-        })
-        self.save_note({
-            "title": "Attention", "folder": "Knowledge", "tags": ["Transformer", "待验证"],
-            "body": """# Attention · 一个正在展开的问题
+    def locate(self, ident, kind=None):
+        row = self.db.execute("SELECT path FROM files WHERE id=?" + (" AND kind=?" if kind else ""),
+                              (ident, kind) if kind else (ident,)).fetchone()
+        return row[0] if row else None
 
-为什么序列模型需要一种**根据当前内容选择信息来源**的机制？
+    def rebuild(self):
+        """Throw the index away and read every file again."""
+        for table in self.index_tables:
+            self.db.execute("DELETE FROM " + table)
+        self.vault.known.clear()
+        # Topics first so everything that points at them resolves; journal last, in order.
+        order = {"topic": 0, "thread": 1, "journal": 9}
+        for rel in sorted(self.vault.files(), key=lambda r: (order.get(self.kind_of(r), 5), r)):
+            kind = self.kind_of(rel)
+            if kind in self.indexers:
+                try:
+                    self.indexers[kind](rel)
+                except Exception as exc:  # one unreadable file must not hide the rest
+                    self.db.execute("INSERT INTO events(kind,title,detail,target,at) VALUES(?,?,?,?,?)",
+                                    ("index", "读不了这个文件", f"{rel}: {exc}"[:500], rel, stamp()))
+            self.vault.known[rel] = self.vault._stat(rel)
+        self.db.commit()
 
-## 直觉
-想象你在读「小猫趴在椅子上，因为它很舒服」。
-当模型试着理解「它」时，哪些之前的词应该提供更多信息？
+    def sync(self):
+        """Pick up files changed outside Lattice. Returns whether anything changed."""
+        changed, removed = self.vault.scan()
+        if any(self.kind_of(r) == "journal" for r in changed + removed):
+            # The journal is append-only; an outside edit to it is rare enough to re-read everything.
+            self.rebuild()
+            return True
+        for rel in removed:
+            self._unindex(rel)
+        for rel in changed:
+            self._unindex(rel)
+            kind = self.kind_of(rel)
+            if kind in self.indexers:
+                try:
+                    self.indexers[kind](rel)
+                except Exception:
+                    pass
+        self.db.commit()
+        return bool(changed or removed)
 
-## 可验证的猜测
-如果注意力权重均匀分配，模型还能利用不同上下文建立区别吗？
+    # ---- settings (machine-local, not learning data) --------------------------------------
+    def settings(self):
+        try:
+            return json.loads(self.settings_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
 
-## 可动手的实验
-用三组小向量计算 `QKᵀ / √d`，再经过 softmax；有意识地改变一组 Key。
+    def setting(self, key, default=None):
+        return self.settings().get(key, default)
 
-## 关联
-[[Transformer]] · [[从这里开始 · 一张可以生长的工作台]]
+    def set_setting(self, key, value):
+        data = self.settings()
+        data[key] = value
+        tmp = self.settings_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, self.settings_path)
+        return value
 
-> 这是探索模板，等待实际实验结果。
-""",
-        })
-        self.save_note({
-            "title": "Transformer", "folder": "Knowledge", "tags": ["模型结构"],
-            "body": """# Transformer
+    # ---- journal ------------------------------------------------------------------------
+    def record(self, kind, data, actor="app", refs=()):
+        """Append one entry to the learning journal and index it."""
+        entry = {"id": identifier(), "at": vault_now(), "actor": actor, "type": kind, "refs": list(refs), "data": data}
+        self.vault.append_line(journal_path(entry["at"]), entry)
+        indexer = self.journal_indexers.get(kind)
+        if indexer:
+            indexer(entry)
+        self.db.commit()
+        return entry
 
-从序列中提取结构的信息处理架构。
-
-## 我真正关心的问题
-在语言建模中，为什么会有表示层、[[Attention]]、MLP、残差连接和输出投影？每一层分别解决什么问题？
-
-## 等待实验
-比较无注意力的极简模型与一个单头注意力模型的行为。
-
-## 关联
-[[Attention]]
-""",
-        })
-        study = Path.home() / "Projects" / "StudyLab"
-        if study.is_dir():
-            self.add_project("StudyLab · 既有学习目录", str(study))
+    def _index_journal(self, rel, unindex=None):
+        if unindex is not None:
+            # Journal files only grow; re-reading one re-adds entries we may already hold.
+            return
+        self.register(rel, rel, "journal")
+        for entry in self.vault.read_lines(rel):
+            indexer = self.journal_indexers.get(entry.get("type"))
+            if indexer:
+                indexer(entry)
 
     def emit(self, kind, title, detail="", target=""):
+        self.record("event", {"kind": kind, "title": title, "detail": detail, "target": target})
+
+    def _index_event(self, entry):
+        d = entry["data"]
         self.db.execute("INSERT INTO events(kind,title,detail,target,at) VALUES(?,?,?,?,?)",
-                        (kind, title, detail, target, stamp()))
-        self.db.commit()
+                        (d.get("kind", ""), d.get("title", ""), d.get("detail", ""), d.get("target", ""), entry["at"]))
+
+    # ---- notes ---------------------------------------------------------------------------
+    def _index_note(self, rel, unindex=None):
+        if unindex is not None:
+            self.db.execute("DELETE FROM notes WHERE id=?", (unindex,))
+            return
+        attrs, body = self.vault.read_md(rel)
+        attrs = self.adopt(rel, "note", attrs, body)
+        ident = str(attrs["id"])
+        folder = "/".join(rel.split("/")[1:-1]) or "Knowledge"
+        t = str(attrs.get("created") or stamp())
+        self.db.execute("INSERT OR REPLACE INTO notes VALUES(?,?,?,?,?,?,?,?)",
+                        (ident, str(attrs.get("title") or Path(rel).stem), body, folder,
+                         json.dumps([str(x) for x in attrs.get("tags") or []], ensure_ascii=False),
+                         int(bool(attrs.get("pinned"))), t, str(attrs.get("updated") or t)))
+        self.register(rel, ident, "note")
 
     def get_note(self, note_id):
         row = self.db.execute("SELECT * FROM notes WHERE id=?", (note_id,)).fetchone()
@@ -170,60 +246,62 @@ class Store:
             "SELECT * FROM notes" + condition + " ORDER BY pinned DESC,updated_at DESC LIMIT ?", params
         ).fetchall()]
 
-    def save_note(self, data, revise=True):
+    def save_note(self, data):
         note_id = data.get("id") or identifier()
         title = str(data.get("title") or "无标题").strip()[:180]
         body = str(data.get("body") or "")
-        folder = str(data.get("folder") or "Knowledge").strip()[:80]
-        tags = json.dumps(list(dict.fromkeys([str(x)[:40] for x in data.get("tags", [])]))[:20], ensure_ascii=False)
-        pinned = int(bool(data.get("pinned", False)))
-        old = self.db.execute("SELECT * FROM notes WHERE id=?", (note_id,)).fetchone()
-        now = stamp()
-        if old:
-            if title == old["title"] and body == old["body"] and folder == old["folder"] and tags == old["tags"] and pinned == old["pinned"]:
-                return self.get_note(note_id)
-            # A new revision on explicit save; UI handles debounce and cadence.
-            # Draft autosaves (revise=False) only overwrite, so typing does not flood the history.
-            if revise:
-                self.db.execute("INSERT INTO revisions(note_id,title,body,created_at) VALUES(?,?,?,?)",
-                                (note_id, old["title"], old["body"], now))
-            self.db.execute(
-                "UPDATE notes SET title=?,body=?,folder=?,tags=?,pinned=?,updated_at=? WHERE id=?",
-                (title, body, folder, tags, pinned, now, note_id),
-            )
-            self.db.commit()
-            self.emit("note", f"修订 · {title}", f"{folder} · {len(body)} 字符", note_id)
-        else:
-            self.db.execute(
-                "INSERT INTO notes(id,title,body,folder,tags,pinned,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
-                (note_id, title, body, folder, tags, pinned, now, now)
-            )
-            self.db.commit()
-            self.emit("note", f"新笔记 · {title}", folder, note_id)
+        folder = re.sub(r"[\\:*?\"<>|]", " ", str(data.get("folder") or "Knowledge")).strip(" /")[:80] or "Knowledge"
+        tags = list(dict.fromkeys([str(x)[:40] for x in data.get("tags", [])]))[:20]
+        old = self.get_note(note_id)
+        current = self.locate(note_id, "note")
+        if old and current and title == old["title"] and body == old["body"] and folder == old["folder"] \
+                and tags == old["tags"] and bool(data.get("pinned", old["pinned"])) == old["pinned"]:
+            return old
+        attrs = self.vault.read_md(current)[0] if current else {}
+        attrs.update(id=note_id, kind="note", title=title, tags=tags, pinned=bool(data.get("pinned", attrs.get("pinned", False))),
+                     created=attrs.get("created") or stamp(), updated=stamp())
+        rel = self.vault.unique(f"notes/{folder}", title, ".md", current if current and current.startswith(f"notes/{folder}/") else None)
+        if current and current != rel:
+            self.vault.move(current, rel)
+            self.unindex(current)
+        self.vault.write_md(rel, attrs, body)
+        self.reindex(rel)
+        self.emit("note", ("修订 · " if old else "新笔记 · ") + title, folder, note_id)
         return self.get_note(note_id)
 
     def delete_note(self, note_id):
         old = self.get_note(note_id)
-        if not old:
+        rel = self.locate(note_id, "note")
+        if not old or not rel:
             return False
-        self.db.execute("DELETE FROM notes WHERE id=?", (note_id,))
-        self.db.commit()
+        self.vault.remove(rel)
+        self.unindex(rel)
         self.emit("note", f"删除笔记 · {old['title']}")
         return True
 
     def revisions(self, note_id):
-        return records(self.db.execute(
-            "SELECT id,note_id,title,body,created_at FROM revisions WHERE note_id=? ORDER BY id DESC LIMIT 200",
-            (note_id,)
-        ))
+        """Earlier committed versions of a note, from the vault's git history."""
+        current = self.get_note(note_id)
+        if not current:
+            return []
+        out = []
+        versions = self.vault.history(note_id, "notes")
+        for v in versions:
+            try:
+                attrs, body = split_frontmatter(self.vault.show(v["commit"], v["path"]))
+            except Exception:
+                continue
+            if not out and v is versions[0] and (attrs.get("title"), body.rstrip()) == (current["title"], current["body"].rstrip()):
+                continue  # the latest commit is the version on disk now, not history
+            out.append({"id": v["commit"], "note_id": note_id, "title": attrs.get("title", ""), "body": body.rstrip(), "created_at": v["at"]})
+        return out
 
     def restore(self, note_id, rev_id):
-        old = self.db.execute("SELECT title,body FROM revisions WHERE id=? AND note_id=?",
-                              (rev_id, note_id)).fetchone()
+        old = next((r for r in self.revisions(note_id) if r["id"] == rev_id), None)
         if not old:
             return None
         current = self.get_note(note_id)
-        return self.save_note({**current, "title":old["title"], "body":old["body"]})
+        return self.save_note({**current, "title": old["title"], "body": old["body"]})
 
     def graph(self):
         ns = self.list_notes(limit=1000)
@@ -234,49 +312,48 @@ class Store:
                 match = by_title.get(linked.casefold())
                 if match and match != n["id"]:
                     edges.add((n["id"], match))
-        nodes = [{"id": n["id"], "title": n["title"], "folder":n["folder"], "degree":0} for n in ns]
+        nodes = [{"id": n["id"], "title": n["title"], "folder": n["folder"], "degree": 0} for n in ns]
         counts = {}
-        for a,b in edges:
-            counts[a] = counts.get(a,0)+1
-            counts[b] = counts.get(b,0)+1
+        for a, b in edges:
+            counts[a] = counts.get(a, 0) + 1
+            counts[b] = counts.get(b, 0) + 1
         for n in nodes:
-            n["degree"] = counts.get(n["id"],0)
-        return {"nodes":nodes,"edges":[{"source":a,"target":b} for a,b in sorted(edges)]}
+            n["degree"] = counts.get(n["id"], 0)
+        return {"nodes": nodes, "edges": [{"source": a, "target": b} for a, b in sorted(edges)]}
 
     def backlinks(self, note_id):
         n = self.get_note(note_id)
         if not n:
             return []
         title = n["title"].casefold()
-        return [{"id":x["id"],"title":x["title"]} for x in self.list_notes(limit=1000)
+        return [{"id": x["id"], "title": x["title"]} for x in self.list_notes(limit=1000)
                 if x["id"] != note_id and title in [w.casefold() for w in words(x["body"])]]
 
+    # ---- mounted folders (machine-local paths, so they live in settings) --------------------
     def add_project(self, name, path):
         p = Path(path).expanduser().resolve()
         if not p.is_dir():
             raise ValueError(f"目录不存在：{p}")
-        existing = self.db.execute("SELECT * FROM projects WHERE path=?", (str(p),)).fetchone()
+        projects = self.projects()
+        existing = next((x for x in projects if x["path"] == str(p)), None)
         if existing:
-            return dict(existing)
-        ident = identifier()
-        self.db.execute("INSERT INTO projects VALUES(?,?,?,?)",(ident,str(name)[:120],str(p),stamp()))
-        self.db.commit()
-        self.emit("project",f"连接工作区 · {name}",str(p),ident)
-        return dict(self.db.execute("SELECT * FROM projects WHERE id=?",(ident,)).fetchone())
+            return existing
+        project = {"id": identifier(), "name": str(name)[:120], "path": str(p), "created_at": stamp()}
+        self.set_setting("projects", projects + [project])
+        self.emit("project", f"连接工作区 · {name}", str(p), project["id"])
+        return project
 
     def projects(self):
-        return records(self.db.execute("SELECT * FROM projects ORDER BY created_at"))
+        return self.setting("projects", [])
 
     def project(self, ident):
-        row=self.db.execute("SELECT * FROM projects WHERE id=?",(ident,)).fetchone()
-        return dict(row) if row else None
+        return next((p for p in self.projects() if p["id"] == ident), None)
 
     def remove_project(self, ident):
         p = self.project(ident)
         if p:
-            self.db.execute("DELETE FROM projects WHERE id=?",(ident,))
-            self.db.commit()
-            self.emit("project",f"移除工作区引用 · {p['name']}")
+            self.set_setting("projects", [x for x in self.projects() if x["id"] != ident])
+            self.emit("project", f"移除工作区引用 · {p['name']}")
         return bool(p)
 
     def _safe_path(self, project_id, relative):
@@ -287,113 +364,171 @@ class Store:
         resolved = (root / str(relative)).resolve()
         if not resolved.is_relative_to(root):
             raise ValueError("禁止访问工作区之外的路径")
-        return resolved,root
+        return resolved, root
 
     def project_files(self, project_id, relative=""):
-        target,root = self._safe_path(project_id,relative)
+        target, root = self._safe_path(project_id, relative)
         if not target.is_dir():
             return []
-        skipped={".git","node_modules",".venv","venv","dist","build",".next","__pycache__",".cache"}
-        found=[]
-        for p in sorted(target.iterdir(),key=lambda x:(not x.is_dir(),x.name.casefold())):
+        skipped = {".git", "node_modules", ".venv", "venv", "dist", "build", ".next", "__pycache__", ".cache"}
+        found = []
+        for p in sorted(target.iterdir(), key=lambda x: (not x.is_dir(), x.name.casefold())):
             if p.name in skipped or p.name.startswith(".env"):
                 continue
             # Never traverse symlinks outside the chosen project.
             if p.is_symlink():
                 continue
-            found.append({
-                "name":p.name,"path":p.relative_to(root).as_posix(),
-                "type":"dir" if p.is_dir() else "file"
-            })
-            if len(found)>=180:
+            found.append({"name": p.name, "path": p.relative_to(root).as_posix(), "type": "dir" if p.is_dir() else "file"})
+            if len(found) >= 180:
                 break
         return found
 
     def file_read(self, project_id, relative):
-        path,_=self._safe_path(project_id,relative)
-        if not path.is_file() or path.stat().st_size>1024*1024:
+        path, _ = self._safe_path(project_id, relative)
+        if not path.is_file() or path.stat().st_size > 1024 * 1024:
             raise ValueError("只能打开不超过 1MB 的普通文本文件")
         if path.name.startswith(".env"):
             raise ValueError("为避免泄露凭据，不能在此预览环境密钥文件")
         try:
-            content=path.read_text(encoding="utf-8")
+            content = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             raise ValueError("二进制文件无法在文本编辑器中打开")
-        return {"content":content,"path":str(path)}
+        return {"content": content, "path": str(path)}
 
     def file_write(self, project_id, relative, content):
-        path,_=self._safe_path(project_id,relative)
-        if not path.is_file() or not os.access(path,os.W_OK):
+        path, _ = self._safe_path(project_id, relative)
+        if not path.is_file() or not os.access(path, os.W_OK):
             raise ValueError("只能修改已存在且可写的文本文件")
         if path.name.startswith(".env"):
             raise ValueError("不编辑环境密钥文件")
-        if len(content)>1024*1024:
+        if len(content) > 1024 * 1024:
             raise ValueError("文件超过 1MB")
         try:
-            previous=path.read_text(encoding="utf-8")
+            previous = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             raise ValueError("二进制文件无法在文本编辑器中打开")
         if previous != content:
             # Keep a safety copy alongside the application's local data, not beside user code.
-            backup_dir=APP_HOME/"file-backups"
-            backup_dir.mkdir(parents=True,exist_ok=True)
-            (backup_dir/f"{path.name}.{identifier()}.bak").write_text(previous,encoding="utf-8")
+            backup_dir = APP_HOME / "file-backups"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            (backup_dir / f"{path.name}.{identifier()}.bak").write_text(previous, encoding="utf-8")
             # Retention: unbounded .bak growth would silently fill the disk.
-            backups=sorted(backup_dir.glob("*.bak"),key=lambda p:p.stat().st_mtime)
+            backups = sorted(backup_dir.glob("*.bak"), key=lambda p: p.stat().st_mtime)
             for stale in backups[:-200]:
                 stale.unlink(missing_ok=True)
-            path.write_text(content,encoding="utf-8")
-            self.emit("file", f"编辑文件 · {path.name}",str(path))
+            path.write_text(content, encoding="utf-8")
+            self.emit("file", f"编辑文件 · {path.name}", str(path))
         return True
 
-    def new_session(self, agent, project_id=None, title=None):
-        ident=identifier()
-        t=stamp()
-        title=title or ("与 "+agent+" 探索")
-        self.db.execute(
-            "INSERT INTO sessions(id,agent,title,project_id,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-            (ident, agent,title,project_id,t,t))
-        self.db.commit()
-        self.emit("agent",f"开启会话 · {title}",agent,ident)
+    # ---- conversations: one JSON-lines file per thread, header first --------------------------
+    def _thread_rel(self, ident, created):
+        return f"threads/{created[:7]}/{ident}.jsonl"
+
+    def _index_thread(self, rel, unindex=None):
+        if unindex is not None:
+            self.db.execute("DELETE FROM messages WHERE session_id=?", (unindex,))
+            self.db.execute("DELETE FROM sessions WHERE id=?", (unindex,))
+            for hook in self.thread_hooks:
+                hook(None, unindex)
+            return
+        lines = self.vault.read_lines(rel)
+        if not lines or lines[0].get("kind") != "thread":
+            return
+        head, messages = lines[0], lines[1:]
+        updated = messages[-1]["at"] if messages else head["created"]
+        self.db.execute("INSERT OR REPLACE INTO sessions VALUES(?,?,?,?,?,?)",
+                        (head["id"], head.get("agent", "api"), head.get("title", ""), head.get("project_id"), head["created"], updated))
+        self.db.executemany("INSERT OR REPLACE INTO messages VALUES(?,?,?,?,?,?)",
+                            [(m["id"], head["id"], m["role"], m["content"], json.dumps(m.get("meta") or {}, ensure_ascii=False), m["at"])
+                             for m in messages])
+        self.register(rel, head["id"], "thread")
+        for hook in self.thread_hooks:
+            hook(head, head["id"])
+
+    thread_hooks = ()
+
+    def new_session(self, agent, project_id=None, title=None, attrs=None):
+        ident = identifier()
+        t = stamp()
+        head = {"id": ident, "kind": "thread", "agent": agent, "title": title or ("与 " + agent + " 探索"),
+                "project_id": project_id, "created": t, **(attrs or {})}
+        rel = self._thread_rel(ident, t)
+        self.vault.write_lines(rel, [head])
+        self.reindex(rel)
+        self.emit("agent", f"开启会话 · {head['title']}", agent, ident)
         return self.session(ident)
 
     def session(self, ident):
-        row=self.db.execute("SELECT * FROM sessions WHERE id=?",(ident,)).fetchone()
+        row = self.db.execute("SELECT * FROM sessions WHERE id=?", (ident,)).fetchone()
         return dict(row) if row else None
 
-    def set_remote_id(self, ident, remote_id):
-        self.db.execute("UPDATE sessions SET remote_id=? WHERE id=?",(remote_id,ident))
-        self.db.commit()
+    def thread_head(self, ident):
+        rel = self.locate(ident, "thread")
+        if not rel:
+            raise ValueError("会话不存在")
+        return self.vault.read_lines(rel)[0]
+
+    def update_thread(self, ident, **attrs):
+        """Change a conversation's header attributes (title, practice state…)."""
+        rel = self.locate(ident, "thread")
+        lines = self.vault.read_lines(rel)
+        lines[0].update(attrs)
+        self.vault.write_lines(rel, lines)
+        self.reindex(rel)
+        return lines[0]
 
     def append_message(self, session_id, role, content, meta=None):
-        t=stamp()
-        self.db.execute("INSERT INTO messages(session_id,role,content,meta,created_at) VALUES(?,?,?,?,?)",
-                        (session_id,role,content,json.dumps(meta or {},ensure_ascii=False),t))
-        self.db.execute("UPDATE sessions SET updated_at=? WHERE id=?",(t,session_id))
+        rel = self.locate(session_id, "thread")
+        if not rel:
+            raise ValueError("会话不存在")
+        ident = (self.db.execute("SELECT MAX(id) FROM messages").fetchone()[0] or 0) + 1
+        message = {"id": ident, "role": role, "content": content, "meta": meta or {}, "at": stamp()}
+        self.vault.append_line(rel, message)
+        self.db.execute("INSERT INTO messages VALUES(?,?,?,?,?,?)",
+                        (ident, session_id, role, content, json.dumps(meta or {}, ensure_ascii=False), message["at"]))
+        self.db.execute("UPDATE sessions SET updated_at=? WHERE id=?", (message["at"], session_id))
         self.db.commit()
-        return True
+        return ident
+
+    def move_messages(self, ids, target):
+        """Move some messages into another conversation, keeping their ids and times."""
+        ids = {int(i) for i in ids}
+        moved = []
+        for rel in {r[0] for r in self.db.execute(
+                f"SELECT f.path FROM messages m JOIN files f ON f.id=m.session_id AND f.kind='thread' WHERE m.id IN ({','.join('?' * len(ids))})", tuple(ids))}:
+            lines = self.vault.read_lines(rel)
+            moved += [m for m in lines[1:] if m.get("id") in ids]
+            self.vault.write_lines(rel, [lines[0]] + [m for m in lines[1:] if m.get("id") not in ids])
+            self.reindex(rel)
+        if moved:
+            rel = self.locate(target, "thread")
+            lines = self.vault.read_lines(rel)
+            self.vault.write_lines(rel, [lines[0]] + sorted(lines[1:] + moved, key=lambda m: m["id"]))
+            self.reindex(rel)
+        return len(moved)
 
     def messages(self, session_id):
         rows = records(self.db.execute(
-            "SELECT * FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 1500",(session_id,)))
+            "SELECT * FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 1500", (session_id,)))
         rows.reverse()
         return rows
 
     def export_markdown(self, dest):
-        target=Path(dest).expanduser().resolve()
+        target = Path(dest).expanduser().resolve()
         if target.exists() and not target.is_dir():
             raise ValueError("导出目标不是文件夹")
-        target.mkdir(parents=True,exist_ok=True)
-        count=0
+        target.mkdir(parents=True, exist_ok=True)
+        count = 0
         for n in self.list_notes(limit=1000):
-            folder=target/re.sub(r"[^\w\-\u4e00-\u9fff]","_",n["folder"])
+            folder = target / re.sub(r"[^\w\-一-鿿]", "_", n["folder"])
             folder.mkdir(exist_ok=True)
-            safe_title=re.sub(r"[\\/:*?\"<>|]","_",n["title"]).strip()[:120]
-            path=folder/f"{safe_title}-{n['id'][:6]}.md"
-            path.write_text(n["body"],encoding="utf-8")
-            count+=1
-        self.emit("export",f"导出 {count} 篇笔记",str(target))
-        return {"count":count,"path":str(target)}
+            safe_title = re.sub(r"[\\/:*?\"<>|]", "_", n["title"]).strip()[:120]
+            path = folder / f"{safe_title}-{n['id'][:6]}.md"
+            path.write_text(n["body"], encoding="utf-8")
+            count += 1
+        self.emit("export", f"导出 {count} 篇笔记", str(target))
+        return {"count": count, "path": str(target)}
 
     def close(self):
+        self.vault.commit("我的编辑", "me")
         self.db.close()

@@ -118,7 +118,7 @@ function render(){
  el('#root > .main').innerHTML=(contextual?learningHeader():header())+
  '<section class="content '+(learning?'page-surface':'')+'" data-scroll="page" data-scroll-ns="'+esc(S.view)+'">'+
  (learning?learningPage():'<div class="page '+(S.view==='graph'?'wide':'')+'">'+viewHtml()+'</div>')+
- '</section>'+(contextual?proposalRibbon():'');
+ '</section>';
  scrollRestore(sc,L.scrollBottom?'chat-'+L.scrollBottom:null);L.scrollBottom=null;
  fitCodeEditors();runAfterRender();
  const again=focusId&&document.getElementById(focusId);

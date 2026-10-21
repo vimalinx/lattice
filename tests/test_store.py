@@ -13,16 +13,20 @@ class StoreTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name)
-        self.store=Store(self.root/"test.sqlite",seed=False)
+        self.store=Store(self.root/"test.sqlite")
         self.addCleanup(self.store.close)
 
     def test_note_revisions_and_restore(self):
+        # A version is a vault commit; the learner's edits are committed when they pause.
         n=self.store.save_note({"title":"我对注意力的认识","body":"第一种解释"})
+        self.store.vault.commit("第一版")
         changed=self.store.save_note({**n,"body":"经过实验修订的解释"})
+        self.store.vault.commit("第二版")
         self.assertEqual(len(self.store.revisions(n["id"])),1)
         self.assertEqual(self.store.revisions(n["id"])[0]["body"],"第一种解释")
         restored=self.store.restore(n["id"],self.store.revisions(n["id"])[0]["id"])
         self.assertEqual(restored["body"],"第一种解释")
+        self.store.vault.commit("恢复")
         self.assertGreaterEqual(len(self.store.revisions(n["id"])),2)
 
     def test_graph_and_backlinks(self):

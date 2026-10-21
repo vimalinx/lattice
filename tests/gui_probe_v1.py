@@ -1,7 +1,7 @@
 import os,sys,tempfile,json
 from pathlib import Path
 qa=Path(tempfile.mkdtemp(prefix='lattice-render-probe-'))
-os.environ['XDG_DATA_HOME']=str(qa/'data');os.environ['XDG_CONFIG_HOME']=str(qa/'config')
+os.environ['XDG_DATA_HOME']=str(qa/'data');os.environ['XDG_CONFIG_HOME']=str(qa/'config');os.environ['LATTICE_VAULT']=str(qa/'vault')
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QTimer,Qt
 from PySide6.QtWidgets import QApplication

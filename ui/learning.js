@@ -346,11 +346,6 @@ function flashPanel(){
  '<div class="flash-footnote">快答与主讲独立运行 · 记录在本机共享</div></aside>';
 }
 function selectionHtml(){return L.selection?'<div><span>已选中 · '+L.selection.length+' 字符</span>'+lbutton(svg("close",12),'l-clear-selection','','ghost sm')+'</div><pre>'+esc(shorten(L.selection,200))+'</pre>'+lbutton('解释选中内容','l-explain-selection','','ghost sm'):'<span>'+svg("eye",13)+' 选中文字或代码，带着上下文提问</span>';}
-function proposalRibbon(){
- const pending=(ld()?.proposals||[]).filter(p=>p.state==='pending');
- if(!pending.length)return '';
- return '<div class="proposal-ribbon"><div><span class="proposal-dot"></span><strong>'+pending.length+' 份教学建议待采纳</strong><span>'+esc(shorten(pending[0].payload.summary,55))+'</span></div>'+lbutton('预览并采纳 '+svg("arrow",14),'l-proposals','','primary sm')+'</div>';
-}
 function visibleCards(){
  const q=L.search.trim().toLocaleLowerCase();
  return (ld()?.cards||[]).filter(c=>(!L.stage||c.stage===L.stage)&&(!L.scope||c.topic_id===L.scope)&&(!q||[c.title,c.body,c.understanding,c.question,...c.tags].join(' ').toLocaleLowerCase().includes(q)));
@@ -605,17 +600,6 @@ function relationModal(source=''){
  '<label class="learn-form-label">为什么相连<textarea class="field" rows="3" id="relation-reason"></textarea></label><p>前置知识与整体—部分关系会用于知识树；其他关联会出现在关系图中。</p>'+
  '<div class="modal-actions">'+lbutton('取消','modal-close','','ghost')+lbutton('建立关系','l-relation-save','','primary')+'</div>');
 }
-function proposalsModal(){
- const proposals=ld().proposals.filter(p=>p.state==='pending');
- modal(modalHead('把建议变成可继续使用的学习材料')+'<p>这里是模型提出的草案。采纳会添加内容，不会执行 Python，也不会自动标记你已经掌握知识。</p>'+
- proposals.map(p=>{const pl=p.payload||{},les=pl.lessons||[],cds=pl.cards||[],cls=pl.cells||[],rls=pl.relations||[],pnotes=pl.notes||[];return '<section class="proposal-preview"><h3>'+esc(pl.summary||'一份新的教学建议')+'</h3><div class="proposal-counts">'+les.length+' 节课 · '+cds.length+' 张卡 · '+cls.length+' 个单元格 · '+rls.length+' 条关系'+(pnotes.length?' · '+pnotes.length+' 篇经验文档':'')+'</div>'+
- les.map(l=>'<details><summary>课程 · '+esc(l.title)+'</summary><div class="markdown">'+markdown(l.body||'')+'</div></details>').join('')+
- cds.map(c=>'<details><summary>知识卡 · '+esc(c.title)+'</summary><div class="markdown">'+markdown(c.body||'')+'</div><p>'+esc(c.question||'')+'</p></details>').join('')+
- pnotes.map(n=>'<details><summary>经验文档 · '+esc(n.title)+'</summary><div class="markdown">'+markdown(n.body||'')+'</div></details>').join('')+
- cls.map((c,i)=>'<details><summary>单元格 '+(i+1)+' · '+esc(c.kind)+'</summary><pre>'+esc(c.source)+'</pre></details>').join('')+
- (rls.length?'<div class="proposal-relations">'+rls.map(r=>'<p>'+esc(r.source+' → '+(relationName[r.kind]||r.kind)+' → '+r.target)+'<small>'+esc(r.reason||'')+'</small></p>').join('')+'</div>':'')+
- '<div class="modal-actions">'+lbutton('先略过','l-proposal-dismiss','data-id="'+esc(p.id)+'"','ghost sm')+lbutton('采纳这一份','l-proposal-apply','data-id="'+esc(p.id)+'"','primary sm')+'</div></section>';}).join(''),'large');
-}
 async function settingsSave(){
  const apis={};
  for(const a of ld().providers.apis){const v=k=>el('#cfg-api-'+a.id+'-'+k).value;apis[a.id]={base_url:v('base'),api_key:v('key'),headers:JSON.parse(v('headers')||'{}'),extra_body:JSON.parse(v('extra')||'{}')};}
@@ -736,15 +720,6 @@ action=async function(target){
   await learnRefresh();await openContent('notebook');
   return toast('已放进实验笔记并交给 Jupyter 运行');
  }
- case 'l-proposals':return proposalsModal();
- case 'l-proposal-apply':{
-  await flushCells();const result=await rpc('learn_proposal_apply',{id,notebook_id:activeNotebook()?.id});closeModal();
-  if(result.notebook_id)L.notebookId=result.notebook_id;if(result.lessons?.[0])L.lessonId=result.lessons[0];
-  await learnRefresh();
-  if(result.lessons?.length)await openContent('classroom');else if(result.cells?.length)await openContent('notebook');
-  return toast('已写入学习档案；新增代码尚未执行');
- }
- case 'l-proposal-dismiss':await rpc('learn_proposal_dismiss',{id});closeModal();return learnRefresh();
  case 'l-card-view':L.cardView=a.dataset.mode;return render();
  case 'l-toggle-flash':return go('flash');
  case 'l-lesson-topic':{
@@ -912,6 +887,8 @@ onEvent=async function(evt){
   return;
  }
  if(evt.type==='learning_changed'){
+  // Files edited outside Lattice: notes live in the base data, learning records in the snapshot.
+  if(evt.external){await reloadData();if(!S.noteDirty&&!L.pad)render();return;}
   if(evt.topic_id===lt()?.id){await learnRefresh(false);if(['notebook','practice'].includes(S.view))render();}
   return;
  }

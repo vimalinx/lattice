@@ -37,15 +37,20 @@ python3 run.py
 
 浏览器界面只通过 Qt WebChannel `backend.request(JSON.stringify({method,...}))` 访问本机后端；返回 `{ok,data}` 或 `{ok:false,error}`。没有向局域网开放 HTTP 代码执行服务。事件从 `backend.event` 传输。
 
-模型接口：`learn_settings[_save]`、`learn_connect`、`learn_new_tutor`、`learn_send`、`learn_cancel`、`learn_test_api`。练习：`learn_practice_start/send/end/get`、`learn_insight_resolve`。课程：`learn_topic_save`、`learn_focus`、`learn_lesson_save`、`learn_context`。卡片：`learn_card_save/delete`、`learn_evidence`、`learn_completed_runs`、`learn_relation/delete`、`learn_review`。候选：`learn_proposal_apply/dismiss`。Notebook：`nb_create/get`、`nb_cell_save/delete/move`、`nb_run`、`nb_interrupt/restart`、`nb_history/import/export`。整体快照 `learn_snapshot`，档案导出 `learn_export`。
+模型接口：`learn_settings[_save]`、`learn_new_tutor`、`learn_send`、`learn_cancel`、`learn_test_api`。练习：`learn_practice_start/send/end/get`、`learn_insight_resolve`。课程：`learn_topic_save`、`learn_focus`、`learn_lesson_save`、`learn_context`。卡片：`learn_card_save/delete`、`learn_evidence`、`learn_completed_runs`、`learn_relation/delete`、`learn_review`。候选：`learn_proposal_apply/dismiss`。Notebook：`nb_create/get`、`nb_cell_save/delete/move`、`nb_run`、`nb_interrupt/restart`、`nb_history/import/export`。整体快照 `learn_snapshot`，档案导出 `learn_export`。
 
 主讲的课程建议使用 fenced `lattice` JSON（version=1），允许 lessons/cards/relations/cells。模型没有直写数据库工具，未知字段和不合法关系会拒绝；采纳为事务操作，可重复点击而不重复插入；不会自动执行 AI 生成的 Python。
 
 ## 数据、凭据和备份
 
-默认数据：`~/.local/share/lattice/lattice.db`（支持 XDG_DATA_HOME）；学习实验工作目录在同目录 `learning/`。模型配置：`~/.config/lattice/providers.json`（支持 XDG_CONFIG_HOME），权限 0600；界面只知道是否有 Key，不接收已保存密钥；Key 也可以用环境变量 `DEEPSEEK_API_KEY`、`COMMANDCODE_API_KEY`、`OPENCODE_GO_API_KEY` 提供。导出 ZIP 包含数据库、知识结构 JSON、知识卡 Markdown 与 `.ipynb`，不包含凭据配置。实际使用模型时，所需学习上下文会发给你配置的模型服务，不能理解为“数据永不出网”。
+学习数据就是一个文件夹：学习库，默认 `~/Lattice/`（可用环境变量 `LATTICE_VAULT` 指定），本身是一个 git 仓库。主题、知识卡、课程、笔记、薄弱点是带 YAML frontmatter 的 Markdown（`topics/`、`cards/`、`lessons/`、`notes/<文件夹>/`、`insights/`），实验笔记是标准 `.ipynb`（`notebooks/`），对话是 `threads/` 下的 JSON lines，学习轨迹是 `journal/` 下按天追加的 JSON lines。文件名给人看，引用一律用 frontmatter 里的 `id`；卡片正文中「## 我的理解」一节和理解阶段只归你。格式说明见 `docs/DESIGN.md`。
 
-恢复档案前退出所有 Lattice 窗口，备份整个数据目录，再把 ZIP 中的 lattice.db 放入新的空白 Lattice 数据目录。建议先用独立 XDG_DATA_HOME 启动验证，而非覆盖正在使用的 SQLite/WAL 文件。
+- `.lattice/index.db` 只是索引，每次启动从文件重建，删了也没关系；`.lattice/settings.json`、`.lattice/runs/`（每次运行的完整输出）不进 git。
+- 你的编辑停顿约 30 秒、或任何 AI 动作之前自动提交；AI 的每个动作单独提交一次，作者写明是哪个 AI。对话里的「撤销」把那次提交改过的内容文件逐个改回去；之后又被改过的文件不会被覆盖，会提示没法自动撤销。轨迹和对话只追加，不参与撤销。笔记的「版本历史」就是 git 里的历次提交。
+- 可以用任何编辑器直接改学习库里的文件，Lattice 每两秒检查一次并更新界面；外面新放进来的 Markdown 第一次被读到时会被写上 `id`。
+- 第一次在没有学习库的机器上启动时，会把旧数据库 `~/.local/share/lattice/lattice.db` 的内容迁移成文件（旧数据库只读，原样保留）。
+- 模型配置：`~/.config/lattice/providers.json`（支持 XDG_CONFIG_HOME），权限 0600；界面只知道是否有 Key，不接收已保存密钥；Key 也可以用环境变量 `DEEPSEEK_API_KEY`、`COMMANDCODE_API_KEY`、`OPENCODE_GO_API_KEY` 提供。日志和浏览器配置仍在 `~/.local/share/lattice/`。
+- 导出 ZIP 就是学习库全部文件的副本，不含索引、本机设置和凭据。恢复时把它解压进一个空的学习库文件夹，Lattice 启动时会重建索引。实际使用模型时，所需学习内容会发给你配置的模型服务，不能理解为“数据永不出网”。
 
 ## 验收
 

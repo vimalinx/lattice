@@ -15,7 +15,7 @@ from lattice.learning_bridge import LearningBridge
 
 @pytest.fixture
 def model(tmp_path):
-    s = Store(tmp_path / "data.db", seed=False)
+    s = Store(tmp_path / "data.db")
     l = LearningStore(s)
     yield l
     s.close()
@@ -24,7 +24,7 @@ def model(tmp_path):
 @pytest.fixture
 def bridge(tmp_path):
     QCoreApplication.instance() or QCoreApplication([])
-    b = LearningBridge(store=Store(tmp_path / "data.db", seed=False), config_path=tmp_path / "providers.json")
+    b = LearningBridge(store=Store(tmp_path / "data.db"), config_path=tmp_path / "providers.json")
     yield b
     b.closing = True
     b.store.close()
@@ -35,7 +35,7 @@ def topic(l):
 
 
 def test_snapshot_shape_is_stable_without_topics(tmp_path):
-    s = Store(tmp_path / "data.db", seed=False)
+    s = Store(tmp_path / "data.db")
     l = LearningStore(s)
     l.db.execute("DELETE FROM learn_threads")
     l.db.execute("DELETE FROM learn_lessons")
@@ -45,7 +45,7 @@ def test_snapshot_shape_is_stable_without_topics(tmp_path):
     l.db.execute("DELETE FROM learn_topics")
     l.db.commit()
     snap = l.snapshot()
-    for key in ("lessons", "notebooks", "threads", "tutor_messages", "flash_messages", "proposals"):
+    for key in ("lessons", "notebooks", "threads", "tutor_messages", "flash_messages", "practices"):
         assert key in snap
     # Deleting every topic still leaves the free conversation to land on.
     assert snap["active_topic"] == l.chat_topic() and snap["topics"][0]["title"] == "未归入主题"
@@ -113,7 +113,7 @@ class _Spin(QThread):
 
 
 def test_topic_delete_retires_running_workers(bridge):
-    tid = topic(bridge.learning)
+    tid = bridge.learning.topic_save({"title": "会被删掉"})["id"]
     threads = bridge.learning.threads(tid)
     spin = _Spin()
     spin.event.connect(bridge.api_event)
@@ -132,7 +132,7 @@ def test_export_excludes_credentials(bridge, tmp_path):
     with zipfile.ZipFile(out) as z:
         names = z.namelist()
         assert "providers.json" not in names
-        assert "lattice.db" in names and "learning.json" in names
+        assert any(n.startswith("topics/") for n in names) and not any(n.startswith(".lattice/") for n in names)
         assert "auth.json" not in names
 
 

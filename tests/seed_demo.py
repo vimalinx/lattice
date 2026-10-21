@@ -15,14 +15,16 @@ sys.path.insert(0, str(root))
 DEMO = Path(sys.argv[sys.argv.index('--dir') + 1]) if '--dir' in sys.argv else Path('/tmp/lattice-demo')
 os.environ['XDG_DATA_HOME'] = str(DEMO / 'data')
 os.environ['XDG_CONFIG_HOME'] = str(DEMO / 'config')
+os.environ['LATTICE_VAULT'] = str(DEMO / 'vault')
 
 from lattice.store import Store
 from lattice.learning import LearningStore
 
-if (DEMO / 'data').exists():
-    shutil.rmtree(DEMO / 'data')
+for old in ('data', 'vault'):
+    if (DEMO / old).exists():
+        shutil.rmtree(DEMO / old)
 
-store = Store(DEMO / 'data' / 'lattice' / 'lattice.db', seed=False)
+store = Store(DEMO / 'vault')
 learn = LearningStore(store)
 
 # ---------- Notes with [[wikilinks]] -> note-link graph ----------

@@ -1,22 +1,18 @@
 """Native desktop orchestration: two independent AI lanes and real notebooks."""
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
-import os
 import re
 from pathlib import Path
-import sqlite3
-import tempfile
 import zipfile
 
-from PySide6.QtCore import Slot
+from PySide6.QtCore import QTimer, Slot
 from PySide6.QtWidgets import QFileDialog
 
 from .bridge import Bridge
-from .store import APP_HOME
-from .learning import LearningStore, TABLES, dump, now, readable_outputs, text
+from .store import LEGACY_DB
+from .learning import LearningStore, dump, text
 from .notebook import NotebookWorker
 from .providers import ProviderConfig, ApiWorker
 from .teaching import TUTOR_POLICY, FLASH_POLICY, ORGANIZE_POLICY, PRACTICE_POLICY, PRACTICE_TASKS, TASKS, task_prompt
@@ -28,7 +24,8 @@ LOG = logging.getLogger("lattice")
 class LearningBridge(Bridge):
     def __init__(self, parent=None, store=None, config_path=None):
         super().__init__(parent, store)
-        self.learning = LearningStore(self.store)
+        # The first start on a vault-less machine moves the old database's records into files.
+        self.learning = LearningStore(self.store, migrate_from=LEGACY_DB if store is None else None)
         self.providers = ProviderConfig(config_path)
         self.notebook_workers = {}
         self.notebook_states = {}
@@ -50,9 +47,23 @@ class LearningBridge(Bridge):
         self.deferred = []
         self._retired = []
         self.closing = False
-        # Isolate tests and alternate profiles from the user's normal data.
-        self.learning_home = self.store.path.parent / "learning"
-        self.learning_home.mkdir(parents=True, exist_ok=True)
+        # Outside edits are picked up every couple of seconds; the learner's own edits
+        # are committed once they pause, and before any agent action.
+        self.sync_timer = QTimer(self)
+        self.sync_timer.timeout.connect(self.sync_vault)
+        self.sync_timer.start(2000)
+        self.commit_timer = QTimer(self)
+        self.commit_timer.timeout.connect(lambda: self.store.vault.commit("我的编辑", "me"))
+        self.commit_timer.start(30000)
+
+    def sync_vault(self):
+        if self.closing:
+            return
+        try:
+            if self.store.sync():
+                self.announce({"type": "learning_changed", "topic_id": self.learning.setting("active_topic"), "external": True})
+        except Exception as exc:
+            LOG.warning("vault sync failed: %s", exc)
 
     def learning_state(self, topic_id=None):
         result = self.learning.snapshot(topic_id)
@@ -101,10 +112,6 @@ class LearningBridge(Bridge):
             return l.relation_add(args["source"], args["target"], args.get("kind", "related"), args.get("reason", ""))
         if method == "learn_relation_delete":
             return l.relation_delete(args["id"])
-        if method == "learn_proposal_apply":
-            return l.proposal_apply(args["id"], args.get("notebook_id"))
-        if method == "learn_proposal_dismiss":
-            return l.proposal_dismiss(args["id"])
         if method == "learn_settings":
             return self.providers.public()
         if method == "learn_settings_save":
@@ -131,12 +138,10 @@ class LearningBridge(Bridge):
         if method == "learn_organize":
             return self.organize(args["topic_id"], args["ref"])
         if method == "learn_action_undo":
-            tools.undo(self, args["id"])
+            l.action_undo(args["id"])
             return self.learning_state(args.get("topic_id"))
         if method == "learn_cancel":
             return self.learning_cancel(args["topic_id"], args.get("lane", "tutor"))
-        if method == "learn_context":
-            return l.context(args["topic_id"], args.get("lane", "tutor"), args.get("selection", ""), args.get("notebook_id"))
         if method == "nb_create":
             return l.notebook_create(args["topic_id"], args.get("title", "实验笔记"))
         if method == "nb_delete":
@@ -178,8 +183,7 @@ class LearningBridge(Bridge):
         self.learning_status.pop(old["tutor_session"], None)
         topic = self.learning.one("learn_topics", topic_id)
         new = self.store.new_session("api", title="主讲 · " + topic["title"])
-        with self.learning.transaction():
-            self.store.db.execute("UPDATE learn_threads SET tutor_session=? WHERE topic_id=?", (new["id"], topic_id))
+        self.learning.set_thread(topic_id, tutor=new["id"])
         return self.learning_state(topic_id)
 
     def _note(self, selection=""):
@@ -348,6 +352,8 @@ class LearningBridge(Bridge):
         role, topic_id, practice_id = self.agent_ctx.get(ident, (None, None, None))
         if not role:
             return reply(dump({"error": "这个会话不能使用工具"}))
+        # The learner's pending edits get their own commit, so an agent's commit holds only its change.
+        self.store.vault.commit("我的编辑", "me")
         # Once the tutor creates or picks another topic, the rest of the turn works there.
         ctx = tools.Context(self, role, self.turn_focus.get(ident, topic_id), ident, practice_id)
         before = len(self.turn_actions.get(ident, []))
@@ -378,9 +384,6 @@ class LearningBridge(Bridge):
             evt["actions"] = self.turn_actions.pop(ident, [])
             self.store.append_message(ident, "assistant", body, {"stop_reason": reason, "usage": evt.get("usage"), "lane": lane,
                                                                  "actions": evt["actions"]})
-            row = self.store.db.execute("SELECT MAX(id) FROM messages WHERE session_id=?", (ident,)).fetchone()
-            if reason == "end_turn" and lane in {"tutor", "flash"}:
-                evt["artifacts"] = self.learning.proposal_extract(topic, lane, body, row[0])
             self.store.emit("learning", {"tutor": "主讲回复已保存", "flash": "即时答疑已保存", "practice": "练习教练回复已保存",
                                          "organizer": "整理完成"}[lane], reason, topic)
         if lane == "tutor":
@@ -394,8 +397,7 @@ class LearningBridge(Bridge):
             # This turn's question and answer, plus the earlier messages the tutor chose to carry.
             ids = [r[0] for r in self.store.db.execute("SELECT id FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 2", (ident,))]
             ids += self.turn_carry.pop(ident, [])
-            self.store.db.execute(f"UPDATE messages SET session_id=? WHERE session_id=? AND id IN ({','.join('?' * len(ids))})", (target, ident, *ids))
-            self.store.db.commit()
+            self.store.move_messages(ids, target)
         self.turn_carry.pop(ident, None)
         if focus:
             self.learning.focus(focus)
@@ -480,7 +482,7 @@ class LearningBridge(Bridge):
         worker = self.notebook_workers.get(notebook_id)
         if not worker or not worker.isRunning():
             config = self.providers.read()
-            worker = NotebookWorker(notebook_id, self.learning_home / "notebooks" / notebook_id,
+            worker = NotebookWorker(notebook_id, self.store.root / "notebooks",
                                     config["kernel_name"], config["kernel_timeout"])
             worker.event.connect(self.notebook_event)
             self.notebook_workers[notebook_id] = worker
@@ -526,8 +528,7 @@ class LearningBridge(Bridge):
         ident, kind = evt["notebook_id"], evt["kind"]
         if kind == "run_started":
             self.notebook_states[ident] = {"state": "busy", "kernel_id": evt.get("kernel_id")}
-            self.store.db.execute("UPDATE learn_runs SET state='running',kernel_id=? WHERE id=?", (evt.get("kernel_id"), evt["run_id"]))
-            self.store.db.commit()
+            self.learning.run_started(evt["run_id"], evt.get("kernel_id"))
         elif kind == "run_finished":
             self.learning.run_finish(evt["run_id"], evt.get("outputs", []), evt["state"], evt.get("execution_count"), evt.get("kernel_id"))
         elif kind in {"status", "batch_finished"}:
@@ -570,25 +571,17 @@ class LearningBridge(Bridge):
         return str(path)
 
     def export_learning(self, path=None):
+        """The vault is the archive: every file as it is, without the index or machine-local state."""
         if path is None:
             path, _ = QFileDialog.getSaveFileName(None, "导出学习档案（不含 API Key）", str(Path.home() / "lattice-learning.zip"), "ZIP archive (*.zip)")
         if not path:
             return None
-        with tempfile.TemporaryDirectory() as tmp:
-            snapshot = Path(tmp) / "lattice.db"
-            # sqlite3.connect's context manager only commits; the connection
-            # itself needs closing or the temp cleanup can race an open handle.
-            with contextlib.closing(sqlite3.connect(snapshot)) as destination:
-                self.store.db.backup(destination)
-            with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
-                archive.write(snapshot, "lattice.db")
-                archive.writestr("learning.json", json.dumps({table: self.learning.rows("SELECT * FROM " + table) for table in TABLES}, ensure_ascii=False, indent=2))
-                for row in self.learning.rows("SELECT id FROM learn_notebooks"):
-                    archive.writestr("notebooks/" + row["id"] + ".ipynb", json.dumps(self.learning.ipynb(row["id"]), ensure_ascii=False, indent=2))
-                for row in self.learning.rows("SELECT id FROM learn_cards"):
-                    c = self.learning.card(row["id"])
-                    archive.writestr("cards/" + c["id"] + ".md", "# " + c["title"] + "\n\n" + c["body"] + "\n\n## 我的理解\n\n" + c["understanding"] + "\n\n## 仍然想问\n\n" + c["question"] + "\n")
-                archive.writestr("README.txt", "Lattice 本地学习档案。包括 SQLite 全量记录、学习图谱 JSON、知识卡 Markdown 和 Jupyter Notebook。\n不包含 providers.json/API Key。\n恢复时先关闭应用并备份原数据库；然后用 lattice.db 替换应用数据目录内的数据库。")
+        self.store.vault.commit("我的编辑", "me")
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for rel in self.store.vault.files():
+                archive.write(self.store.vault.path(rel), rel)
+            archive.writestr("README.txt", "Lattice 学习库的完整副本：Markdown、Jupyter Notebook、对话和学习轨迹都是普通文件。\n"
+                                           "不包含 providers.json/API Key。把这些文件放进一个空的学习库文件夹，Lattice 启动时会重建索引。")
         self.store.emit("export", "导出完整学习档案", str(path))
         return str(path)
 

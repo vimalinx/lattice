@@ -1,4 +1,4 @@
-"""Deterministic persistence, proposal, provenance and configuration acceptance tests."""
+"""Deterministic persistence, provenance and configuration acceptance tests."""
 import json
 from pathlib import Path
 import stat
@@ -11,7 +11,7 @@ from lattice.providers import ProviderConfig, endpoint, clean_error, DEFAULTS
 
 @pytest.fixture
 def model(tmp_path):
-    s=Store(tmp_path/'data.db',seed=False)
+    s=Store(tmp_path/'data.db')
     s.save_note({'title':'已有笔记','body':'不能丢失'})
     l=LearningStore(s)
     yield l
@@ -72,52 +72,20 @@ def test_evidence_requires_completed_run(model):
     model.evidence_add(k['id'],'experiment','观察',r['id'])
     assert model.card(k['id'])['evidence'][0]['run_id']==r['id']
 
-def proposal(l,payload):
-    ids=l.proposal_extract(topic(l),'tutor','```lattice\n'+json.dumps(payload,ensure_ascii=False)+'\n```',None)
-    return l.snapshot()['proposals'][0]['id']
-
-def test_proposal_is_explicit_atomic_and_idempotent(model):
-    n0=len(model.snapshot()['cards'])
-    pid=proposal(model,{'version':1,'summary':'可采纳','cards':[{'title':'Proposed card','body':'候选解释'}],'cells':[{'kind':'code','source':'40+2'}]})
-    assert len(model.snapshot()['cards'])==n0
-    model.proposal_apply(pid);assert len(model.snapshot()['cards'])==n0+1
-    model.proposal_apply(pid);assert len(model.snapshot()['cards'])==n0+1
-    assert model.db.execute('SELECT COUNT(*) FROM learn_runs').fetchone()[0]==0
-
-def test_proposal_notes_become_experience_notes(model):
-    n0=len(model.store.list_notes())
-    pid=proposal(model,{'version':1,'summary':'带经验','notes':[{'title':'调参心得','body':'eta 先小后大','folder':'经验'}]})
-    model.proposal_apply(pid)
-    notes=model.store.list_notes()
-    assert len(notes)==n0+1 and any(n['title']=='调参心得' and n['folder']=='经验' for n in notes)
-
-def test_invalid_reference_rolls_back_all(model):
-    n0=len(model.snapshot()['cards'])
-    pid=proposal(model,{'version':1,'cards':[{'title':'Should rollback'}],'relations':[{'source':'Should rollback','target':'missing!','kind':'prerequisite'}]})
-    with pytest.raises(ValueError):model.proposal_apply(pid)
-    assert len(model.snapshot()['cards'])==n0 and model.one('learn_proposals',pid)['state']=='pending'
-
 def test_bad_payload_rejected(model):
-    with pytest.raises(ValueError):model.validate_payload({'version':999})
-    with pytest.raises(ValueError):model.validate_payload({'version':1,'execute':'rm'})
-    with pytest.raises(ValueError):model.validate_payload({'version':1,'cards':[{'title':'X','stage':'applied'}]})
+    with pytest.raises(ValueError):model.validate_payload({})
+    with pytest.raises(ValueError):model.validate_payload({'execute':'rm'})
+    with pytest.raises(ValueError):model.validate_payload({'cards':[{'title':'X','stage':'applied'}]})
+    with pytest.raises(ValueError):model.validate_payload({'relations':[{'source':'a','target':'b','kind':'owns'}]})
 
 def test_existing_understanding_not_overwritten(model):
     c=model.card_save({'title':'Existing','understanding':'只属于我的理解','body':'原文'})
-    pid=proposal(model,{'version':1,'cards':[{'title':'Existing','body':'AI新补充'}]})
-    model.proposal_apply(pid)
-    got=model.card(c['id']);assert got['understanding']=='只属于我的理解' and got['body']=='原文'
-    assert any('AI新补充' in e['content'] for e in got['evidence'])
-
-def test_context_shared_not_fake_runtime(model):
-    t=topic(model);threads=model.threads(t)
-    model.store.append_message(threads['flash_session'],'user','变量到底是什么')
-    raw=json.dumps(model.context(t,'tutor'),ensure_ascii=False)
-    assert '变量到底是什么' in raw
+    model.card_supplement(c['id'],'AI新补充','tutor')
+    got=model.card(c['id']);assert got['understanding']=='只属于我的理解' and got['body'].startswith('原文') and 'AI新补充' in got['body']
 
 def test_persistence_reopen(tmp_path):
-    s=Store(tmp_path/'db',seed=False);l=LearningStore(s);c=l.card_save({'title':'persistent'})
-    s.close();s=Store(tmp_path/'db',seed=False);l=LearningStore(s);assert l.card(c['id'])['title']=='persistent';s.close()
+    s=Store(tmp_path/'db');l=LearningStore(s);c=l.card_save({'title':'persistent'})
+    s.close();s=Store(tmp_path/'db');l=LearningStore(s);assert l.card(c['id'])['title']=='persistent';s.close()
 
 def test_config_private_permissions_masking_and_url(tmp_path,monkeypatch):
     monkeypatch.delenv('COMMANDCODE_API_KEY',raising=False)
@@ -139,15 +107,12 @@ def test_messages_window_returns_latest(model):
     assert len(msgs)==1500 and msgs[0]['content']=='m20' and msgs[-1]['content']=='m1519'
 
 def test_one_rejects_tables_without_id_column(model):
-    for table in ('learn_threads','learn_settings'):
+    for table in ('learn_threads','files'):
         with pytest.raises(ValueError):model.one(table,'anything')
     with pytest.raises(ValueError):model.one('not_a_table','x')
 
-def test_schema_version_is_stamped(model):
-    assert model.db.execute('PRAGMA user_version').fetchone()[0]>=1
-
 def test_topic_delete_reparents_children_and_detaches_cards(model):
-    t=topic(model)
+    t=model.topic_save({'title':'要删的主题'})['id'];model.focus(t)
     child=model.topic_save({'title':'分支主题','parent_id':t})
     card=model.card_save({'title':'Survives','topic_id':t})
     nb=model.notebook_create(t)
@@ -162,8 +127,8 @@ def test_topic_delete_reparents_children_and_detaches_cards(model):
     assert not model.rows('SELECT * FROM learn_threads WHERE topic_id=?',(t,))
     assert not model.rows('SELECT * FROM learn_notebooks WHERE id=?',(nb['id'],))
     assert not model.rows('SELECT * FROM learn_cells WHERE notebook_id=?',(nb['id'],))
-    assert not model.rows('SELECT * FROM learn_runs WHERE notebook_id=?',(nb['id'],))
     assert model.snapshot()['active_topic']!=t
+    with pytest.raises(ValueError):model.topic_delete(model.chat_topic())
 
 def test_lesson_and_notebook_delete(model):
     t=topic(model)
@@ -175,7 +140,6 @@ def test_lesson_and_notebook_delete(model):
     model.run_finish(model.run_create(c['id'])['id'],[],'completed')
     model.notebook_delete(nb['id'])
     assert not model.rows('SELECT * FROM learn_cells WHERE notebook_id=?',(nb['id'],))
-    assert not model.rows('SELECT * FROM learn_runs WHERE notebook_id=?',(nb['id'],))
     with pytest.raises(ValueError):model.one('learn_notebooks',nb['id'])
 
 def test_corrupt_provider_config_falls_back(tmp_path,monkeypatch):
@@ -192,7 +156,7 @@ def test_markdown_import_is_idempotent(tmp_path):
     QCoreApplication.instance() or QCoreApplication([])
     folder=tmp_path/'mds';folder.mkdir()
     (folder/'alpha.md').write_text('# Alpha\n第一版',encoding='utf-8')
-    s=Store(tmp_path/'db3',seed=False)
+    s=Store(tmp_path/'db3')
     bridge=Bridge(store=s)
     assert bridge.import_markdown(str(folder))['count']==1
     (folder/'alpha.md').write_text('# Alpha\n第二版',encoding='utf-8')
