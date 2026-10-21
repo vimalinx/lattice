@@ -170,7 +170,7 @@ class Store:
             "SELECT * FROM notes" + condition + " ORDER BY pinned DESC,updated_at DESC LIMIT ?", params
         ).fetchall()]
 
-    def save_note(self, data):
+    def save_note(self, data, revise=True):
         note_id = data.get("id") or identifier()
         title = str(data.get("title") or "无标题").strip()[:180]
         body = str(data.get("body") or "")
@@ -183,8 +183,10 @@ class Store:
             if title == old["title"] and body == old["body"] and folder == old["folder"] and tags == old["tags"] and pinned == old["pinned"]:
                 return self.get_note(note_id)
             # A new revision on explicit save; UI handles debounce and cadence.
-            self.db.execute("INSERT INTO revisions(note_id,title,body,created_at) VALUES(?,?,?,?)",
-                            (note_id, old["title"], old["body"], now))
+            # Draft autosaves (revise=False) only overwrite, so typing does not flood the history.
+            if revise:
+                self.db.execute("INSERT INTO revisions(note_id,title,body,created_at) VALUES(?,?,?,?)",
+                                (note_id, old["title"], old["body"], now))
             self.db.execute(
                 "UPDATE notes SET title=?,body=?,folder=?,tags=?,pinned=?,updated_at=? WHERE id=?",
                 (title, body, folder, tags, pinned, now, note_id),

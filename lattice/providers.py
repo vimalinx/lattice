@@ -37,6 +37,8 @@ DEFAULTS = {
     "kernel_name": "python3", "kernel_timeout": 120,
     # Agents may run notebook code in the learner's own kernel (not a sandbox).
     "agent_auto_run": True,
+    # Closing a scratch pad hands what was written to the organizer.
+    "agent_auto_organize": True,
 }
 
 
@@ -151,6 +153,7 @@ class ProviderConfig:
         updated["temperature"] = max(0, min(float(updated["temperature"]), 2))
         updated["kernel_timeout"] = max(3, min(int(updated["kernel_timeout"]), 3600))
         updated["agent_auto_run"] = bool(updated["agent_auto_run"])
+        updated["agent_auto_organize"] = bool(updated["agent_auto_organize"])
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(self.path.name + ".tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

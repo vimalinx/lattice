@@ -85,7 +85,7 @@ class Bridge(QObject):
         if method=="notes":
             return d.list_notes(args.get("query",""),args.get("folder",""))
         if method=="save_note":
-            return d.save_note(args["note"])
+            return d.save_note(args["note"], revise=not args.get("draft"))
         if method=="delete_note":
             return d.delete_note(args["id"])
         if method=="revisions":

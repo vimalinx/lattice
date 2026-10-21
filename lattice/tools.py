@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 
 from .learning import dump, now, readable_outputs, text, title as clean_title, uid
 
-ROLES = {"tutor", "flash", "practice"}
+ROLES = {"tutor", "flash", "practice", "organizer"}
 NOTE_KEY = "topic_notes:"
 
 
@@ -260,7 +260,7 @@ def update_topic_notes(ctx, notes):
     return {"ok": True}
 
 
-@tool("save_knowledge", {"tutor"}, "把已经讲过、学习者也回应过的内容存进学习档案（直接保存，学习者可以撤销）。lessons 是值得以后回看的完整讲解；cards 一张一个脱离对话也成立的知识点，已有同名卡时内容作为补充附上；relations 的 kind 为 prerequisite/part_of/related/applies_to/contrasts；notes 是依赖情境的经验。",
+@tool("save_knowledge", {"tutor", "organizer"}, "把已经讲过、学习者也回应过的内容存进学习档案（直接保存，学习者可以撤销）。lessons 是值得以后回看的完整讲解；cards 一张一个脱离对话也成立的知识点，已有同名卡时内容作为补充附上；relations 的 kind 为 prerequisite/part_of/related/applies_to/contrasts；notes 是依赖情境的经验。",
       {"lessons": {"type": "array", "items": _obj({"title": S, "objective": S, "body": S}, ["title", "body"])},
        "cards": {"type": "array", "items": _obj({"title": S, "body": S, "question": S, "tags": {"type": "array", "items": S}}, ["title", "body"])},
        "relations": {"type": "array", "items": _obj({"source": S, "target": S, "kind": S, "reason": S}, ["source", "target", "kind"])},
@@ -311,7 +311,7 @@ def _notebook_for(ctx, notebook_id):
     return rows[0] if rows else l.notebook_create(ctx.topic_id)["id"]
 
 
-@tool("write_cell", {"tutor", "practice"}, "在实验笔记里新增或改写一个单元格（kind 为 code 或 markdown）。给 cell_id 时改写那一格；不给 notebook_id 时，主讲写进当前主题的实验笔记，练习教练写进这次练习的笔记本。想看结果就接着调用 run_cells。",
+@tool("write_cell", {"tutor", "practice", "organizer"}, "在实验笔记里新增或改写一个单元格（kind 为 code 或 markdown）。给 cell_id 时改写那一格；不给 notebook_id 时，主讲写进当前主题的实验笔记，练习教练写进这次练习的笔记本。想看结果就接着调用 run_cells。",
       {"source": S, "kind": {"type": "string", "enum": ["code", "markdown"]}, "notebook_id": S, "cell_id": S}, ["source"])
 def write_cell(ctx, source, kind="code", notebook_id=None, cell_id=None):
     l = ctx.l
@@ -382,6 +382,18 @@ def finish_practice_review(ctx, practice_id, next_focus, weak_points, strengths)
     return {"state": p["state"]}
 
 
+@tool("tidy_note", {"tutor", "organizer"}, "整理一篇笔记：给出标题、整理后的正文（Markdown，可用 [[标题]] 连到已有的卡片或笔记）、文件夹和标签。整篇替换；原文会留在笔记的修订历史里，学习者也可以撤销。",
+      {"note_id": S, "title": S, "body": S, "folder": S, "tags": {"type": "array", "items": S}}, ["note_id", "title", "body"])
+def tidy_note(ctx, note_id, title, body, folder=None, tags=None):
+    old = ctx.store.get_note(note_id)
+    if not old:
+        raise ValueError("找不到这篇笔记")
+    note = ctx.store.save_note({"id": note_id, "title": title, "body": text(body), "folder": folder or old["folder"],
+                                "tags": tags if tags is not None else old["tags"], "pinned": old["pinned"]})
+    ctx.act(f"整理了笔记「{note['title']}」", {"op": "note", "note": {k: old[k] for k in ("id", "title", "body", "folder", "tags", "pinned")}}, "note:" + note_id)
+    return {"note_id": note_id, "title": note["title"], "folder": note["folder"]}
+
+
 @tool("hand_to_tutor", {"flash"}, "发现学习者缺的是一整块基础、不是一个小障碍时，转交给主讲系统讲。summary 写清学习者卡在哪里、你已经解释了什么。",
       {"summary": S}, ["summary"])
 def hand_to_tutor(ctx, summary):
@@ -419,6 +431,8 @@ def undo(bridge, action_id):
         l.cell_delete(u["id"])
     elif op == "cell_source":
         l.cell_save({"id": u["id"], "source": u["source"]})
+    elif op == "note":
+        bridge.store.save_note(u["note"])
     elif op == "delete_insight":
         with l.transaction():
             l.db.execute("DELETE FROM learn_insights WHERE id=?", (u["id"],))

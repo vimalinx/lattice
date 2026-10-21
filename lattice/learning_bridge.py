@@ -19,7 +19,7 @@ from .store import APP_HOME
 from .learning import LearningStore, TABLES, dump, now, readable_outputs, text
 from .notebook import NotebookWorker
 from .providers import ProviderConfig, ApiWorker
-from .teaching import TUTOR_POLICY, FLASH_POLICY, PRACTICE_POLICY, PRACTICE_TASKS, TASKS, task_prompt
+from .teaching import TUTOR_POLICY, FLASH_POLICY, ORGANIZE_POLICY, PRACTICE_POLICY, PRACTICE_TASKS, TASKS, task_prompt
 from . import tools
 
 LOG = logging.getLogger("lattice")
@@ -128,6 +128,8 @@ class LearningBridge(Bridge):
             return l.practice(args["id"])
         if method == "learn_insight_resolve":
             return l.insight_resolve(args["id"])
+        if method == "learn_organize":
+            return self.organize(args["topic_id"], args["ref"])
         if method == "learn_action_undo":
             tools.undo(self, args["id"])
             return self.learning_state(args.get("topic_id"))
@@ -225,6 +227,25 @@ class LearningBridge(Bridge):
         self.store.append_message(ident, "user", message, meta)
         self._api_turn(lane, topic_id, ident, conn, policy, history, user)
         return {"session_id": ident, "lane": lane, "state": "queued"}
+
+    def organize(self, topic_id, ref):
+        """Tidy something the learner just wrote in a scratch pad, in the background."""
+        kind, _, ident = str(ref).partition(":")
+        if kind not in {"note", "cell"} or not ident:
+            raise ValueError("只能整理笔记或代码单元格")
+        if (topic_id, "organizer") in self.learning_busy:
+            raise ValueError("上一次整理还没结束")
+        conn = self.providers.lane("tutor")
+        if not conn["api_key"]:
+            raise ValueError(f"请先在模型连接中填写 {conn['label']} 的 API Key")
+        session = self.learning.setting("organizer_session")
+        if not session or not self.store.session(session):
+            session = self.store.new_session("api", title="整理")["id"]
+            self.learning.set_setting("organizer_session", session)
+        what = "一篇记录" if kind == "note" else "一段代码"
+        self.store.append_message(session, "user", f"学习者刚写完{what}：{ref}，请整理。", {"lane": "organizer", "ref": ref})
+        self._api_turn("organizer", topic_id, session, conn, ORGANIZE_POLICY, [], f"学习者刚写完{what}：{ref}。请整理。")
+        return {"session_id": session, "state": "queued"}
 
     def _active_practice(self, topic_id):
         row = self.store.db.execute("SELECT id FROM learn_practices WHERE topic_id=? AND state!='done'", (topic_id,)).fetchone()
@@ -354,12 +375,14 @@ class LearningBridge(Bridge):
         self.learning_status[ident] = "ready" if reason == "end_turn" else reason
         body = evt.get("text", "")
         if body.strip():
+            evt["actions"] = self.turn_actions.pop(ident, [])
             self.store.append_message(ident, "assistant", body, {"stop_reason": reason, "usage": evt.get("usage"), "lane": lane,
-                                                                 "actions": self.turn_actions.pop(ident, [])})
+                                                                 "actions": evt["actions"]})
             row = self.store.db.execute("SELECT MAX(id) FROM messages WHERE session_id=?", (ident,)).fetchone()
-            if reason == "end_turn" and lane != "practice":
+            if reason == "end_turn" and lane in {"tutor", "flash"}:
                 evt["artifacts"] = self.learning.proposal_extract(topic, lane, body, row[0])
-            self.store.emit("learning", {"tutor": "主讲回复已保存", "flash": "即时答疑已保存", "practice": "练习教练回复已保存"}[lane], reason, topic)
+            self.store.emit("learning", {"tutor": "主讲回复已保存", "flash": "即时答疑已保存", "practice": "练习教练回复已保存",
+                                         "organizer": "整理完成"}[lane], reason, topic)
         if lane == "tutor":
             errors = self._record_review(topic, reason)
             if errors:

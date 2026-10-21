@@ -105,6 +105,9 @@ function viewHtml(){
 }
 function render(){
  hideSelPop();teardownLive();
+ // A reply finishing re-renders the page; whoever is typing keeps their caret.
+ const typing=document.activeElement,focusId=typing?.id&&/^(TEXTAREA|INPUT)$/.test(typing.tagName)?typing.id:null;
+ const caret=focusId?[typing.selectionStart,typing.selectionEnd,typing.scrollTop]:null;
  const sc=scrollSnapshot(),learning=LEARNING_PAGES.has(S.view);
  document.documentElement.setAttribute('data-theme',S.theme);
  const contextual=['learning','practice','classroom','notebook','flash'].includes(S.view);
@@ -118,4 +121,6 @@ function render(){
  '</section>'+(contextual?proposalRibbon():'');
  scrollRestore(sc,L.scrollBottom?'chat-'+L.scrollBottom:null);L.scrollBottom=null;
  fitCodeEditors();runAfterRender();
+ const again=focusId&&document.getElementById(focusId);
+ if(again){again.focus();try{again.setSelectionRange(caret[0],caret[1]);}catch(_){}again.scrollTop=caret[2];}
 }

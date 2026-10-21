@@ -287,3 +287,20 @@
 .agent-action svg{color:var(--accent);flex-shrink:0}.agent-action .btn{font-size:10px;padding:2px 7px}
 .agent-action.undone{opacity:.55}.agent-action.undone>span{text-decoration:line-through}.agent-action small{color:var(--subtle);font-size:9.5px}
 .connection-check{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:11.5px;flex-wrap:wrap}
+/* Scratch pads beside the conversation */
+.dialogue-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(340px,44%);height:100%;min-height:0}
+.dialogue-split>.tutor-dialogue>.learn-composer{width:calc(100% - 48px)}
+.scratch-pad{display:flex;flex-direction:column;min-height:0;min-width:0;border-left:1px solid var(--line-soft);background:var(--context)}
+.pad-head{display:flex;align-items:center;gap:8px;padding:9px 12px 9px 16px;border-bottom:1px solid var(--line-soft);flex-shrink:0}
+.pad-kind{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);white-space:nowrap}
+.pad-title{flex:1;min-width:0;background:none;border:0;outline:none;color:var(--text);font-size:13px;font-weight:600;padding:4px 2px}
+.pad-where{flex:1;min-width:0;font-size:10.5px;color:var(--subtle);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pad-status{font-size:10px;color:var(--subtle);white-space:nowrap}
+.pad-editor{flex:1;min-height:0;height:auto!important;resize:none;border:0;outline:none;background:none;color:var(--text);padding:16px 18px;font-size:13px;line-height:1.85}
+.pad-editor.code{font-family:var(--mono,ui-monospace,monospace);font-size:12px;line-height:1.7;tab-size:4}
+.pad-output{max-height:34%;overflow:auto;border-top:1px solid var(--line-soft);padding:8px 16px;flex-shrink:0}.pad-output:empty{display:none}
+.pad-foot{font-size:9.5px;color:var(--subtle);padding:6px 16px 9px;flex-shrink:0}
+.organize-strip{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:8px 24px 0;padding:7px 10px;border:1px solid var(--line-soft);border-radius:10px;font-size:11px;color:var(--muted);background:var(--paper)}
+.organize-strip .agent-actions{margin-top:0}.organize-strip>.btn:last-child{margin-left:auto}
+.organize-strip .learn-thinking{padding:0}
+@media(max-width:980px){.dialogue-split{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) minmax(260px,45%)}.scratch-pad{border-left:0;border-top:1px solid var(--line-soft)}}

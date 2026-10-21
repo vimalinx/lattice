@@ -233,6 +233,52 @@ function actionChips(actions,live=false){
  (a.ref&&!a.undone?(a.ref.startsWith('handoff:')?lbutton('请主讲接住','l-handoff','','ghost sm'):lbutton('查看','l-ref-open','data-ref="'+esc(a.ref)+'"','ghost sm')):'')+
  (a.undoable&&!a.undone?lbutton('撤销','l-action-undo','data-id="'+esc(a.id)+'"','ghost sm'):a.undone?'<small>已撤销</small>':'')+'</div>').join('')+'</div>';
 }
+/* Scratch pads: write beside the conversation; saving is automatic and closing hands it to the organizer. */
+function padTarget(){
+ const practiceNbs=new Set((ld().practices||[]).map(p=>p.notebook_id));
+ return (ld().notebooks||[]).find(n=>!practiceNbs.has(n.id))||null;
+}
+function padHtml(){
+ const p=L.pad,code=p.kind==='code',cell=code?findCell(p.id):null;
+ const src=code?(L.drafts.get(p.id)?.source??cell?.source??''):p.body;
+ return '<aside class="scratch-pad '+(code?'code':'note')+'"><div class="pad-head"><span class="pad-kind">'+svg(code?'code':'edit',14)+' '+(code?'代码':'记录')+'</span>'+
+ (code?'<span class="pad-where">'+esc(ld().notebooks.find(n=>n.id===cell?.notebook_id)?.title||'')+'</span>':'<input id="pad-title" class="pad-title" value="'+esc(p.title)+'" placeholder="标题可以不写，AI 会起"/>')+
+ '<span class="pad-status" id="pad-status">'+esc(p.status||'自动保存')+'</span>'+
+ (code?lbutton(svg('play',13)+' 运行','l-pad-run','title="Shift + Enter 也可以运行"','ghost sm'):'')+
+ lbutton(svg('close',14),'l-pad-close','title="关闭：自动保存，并交给 AI 整理"','ghost sm')+'</div>'+
+ '<textarea id="pad-editor" class="pad-editor'+(code?' code':'')+'" spellcheck="false" '+(code?'data-cell-editor="'+esc(p.id)+'" ':'')+'placeholder="'+(code?'# 只管写代码，关掉后 AI 会补上说明和注释':'只管写：想法、笔记、草稿都行。关掉后 AI 会帮你起标题、理结构、连到相关的卡片')+'">'+esc(src)+'</textarea>'+
+ (code?'<div class="cell-output pad-output" id="cell-output-'+esc(p.id)+'">'+outputHtml(cell?.outputs||[])+'</div>':'')+
+ '<div class="pad-foot">'+(ld().providers?.agent_auto_organize?'关掉小窗后会自动交给 AI 整理，原文留在修订历史里':'自动整理已在设置里关闭')+'</div></aside>';
+}
+async function padSave(){
+ const p=L.pad;if(!p||p.kind!=='note'||!p.dirty)return;
+ clearTimeout(L.padTimer);p.dirty=false;
+ if(!p.title.trim()&&!p.body.trim())return;
+ const saved=await rpc('save_note',{note:{id:p.id||undefined,title:p.title.trim()||p.body.trim().split('\n')[0].replace(/^#+\s*/,'').slice(0,40)||'随手记',folder:p.folder||'随手记',body:p.body,tags:[]},draft:true});
+ p.id=saved.id;p.folder=saved.folder;
+ const at=(S.data?.notes||[]).findIndex(n=>n.id===saved.id);if(at>=0)S.data.notes[at]=saved;else S.data?.notes?.unshift(saved);
+ p.status='已保存 · '+fmtDate(saved.updated_at,true);const b=el('#pad-status');if(b)b.textContent=p.status;
+}
+async function padClose(){
+ const p=L.pad;if(!p)return;
+ let ref=null;
+ if(p.kind==='note'){p.dirty=true;await padSave();if(p.id&&(p.title.trim()||p.body.trim()))ref='note:'+p.id;}
+ else{
+  await flushCells();const cell=findCell(p.id);
+  if(cell&&!cell.source.trim()){await rpc('nb_cell_delete',{id:p.id});}else if(cell)ref='cell:'+p.id;
+ }
+ L.pad=null;await learnRefresh(false);
+ if(ref&&ld().providers?.agent_auto_organize){
+  try{await rpc('learn_organize',{topic_id:lt().id,ref});L.localBusy.add(lk(lt().id,'organizer'));L.organize={busy:true,what:p.kind==='note'?'刚写的记录':'刚写的代码',actions:[]};}
+  catch(e){toast(e.message,'error');}
+ }
+ render();
+}
+function organizeStrip(){
+ const o=L.organize;if(!o)return '';
+ return '<div class="organize-strip'+(o.busy?' busy':'')+'">'+(o.busy?'<span class="learn-thinking"><span></span><span></span><span></span></span> 正在整理'+esc(o.what)+'…':svg('check',13)+' '+esc(o.text||'整理好了'))+
+ actionChips(o.actions||[])+(o.busy?'':lbutton(svg('close',12),'l-organize-dismiss','title="收起"','ghost sm'))+'</div>';
+}
 const convCache={};
 const laneWho=lane=>({tutor:tutorLabel()+' · 主讲',flash:flashLabel()+' · 快答',practice:practiceLabel()+' · 练习教练'})[lane];
 // Saved messages are cached apart from the live tail, so a streamed chunk only
@@ -268,9 +314,15 @@ function conversationHtml(lane){
  return html;
 }
 function tutorChatView(){
+ const dialogue=tutorDialogue();
+ return L.pad?'<div class="dialogue-split">'+dialogue+padHtml()+'</div>':dialogue;
+}
+function tutorDialogue(){
  const messages=ld()?.tutor_messages||[];
  return '<div class="tutor-dialogue"><div class="tutor-dialogue-tools"><span>'+svg("bot",15)+' 主讲负责：讲清机制、安排实验、串联知识</span>'+
- lbutton(svg("plus",14)+' 新会话','l-tutor-new','','ghost sm')+lbutton(svg("book",14)+' 提炼知识卡','l-tutor-task','data-task="capture"','ghost sm')+'</div><div class="learn-chat-scroll" id="learn-chat-tutor" data-scroll="chat-tutor" data-scroll-ns="'+esc(lt()?.id||'')+'">'+
+ lbutton(svg("code",14)+' 写代码','l-pad-new','data-kind="code" title="在旁边开一个代码小窗，写完关掉，AI 会帮你整理"','ghost sm')+
+ lbutton(svg("edit",14)+' 写记录','l-pad-new','data-kind="note" title="随手记想法、笔记或文档，写完关掉，AI 会帮你整理"','ghost sm')+
+ lbutton(svg("plus",14)+' 新会话','l-tutor-new','','ghost sm')+lbutton(svg("book",14)+' 提炼知识卡','l-tutor-task','data-task="capture"','ghost sm')+'</div><div id="organize-strip">'+organizeStrip()+'</div><div class="learn-chat-scroll" id="learn-chat-tutor" data-scroll="chat-tutor" data-scroll-ns="'+esc(lt()?.id||'')+'">'+
  (messages.length||laneBusy('tutor')?conversationHtml('tutor'):isChat()?'<div class="tutor-welcome"><div class="learn-empty-icon">'+svg("spark",30)+'</div><h2>想到什么，直接说。</h2><p>'+esc(tutorLabel())+' 会跟着你的话题走，需要时去查你以前学过的内容；值得长期深入的内容，它会自己整理成主题。</p></div>':'<div class="tutor-welcome"><div class="learn-empty-icon">'+svg("spark",30)+'</div><h2>不是从目录开始，<br>是从你想知道的事开始。</h2><p>'+esc(tutorLabel())+' 会参考当前课程、实验输出、快答讨论和知识卡。你不需要每次重新说明自己学到了哪里。</p><div>'+lbutton('为当前兴趣规划起点','l-tutor-task','data-task="plan"','primary')+'</div></div>')+
  '</div>'+composer('tutor')+'</div>';
 }
@@ -374,7 +426,8 @@ function connectionsBody(){
  '<div class="connection-inline"><label>超时 / 秒<input class="field" type="number" id="cfg-timeout" min="5" max="600" value="'+esc(c.timeout)+'"/></label><label>Temperature<input class="field" type="number" step="0.05" id="cfg-temperature" min="0" max="2" value="'+esc(c.temperature)+'"/></label></div>'+
  '<p class="connection-foot">密钥保存在本机 0600 权限文件中，不进入学习档案导出。也可以用环境变量提供 Key。</p>'+
  '<div class="kernel-settings"><h3>'+svg("terminal",16)+' 本地 Jupyter 内核</h3><div class="connection-inline"><label>Kernel 名称<input class="field" id="cfg-kernel" value="'+esc(c.kernel_name)+'"/></label><label>单格时限 / 秒<input class="field" type="number" id="cfg-kernel-timeout" min="3" max="3600" value="'+esc(c.kernel_timeout)+'"/></label></div>'+
- '<label class="connection-check"><input type="checkbox" id="cfg-auto-run" '+(c.agent_auto_run?'checked':'')+'/> 允许 AI 自己运行实验笔记里的代码并读取结果 <span class="learn-caption">代码以你的用户权限在本机运行，不是沙箱</span></label></div></section>'+
+ '<label class="connection-check"><input type="checkbox" id="cfg-auto-run" '+(c.agent_auto_run?'checked':'')+'/> 允许 AI 自己运行实验笔记里的代码并读取结果 <span class="learn-caption">代码以你的用户权限在本机运行，不是沙箱</span></label>'+
+ '<label class="connection-check"><input type="checkbox" id="cfg-auto-organize" '+(c.agent_auto_organize?'checked':'')+'/> 关掉写代码 / 写记录的小窗后，自动交给 AI 整理</label></div></section>'+
  '<div class="connection-save-row"><div class="connection-test-result" id="connection-test-result">'+esc(L.testResult||'尚未执行连接测试。其他本地功能不依赖 API 配置。')+'</div>'+lbutton(svg("save",15)+' 保存全部设置','l-settings-save','','primary')+'</div>'+
  '<section class="connection-data"><div><h3>可以带走的学习档案</h3><p>SQLite 全量记录、知识卡 Markdown、关系 JSON 和标准 .ipynb。API Key 不包含在内。</p></div>'+lbutton(svg("download",15)+' 导出学习档案','l-export','','ghost')+'</section></div>';
 }
@@ -426,6 +479,7 @@ async function saveCell(id){
  if(L.drafts.get(id)?.source===draft.source)L.drafts.delete(id);
  const nb=ld()?.notebooks.find(n=>n.id===saved.notebook_id);if(nb){const at=nb.cells.findIndex(c=>c.id===id);if(at>=0)nb.cells[at]=saved;}
  const label=el('#cell-save-'+id);if(label)label.textContent=L.drafts.has(id)?'待保存':'已保存';
+ if(L.pad?.id===id){L.pad.status=L.drafts.has(id)?'正在保存…':'已保存 · '+fmtDate(saved.updated_at,true);const b=el('#pad-status');if(b)b.textContent=L.pad.status;}
 }
 async function flushCells(){for(const id of [...L.drafts.keys()])await saveCell(id);}
 async function focusTopic(id){await flushCells();adoptLearning(await rpc('learn_focus',{id}));L.inputs={tutor:'',flash:''};L.selection='';render();}
@@ -569,7 +623,7 @@ async function settingsSave(){
  flash_api:el('#cfg-flash-api').value,flash_model:el('#cfg-flash-model').value,flash_max_tokens:Number(el('#cfg-flash-tokens').value),
  practice_api:el('#cfg-practice-api').value,practice_model:el('#cfg-practice-model').value,practice_max_tokens:Number(el('#cfg-practice-tokens').value),
  tutor_api:el('#cfg-tutor-api').value,tutor_model:el('#cfg-tutor-model').value,tutor_max_tokens:Number(el('#cfg-tutor-tokens').value),
- kernel_name:el('#cfg-kernel').value,kernel_timeout:Number(el('#cfg-kernel-timeout').value),agent_auto_run:el('#cfg-auto-run').checked};
+ kernel_name:el('#cfg-kernel').value,kernel_timeout:Number(el('#cfg-kernel-timeout').value),agent_auto_run:el('#cfg-auto-run').checked,agent_auto_organize:el('#cfg-auto-organize').checked};
  ld().providers=await rpc('learn_settings_save',{config:cfg});all('[id^="cfg-api-"][id$="-key"]').forEach(x=>x.value='');toast('模型设置已保存');
 }
 const originalGo=go;
@@ -623,6 +677,19 @@ action=async function(target){
   return openContent('practice');
  }
  case 'l-practice-task':return sendLearning('practice',null,a.dataset.task);
+ case 'l-pad-new':{
+  if(L.pad)await padClose();
+  if(a.dataset.kind==='note'){L.pad={kind:'note',id:null,title:'',body:'',status:'自动保存'};}
+  else{
+   let nb=padTarget();if(!nb)nb=await rpc('nb_create',{topic_id:lt().id,title:'随手代码'});
+   const cell=await rpc('nb_cell_save',{cell:{notebook_id:nb.id,kind:'code',source:''}});
+   await learnRefresh(false);L.notebookId=nb.id;L.pad={kind:'code',id:cell.id,status:'自动保存'};
+  }
+  render();setTimeout(()=>el('#pad-editor')?.focus(),30);return;
+ }
+ case 'l-pad-close':return padClose();
+ case 'l-pad-run':await flushCells();await rpc('nb_run',{id:findCell(L.pad.id).notebook_id,cell_id:L.pad.id});return;
+ case 'l-organize-dismiss':L.organize=null;{const b=el('#organize-strip');if(b)b.innerHTML='';}return;
  case 'l-action-undo':{
   adoptLearning(await rpc('learn_action_undo',{id,topic_id:lt()?.id}));L.undone.add(id);render();return toast('已撤销');
  }
@@ -780,12 +847,18 @@ onInput=async function(e){
  if(t.id==='learn-input-tutor'){L.inputs.tutor=t.value;return;}
  if(t.id==='learn-input-flash'){L.inputs.flash=t.value;return;}
  if(t.id==='learn-input-practice'){L.inputs.practice=t.value;return;}
+ if(L.pad?.kind==='note'&&(t.id==='pad-editor'||t.id==='pad-title')){
+  L.pad[t.id==='pad-title'?'title':'body']=t.value;L.pad.dirty=true;
+  const b=el('#pad-status');if(b)b.textContent='正在保存…';
+  clearTimeout(L.padTimer);L.padTimer=setTimeout(()=>safe(padSave),1200);return;
+ }
  if(t.dataset.f&&CARD_FIELDS.has(t.dataset.f)){
   const slot=t.closest('.content-detail'),s=slot?currentDetail():null;
   if(s?.kind==='card'){const d=L.cardDrafts.get(s.uid)||{};d[t.dataset.f]=t.value;L.cardDrafts.set(s.uid,d);}
  }
  if(t.dataset.cellEditor){
   const id=t.dataset.cellEditor,c=findCell(id);if(!c)return;
+  if(L.pad?.id===id){const b=el('#pad-status');if(b)b.textContent='正在保存…';}
   L.drafts.set(id,{id,notebook_id:c.notebook_id,kind:c.kind,source:t.value});
   const label=el('#cell-save-'+id);if(label)label.textContent='待保存';
   const preview=el('#md-preview-'+id);if(preview)preview.innerHTML=markdown(t.value);
@@ -813,10 +886,20 @@ onEvent=async function(evt){
   if(evt.kind==='chunk'){L.streams[key]=(L.streams[key]||'')+evt.text;if(same)patchStream(evt.lane);return;}
   if(evt.kind==='error'){L.localBusy.delete(key);L.errors[key]=evt.message||'请求失败，没有收到错误说明。请重试。';if(same)patchChat(evt.lane);L.testResult=evt.message;const b=el('#connection-test-result');if(b)b.textContent=evt.message;return;}
   if(evt.kind==='status'){ld().runtime.agents[evt.session_id]=evt.state;if(evt.state==='offline')L.localBusy.delete(key);const chip=el('.learn-agent-chip');if(chip&&evt.lane==='tutor'&&same)chip.innerHTML='<i></i> '+esc(tutorLabel())+' · '+esc(stateName[evt.state]||evt.state);return;}
+  if(evt.kind==='tool'&&evt.lane==='organizer'){
+   if(L.organize&&evt.actions?.length){L.organize.actions.push(...evt.actions);const b=el('#organize-strip');if(b)b.innerHTML=organizeStrip();}
+   return;
+  }
   if(evt.kind==='tool'){
    if(!evt.actions?.length)return;
    (L.liveActions[key]=L.liveActions[key]||[]).push(...evt.actions);
    if(same){const box=el('#learn-chat-'+evt.lane+' .streaming .live-actions');if(box)box.innerHTML=actionChips(L.liveActions[key],true);else patchChat(evt.lane);}
+   return;
+  }
+  if(evt.kind==='finished'&&evt.lane==='organizer'){
+   L.localBusy.delete(key);L.streams[key]='';
+   L.organize={busy:false,text:evt.stop_reason==='end_turn'?cleanReply(evt.text).split('\n').filter(x=>x.trim()).at(-1)||'':'整理没有完成：'+(L.errors[key]||evt.stop_reason),actions:evt.actions||L.organize?.actions||[]};
+   await reloadData();await learnRefresh(false);if(LEARNING_PAGES.has(S.view)||S.view==='notes')render();
    return;
   }
   if(evt.kind==='finished'){
