@@ -55,3 +55,23 @@ def system_prompt(vault_root, agent, extra=""):
 def task_prompt(message, task):
     """The learner's words plus, for a task button, how to work this turn."""
     return message + ("\n\n（本次工作方式：" + TASKS[task][1] + "）" if task in TASKS else "")
+
+
+def save(vault, name, history, tools, policy, blocks=True):
+    """The learner's own version of an agent: agents/<name>.md in the vault replaces the shipped one."""
+    base = load(vault.root, name)
+    attrs = {"title": base["title"], "history": max(0, min(int(history), 200)), "blocks": bool(blocks), "tools": [str(t) for t in tools]}
+    vault.write_md(f"agents/{name}.md", attrs, str(policy).strip())
+    return f"agents/{name}.md"
+
+
+def reset(vault, name):
+    load(vault.root, name)
+    rel = f"agents/{name}.md"
+    if vault.path(rel).exists():
+        vault.remove(rel)
+    return rel
+
+
+def overridden(vault_root, name):
+    return (Path(vault_root) / "agents" / f"{name}.md").is_file()

@@ -685,7 +685,7 @@ class Lattice:
         if row:
             return row["id"]
         name = self.doc(topic, "topic")["title"] if topic else None
-        return self.thread_new(agent, topic, ({"tutor": "主讲", "flash": "快答"}.get(agent, agent)) + (" · " + name if name else ""))["id"]
+        return self.thread_new(agent, topic, ({"tutor": "主会话", "flash": "快答"}.get(agent, agent)) + (" · " + name if name else ""))["id"]
 
     def thread_head(self, ident):
         row = self.index.one("SELECT head FROM threads WHERE id=?", (ident,))

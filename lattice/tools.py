@@ -218,7 +218,7 @@ def journal(ctx, types=None, ref=None, since=None, actor=None, limit=40):
     return [_entry(e) for e in ctx.l.journal(types, ref, since, None, actor, min(int(limit), 200))]
 
 
-@tool("conversation", ALL, "读一段对话的最近消息（带消息 id）。agent 是 tutor（主讲）或 flash（快答），topic 不给就是当前主题，给空字符串就是默认对话；或者直接给 thread（例如练习的 id）。",
+@tool("conversation", ALL, "读一段对话的最近消息（带消息 id）。agent 是 tutor（主会话）或 flash（快答），topic 不给就是当前主题，给空字符串就是默认对话；或者直接给 thread（例如练习的 id）。",
       {"agent": {"type": "string", "enum": ["tutor", "flash", "coach"]}, "topic": S, "thread": S, "limit": I})
 def conversation(ctx, agent="tutor", topic=None, thread=None, limit=12):
     ident = thread or ctx.l.thread_for(agent, ctx.topic if topic is None else (topic or None))
@@ -429,16 +429,44 @@ def finish_practice_review(ctx, practice, next_focus, weak_points, strengths):
     return {"state": p["state"]}
 
 
-@tool("hand_to_tutor", {"flash"}, "发现学习者缺的是一整块基础、不是一个小障碍时，转交给主讲系统讲。summary 写清学习者卡在哪里、你已经解释了什么。", {"summary": S}, ["summary"])
+@tool("hand_to_tutor", {"flash"}, "发现学习者缺的是一整块基础、不是一个小障碍时，转交给主会话系统讲。summary 写清学习者卡在哪里、你已经解释了什么。", {"summary": S}, ["summary"])
 def hand_to_tutor(ctx, summary):
-    ctx.act("转交给主讲：" + text(summary, 3000)[:80], "handoff:" + (ctx.topic or ""), False)
-    ctx.l.record("action", {"summary": "快答转交主讲", "handoff": text(summary, 3000), "topic": ctx.topic}, ctx.agent, [ctx.thread])
+    ctx.act("转交给主会话：" + text(summary, 3000)[:80], "handoff:" + (ctx.topic or ""), False)
+    ctx.l.record("action", {"summary": "快答转交主会话", "handoff": text(summary, 3000), "topic": ctx.topic}, ctx.agent, [ctx.thread])
     return {"ok": True}
+
+
+# ---- the interface ----------------------------------------------------------------------------------
+
+UI_OP = {"type": "object", "properties": {"do": {"type": "string", "enum": ["open", "close", "focus", "move", "float", "layout", "preset", "sidebar", "set"]},
+                                          "panel": S, "agent": S, "path": S, "topic": S, "where": S, "to": S, "name": S, "section": S,
+                                          "open": {"type": "boolean"}, "key": S, "value": {}, "spec": {"type": "object"}}, "required": ["do"]}
+
+
+@tool("ui", {"tutor", "flash", "coach"}, "控制整个界面，ops 按顺序执行：\n"
+      "- open：打开面板。panel 是 chat（给 agent：tutor 主会话 / flash 快答）、file（给 path）、map（可给 topic）、journal、review、settings、home；where 是 left / right / top / bottom（贴着 to 指定的面板分栏）、float（浮出）或 tab（默认：放进 to 所在的那组标签，不给 to 就放进同一侧最近用的那组）。\n"
+      "- close / focus / float：panel 是面板 id 或标题（从 screen 里看）。\n"
+      "- move：把 panel 移到 to 旁边，where 同上。\n"
+      "- layout：整个替换布局。spec 是 {\"split\": \"h\"或\"v\", \"sizes\": [0.5, 0.5], \"parts\": [spec, ...]}，叶子是 {\"tabs\": [面板, ...]}；面板可以是已有面板的 id，也可以是一个 open 那样的对象。\n"
+      "- preset：套用学习者存过的布局 name。sidebar：切到左栏的 section（topics、cards、notes、lessons、work、practice、files、search），open 为 false 时收起。\n"
+      "- set：改外观，key 是 theme（dark / light）、font_size、code_font_size、density（compact / comfortable）。\n"
+      "学习者可以一键还原你改动前的界面。正在打字的面板不要关、不要挪。", {"ops": {"type": "array", "items": UI_OP}}, ["ops"])
+def ui(ctx, ops):
+    if not isinstance(ops, list) or not ops or len(ops) > 40:
+        raise ValueError("ops 应是 1～40 个界面操作")
+
+    def start(done):
+        def finish(result):
+            if isinstance(result, dict) and result.get("snapshot"):
+                ctx.act("调整了界面：" + "、".join(dict.fromkeys(o.get("do", "") for o in ops)), "ui:" + result["snapshot"], False)
+            done(result)
+        ctx.bridge.ui_request(ctx.agent, ops, finish)
+    return Later(start)
 
 
 # ---- the learner's side ----------------------------------------------------------------------------
 
-@tool("open", {"tutor", "flash", "coach"}, "在学习者自己的面板里打开一个文件，用来指给 TA 看：line 定位到某一行，highlight 高亮一段原文，cell 定位到实验笔记的某一格。不移动、不关闭学习者已有的面板。",
+@tool("open", {"tutor", "flash", "coach"}, "在学习者自己的面板里打开一个文件，用来指给 TA 看：line 定位到某一行，highlight 高亮一段原文，cell 定位到实验笔记的某一格。要摆放面板用 ui。",
       {"file": S, "line": I, "highlight": S, "cell": S}, ["file"])
 def open_file(ctx, file, line=None, highlight=None, cell=None):
     path = _path_of(ctx, file)

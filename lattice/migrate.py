@@ -94,7 +94,7 @@ def migrate(source, lattice):
     practice_ids = {p["id"]: sid for sid, p in practices.items()}
     for s in _rows(db, "SELECT * FROM sessions"):
         agent, topic = roles.get(s["id"], ("archive", None))
-        title = {"tutor": "主讲", "flash": "快答"}.get(agent, s["title"]) if topic is None and agent in ("tutor", "flash") else s["title"]
+        title = {"tutor": "主会话", "flash": "快答"}.get(agent, s["title"]) if topic is None and agent in ("tutor", "flash") else s["title"]
         head = {"id": s["id"], "kind": "thread", "agent": agent, "title": title, "topic": topic, "created": s["created_at"]}
         p = practices.get(s["id"])
         if p:

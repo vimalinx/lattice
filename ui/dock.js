@@ -5,11 +5,30 @@ const Dock={layout:null,panels:{},els:{},types:{},focus:null,lastStack:{ai:null,
 function panelType(name,def){Dock.types[name]=def;}
 function newId(prefix){return prefix+Math.random().toString(36).slice(2,10);}
 function stackNode(tabs){return {t:"stack",id:newId("s"),tabs,active:tabs[0]||null};}
-function defaultLayout(){
- const tutor=newId("p"),flash=newId("p"),files=newId("p");
- Dock.panels={[tutor]:{type:"chat",agent:"tutor"},[flash]:{type:"chat",agent:"flash"},[files]:{type:"browser"}};
- return {root:{t:"split",id:newId("n"),dir:"h",sizes:[.52,.48],kids:[stackNode([tutor,flash]),stackNode([files])]},floats:[]};
+/* Out of the box: the main conversation and quick answers apart on the left, the learner's side on the right. */
+function factoryLayout(){
+ const main=newId("p"),flash=newId("p"),home=newId("p");
+ return {panels:{[main]:{type:"chat",agent:"tutor"},[flash]:{type:"chat",agent:"flash"},[home]:{type:"home"}},
+  layout:{root:{t:"split",id:newId("n"),dir:"h",sizes:[.46,.54],kids:[{t:"split",id:newId("n"),dir:"v",sizes:[.7,.3],kids:[stackNode([main]),stackNode([flash])]},stackNode([home])]},floats:[]}};
 }
+function defaultChoice(){
+ const preset=S.ui?.default_preset&&S.ui.presets?.[S.ui.default_preset];
+ return preset?JSON.parse(JSON.stringify(preset)):factoryLayout();
+}
+function defaultLayout(){const chosen=defaultChoice();Dock.panels=chosen.panels;return chosen.layout;}
+/* Replace the whole layout; panels that stay keep their state, the rest are closed. */
+async function applyLayout(saved){
+ if(typeof flushAll==="function")await flushAll();
+ const next=JSON.parse(JSON.stringify(saved));
+ for(const pid of Object.keys(Dock.panels)){
+  const keep=next.panels[pid]&&panelKey(next.panels[pid])===panelKey(Dock.panels[pid]);
+  if(!keep){const t=Dock.types[Dock.panels[pid].type];const node=Dock.els[pid];delete Dock.panels[pid];delete Dock.els[pid];if(t?.unmount)safe(()=>t.unmount({},node));node?.remove();}
+ }
+ Dock.layout=next.layout;Dock.layout.floats=Dock.layout.floats||[];
+ for(const [pid,params] of Object.entries(next.panels))if(!Dock.panels[pid]){Dock.panels[pid]=params;mountPanel(pid);}
+ tidy();renderDock();saveLayout();
+}
+function currentLayout(){return JSON.parse(JSON.stringify({layout:Dock.layout,panels:Dock.panels}));}
 function sideOf(pid){const p=Dock.panels[pid];return p?(Dock.types[p.type]?.side||"mine"):"mine";}
 
 /* ---- tree helpers ---------------------------------------------------------------------------- */
@@ -101,7 +120,7 @@ function mountPanel(pid){
 function float(pid){
  detach(pid);
  const rect=el("#dock").getBoundingClientRect();
- Dock.layout.floats.push({id:newId("f"),x:Math.round(rect.width*.25),y:70,w:Math.round(Math.min(720,rect.width*.5)),h:Math.round(rect.height*.7),stack:stackNode([pid])});
+ Dock.layout.floats.push({id:newId("f"),x:Math.round(rect.width*.25),y:70,w:Math.round(Math.max(480,Math.min(760,rect.width*.5))),h:Math.round(rect.height*.7),stack:stackNode([pid])});
  tidy();renderDock();saveLayout();
 }
 function panelTitle(pid){const p=Dock.panels[pid];return Dock.types[p.type]?.title(p,Dock.els[pid])||p.type;}
@@ -250,4 +269,89 @@ function startFloatDrag(id,resize,e){
  };
  const up=()=>{document.removeEventListener("mousemove",move);document.removeEventListener("mouseup",up);document.body.classList.remove("resizing");saveLayout();};
  document.body.classList.add("resizing");document.addEventListener("mousemove",move);document.addEventListener("mouseup",up);
+}
+
+/* ---- the agents' hands on the interface -------------------------------------------------------------- */
+const UiSnapshots={};
+function resolvePanel(ref){
+ if(!ref)return null;
+ if(Dock.panels[ref])return ref;
+ const ids=Object.keys(Dock.panels),title=String(ref);
+ return ids.find(pid=>panelTitle(pid)===title)||ids.find(pid=>Dock.panels[pid].path===title)||ids.find(pid=>panelTitle(pid).includes(title))||null;
+}
+function paramsOf(op){
+ const type=op.panel||"file";
+ if(type==="chat")return {type,agent:op.agent||"tutor",...(op.thread?{thread:op.thread}:{})};
+ if(type==="file"){if(!op.path)throw new Error("打开文件要给 path");return {type,path:op.path};}
+ if(type==="map")return {type,topic:op.topic||null};
+ if(!Dock.types[type])throw new Error("没有这种面板："+type);
+ return {type};
+}
+function placePanel(pid,where,to){
+ where=where||"tab";
+ if(where==="float"){detach(pid);const rect=el("#dock").getBoundingClientRect();
+  Dock.layout.floats.push({id:newId("f"),x:Math.round(rect.width*.3),y:60,w:Math.round(Math.max(480,rect.width*.4)),h:Math.round(rect.height*.6),stack:stackNode([pid])});return;}
+ const anchor=to&&to!==pid?stackOf(to):null;
+ detach(pid);
+ const target=anchor||targetStack(sideOf(pid));
+ if(where==="tab"||where==="center"){target.tabs.push(pid);target.active=pid;}
+ else if(["left","right","top","bottom"].includes(where))splitBeside(target,where,stackNode([pid]));
+ else throw new Error("where 应为 tab、left、right、top、bottom 或 float");
+}
+function buildSpec(spec,used){
+ if(Array.isArray(spec))spec={tabs:spec};
+ if(spec.tabs){
+  const tabs=spec.tabs.map(ref=>{
+   let pid=typeof ref==="string"?resolvePanel(ref):findPanel(paramsOf(ref));
+   if(!pid&&typeof ref==="object"){pid=newId("p");Dock.panels[pid]=paramsOf(ref);mountPanel(pid);}
+   if(!pid)throw new Error("找不到面板："+ref);
+   used.add(pid);return pid;
+  });
+  return {...stackNode(tabs),active:tabs.includes(resolvePanel(spec.active))?resolvePanel(spec.active):tabs[0]};
+ }
+ const parts=(spec.parts||[]).map(x=>buildSpec(x,used));
+ if(!parts.length)throw new Error("layout 的 parts 不能为空");
+ const sizes=(spec.sizes&&spec.sizes.length===parts.length?spec.sizes:parts.map(()=>1/parts.length)).map(Number);
+ return {t:"split",id:newId("n"),dir:spec.split==="v"?"v":"h",sizes,kids:parts};
+}
+async function runUiOps(ops){
+ const snapshot=newId("u");
+ UiSnapshots[snapshot]={layout:currentLayout(),ui:JSON.parse(JSON.stringify(S.ui))};
+ const results=[];
+ for(const op of ops||[]){
+  try{
+   if(op.do==="open"){
+    const params=paramsOf(op);let pid=findPanel(params);
+    if(!pid){pid=newId("p");Dock.panels[pid]=params;mountPanel(pid);}
+    placePanel(pid,op.where,resolvePanel(op.to));results.push({ok:true,panel:pid});
+   }else if(["close","focus","float","move"].includes(op.do)){
+    const pid=resolvePanel(op.panel);if(!pid)throw new Error("找不到面板："+op.panel);
+    if(op.do==="close"){await closePanel(pid);}
+    else if(op.do==="focus"){const s=stackOf(pid);if(s)s.active=pid;Dock.focus=pid;}
+    else if(op.do==="float")placePanel(pid,"float");
+    else placePanel(pid,op.where,resolvePanel(op.to));
+    results.push({ok:true,panel:pid});
+   }else if(op.do==="layout"){
+    const used=new Set(),root=buildSpec(op.spec||{},used);
+    for(const pid of Object.keys(Dock.panels))if(!used.has(pid)){const t=Dock.types[Dock.panels[pid].type],node=Dock.els[pid];if(t?.beforeClose)await t.beforeClose(Dock.panels[pid],node);delete Dock.panels[pid];delete Dock.els[pid];if(t?.unmount)safe(()=>t.unmount({},node));node?.remove();}
+    Dock.layout={root,floats:[]};results.push({ok:true});
+   }else if(op.do==="preset"){
+    const preset=S.ui.presets?.[op.name];if(!preset)throw new Error("没有叫「"+op.name+"」的布局");
+    await applyLayout(preset);results.push({ok:true});
+   }else if(op.do==="sidebar"){
+    if(op.section&&!SIDE_SECTIONS[op.section])throw new Error("左栏没有这个分区："+op.section);
+    showSection(op.section,op.open!==false);results.push({ok:true});
+   }else if(op.do==="set"){
+    if(!["theme","font_size","code_font_size","density"].includes(op.key))throw new Error("只能改 theme、font_size、code_font_size、density");
+    S.ui[op.key]=op.value;applyUi();saveUi();results.push({ok:true});
+   }else throw new Error("不认识的操作："+op.do);
+  }catch(e){results.push({ok:false,error:e.message});}
+ }
+ tidy();renderDock();saveLayout();
+ const panels=Object.keys(Dock.panels).map(pid=>({id:pid,title:panelTitle(pid),type:Dock.panels[pid].type}));
+ return {snapshot,results,panels};
+}
+async function restoreUi(snapshot){
+ const s=UiSnapshots[snapshot];if(!s)return toast("这次改动之前的界面已经找不到了（重启过）","error");
+ S.ui=s.ui;applyUi();saveUi();await applyLayout(s.layout);renderSide();toast("界面已还原");
 }

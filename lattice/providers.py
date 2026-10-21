@@ -35,7 +35,7 @@ APIS = {
     "custom": {"label": "自定义", "base_url": "", "model": "", "headers": {}, "extra_body": {}, "env": ""},
 }
 API_FIELDS = {"base_url", "headers", "extra_body", "api_key"}
-AGENT_NAMES = {"tutor": "主讲", "flash": "快答", "coach": "练习教练", "organizer": "整理"}
+AGENT_NAMES = {"tutor": "主会话", "flash": "快答", "coach": "练习教练", "organizer": "整理"}
 WEB_BACKENDS = {"duckduckgo": "DuckDuckGo（无需 Key）", "searxng": "SearXNG（自建地址）", "brave": "Brave Search API", "tavily": "Tavily API"}
 WEB_SECRETS = {"brave_key", "tavily_key"}
 DEFAULTS = {
@@ -58,7 +58,16 @@ DEFAULTS = {
     "runners": {},
     # Extra read-only paths visible inside the sandbox (toolchains installed under home).
     "sandbox_paths": [],
+    # Where the vault lives when LATTICE_VAULT is not set; empty means ~/Lattice. Takes effect on restart.
+    "vault": "",
+    # Seconds the learner pauses before their edits are committed.
+    "commit_idle": 30,
+    # Everything about the interface: appearance, the sidebar, saved layouts.
+    "ui": {"theme": "dark", "font_size": 13.5, "code_font_size": 12.5, "density": "comfortable", "send_key": "enter",
+           "selection_popup": True, "side": {"open": True, "width": 270, "section": "topics", "order": [], "hidden": []},
+           "presets": {}, "default_preset": None},
 }
+AGENT_FIELDS = ("api", "model", "max_tokens", "temperature")
 # Settings saved by earlier versions under flat names.
 LEGACY = {"tutor": "tutor", "flash": "flash", "practice": "coach"}
 
@@ -87,13 +96,15 @@ class Config:
                 if old + "_" + field in saved:
                     result["agents"][agent][field] = saved[old + "_" + field]
         for key, value in saved.items():
-            if key in ("agents", "web") and isinstance(value, dict):
+            if key == "ui" and isinstance(value, dict):
+                result["ui"].update(value)
+            elif key in ("agents", "web") and isinstance(value, dict):
                 for name, part in value.items():
                     if key == "agents" and name in result["agents"] and isinstance(part, dict):
-                        result["agents"][name].update({k: v for k, v in part.items() if k in ("api", "model", "max_tokens")})
+                        result["agents"][name].update({k: v for k, v in part.items() if k in AGENT_FIELDS})
                     elif key == "web" and name in result["web"]:
                         result["web"][name] = part
-            elif key in DEFAULTS and key not in ("agents", "web"):
+            elif key in DEFAULTS and key not in ("agents", "web", "ui"):
                 result[key] = value
         saved_apis = result["apis"] if isinstance(result["apis"], dict) else {}
         result["apis"] = {}
@@ -113,8 +124,10 @@ class Config:
         config = config or self.read()
         lane = config["agents"][name]
         api = lane["api"] if lane["api"] in APIS else "commandcode"
+        temperature = lane.get("temperature")
         return {**config["apis"][api], "api": api, "label": APIS[api]["label"], "api_key": self.key(api, config), "model": lane["model"],
-                "max_tokens": lane["max_tokens"], "timeout": config["timeout"], "temperature": config["temperature"]}
+                "max_tokens": lane["max_tokens"], "timeout": config["timeout"],
+                "temperature": config["temperature"] if temperature in (None, "") else float(temperature)}
 
     def public(self):
         # Only known keys cross the bridge; keys never do.
@@ -148,7 +161,7 @@ class Config:
                 if not isinstance(val, dict) or set(val) - set(AGENT_NAMES):
                     raise ValueError("未知的 AI")
                 for name, part in val.items():
-                    updated["agents"][name].update({k: v for k, v in part.items() if k in ("api", "model", "max_tokens")})
+                    updated["agents"][name].update({k: v for k, v in part.items() if k in AGENT_FIELDS})
             elif key == "web":
                 if not isinstance(val, dict) or set(val) - set(DEFAULTS["web"]) - {"clear"}:
                     raise ValueError("联网设置含不支持的字段")
@@ -175,6 +188,19 @@ class Config:
             elif change.get("api_key"):
                 api["api_key"] = str(change["api_key"]).strip()
         self._check(updated)
+        self._write(updated)
+        return self.public()
+
+    def save_ui(self, ui):
+        """The interface's own preferences, saved as one object (appearance, sidebar, layouts)."""
+        if not isinstance(ui, dict) or len(json.dumps(ui, ensure_ascii=False)) > 4_000_000:
+            raise ValueError("界面设置应为不超过 4MB 的对象")
+        updated = self.read()
+        updated["ui"] = {**DEFAULTS["ui"], **ui}
+        self._write(updated)
+        return updated["ui"]
+
+    def _write(self, updated):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(self.path.name + ".tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -187,7 +213,6 @@ class Config:
         except Exception:
             tmp.unlink(missing_ok=True)
             raise
-        return self.public()
 
     @staticmethod
     def _check(updated):
@@ -203,7 +228,14 @@ class Config:
             if not isinstance(api["headers"], dict) or not all(isinstance(v, str) for v in api["headers"].values()) \
                     or {k.casefold() for k in api["headers"]} & {"authorization", "content-type"}:
                 raise ValueError(label + " 的请求头应为字符串对象，不能覆盖 Authorization/Content-Type")
+        if updated["vault"] and not str(updated["vault"]).startswith(("/", "~")):
+            raise ValueError("学习库位置应为绝对路径")
+        updated["commit_idle"] = max(5, min(int(updated["commit_idle"]), 3600))
+        if not isinstance(updated["ui"], dict):
+            raise ValueError("界面设置应为对象")
         for name, lane in updated["agents"].items():
+            if lane.get("temperature") not in (None, ""):
+                lane["temperature"] = max(0, min(float(lane["temperature"]), 2))
             if lane["api"] not in APIS:
                 raise ValueError("未知的 API 连接：" + str(lane["api"]))
             lane["model"] = str(lane["model"]).strip()

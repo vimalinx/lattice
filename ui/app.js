@@ -3,31 +3,41 @@
 const Sel={text:"",timer:null};
 async function refreshState(){
  const st=await safe(()=>rpc("state"));if(!st)return;
- Object.assign(S.data,st);renderTop();
+ Object.assign(S.data,st);renderTop();sideChanged([]);homesChanged();
  const titles=el("#doc-titles");if(titles)titles.innerHTML=(S.data.docs||[]).slice(0,800).map(d=>'<option value="'+esc(d.title)+'">').join("");
  Object.keys(Dock.panels).forEach(refreshTab);
 }
 function refreshChats(){Object.keys(Chat).forEach(pid=>loadChat(pid));}
-function renderTop(){
- const bar=el("#topbar");if(!bar)return;
+/* The status bar: where the conversation is, what is working, what is running. */
+function renderStatus(){
+ const bar=el("#status");if(!bar)return;
  const busy=(S.data.busy||[]).length,running=(S.data.running||[]).length,topic=S.data.active_topic;
- bar.innerHTML='<div class="brand">'+logo()+'<b>lattice</b></div>'+
-  '<button class="btn sm" data-action="new-menu">'+svg("plus",14)+' 打开 / 新建</button>'+
-  '<button class="top-search" data-action="palette">'+svg("search",14)+'<span>搜索或输入命令</span><kbd>Ctrl K</kbd></button>'+
-  '<span class="grow"></span>'+
-  (topic?'<a class="top-topic" data-action="open-doc" data-id="'+esc(topic)+'" title="正在学的主题">'+svg("map",13)+' '+esc(topicTitle(topic))+'</a>':'')+
-  (busy?'<span class="top-chip working">'+svg("bot",13)+' '+busy+' 个 AI 在工作</span>':"")+
-  (running?'<span class="top-chip working">'+svg("play",13)+' '+running+' 个运行中</span>':"")+
-  '<button class="top-chip'+(S.data.due?" due":"")+'" data-action="open-review" title="到期要回顾的知识卡">'+svg("card",13)+' 回顾 '+(S.data.due||0)+'</button>'+
-  iconButton(S.theme==="dark"?"sun":"moon","theme","切换明暗")+iconButton("sliders","open-settings","设置");
+ bar.innerHTML=(topic?'<a data-action="open-doc" data-id="'+esc(topic)+'" title="正在学的主题">'+svg("map",12)+' '+esc(topicTitle(topic))+'</a>':'<span>'+svg("bot",12)+' 默认对话</span>')+
+  (busy?'<span class="working">'+svg("bot",12)+' '+busy+' 个 AI 在工作</span>':"")+(running?'<span class="working">'+svg("play",12)+' '+running+' 个运行中</span>':"")+
+  '<span class="grow"></span>'+(S.data.sandbox?.ok?'<span title="AI 的命令和运行都在沙箱里">'+svg("shield",12)+' 沙箱</span>':'<span class="warn">'+svg("shield",12)+' 沙箱不可用</span>')+
+  '<a data-action="open-vault" title="在系统里打开学习库">'+svg("folder",12)+' '+esc(S.data.vault||"")+'</a>';
+}
+function renderTop(){renderStatus();renderActivity();}
+/* Interface preferences live in the machine's config; appearance applies at once. */
+function applyUi(){
+ const u=S.ui,root=document.documentElement;
+ root.dataset.theme=u.theme==="light"?"light":"dark";root.dataset.density=u.density||"comfortable";
+ root.style.setProperty("--font-size",(Number(u.font_size)||13.5)+"px");root.style.setProperty("--code-size",(Number(u.code_font_size)||12.5)+"px");
+ renderActivity();
+}
+let uiTimer=null;
+function saveUi(now=false){
+ clearTimeout(uiTimer);
+ const go=()=>rpc("ui_save",{ui:S.ui}).then(u=>{S.ui=u;}).catch(e=>toast(e.message,"error"));
+ if(now)return go();uiTimer=setTimeout(go,500);
 }
 const NEW_ITEMS=[
  ["写记录","new-note","edit","随手写，关掉后 AI 帮你整理"],["写代码","new-code","code","任何语言，写完就能运行"],["新实验笔记","new-notebook","flask","Jupyter 格式，在沙箱内核里运行"],
- ["新知识卡","new-card","card","自己记下一个知识点"],["主讲","open-agent","bot","",'data-agent="tutor"'],["快答","open-agent","spark","",'data-agent="flash"'],
- ["学习库","open-browser","folder",""],["知识图","open-map","map",""],["学习轨迹","open-journal","history",""],["回顾","open-review","card",""],["设置","open-settings","sliders",""]];
+ ["新知识卡","new-card","card","自己记下一个知识点"],["主会话","open-agent","bot","",'data-agent="tutor"'],["快答","open-agent","spark","",'data-agent="flash"'],
+ ["开始","open-home","home",""],["知识图","open-map","map",""],["学习轨迹","open-journal","history",""],["回顾","open-review","card",""],["设置","open-settings","sliders",""]];
 function newMenu(anchor){
  const r=anchor.getBoundingClientRect();
- const menu=h('<div class="menu" style="left:'+r.left+'px;top:'+(r.bottom+6)+'px">'+NEW_ITEMS.map(([t,a,i,d,x],k)=>(k===4?'<hr/>':'')+'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+(d?'<small>'+esc(d)+'</small>':"")+'</span></button>').join("")+'</div>');
+ const menu=h('<div class="menu" style="left:'+(r.right+6)+'px;top:'+r.top+'px">'+NEW_ITEMS.map(([t,a,i,d,x],k)=>(k===4?'<hr/>':'')+'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+(d?'<small>'+esc(d)+'</small>':"")+'</span></button>').join("")+'</div>');
  closeMenus();document.body.appendChild(menu);
 }
 function closeMenus(){all(".menu").forEach(m=>m.remove());}
@@ -70,13 +80,16 @@ let screenTimer=null;
 function reportScreen(){clearTimeout(screenTimer);screenTimer=setTimeout(()=>safe(sendScreen),1200);}
 function screenOf(pid){const p=Dock.panels[pid],t=Dock.types[p?.type];return t?.screen?{panel:pid,type:p.type,title:panelTitle(pid),...t.screen(p,Dock.els[pid])}:{panel:pid,type:p?.type};}
 function sendScreen(){
- const stacks=[];eachStack((s,f)=>stacks.push({tabs:s.tabs.map(panelTitle),showing:s.active?panelTitle(s.active):null,floating:!!f}));
+ const stacks=[];eachStack((s,f)=>stacks.push({tabs:s.tabs.map(pid=>({id:pid,title:panelTitle(pid),type:Dock.panels[pid].type})),showing:s.active,floating:!!f}));
  const shown=[];eachStack(s=>{if(s.active)shown.push(s.active);});
  const mine=shown.filter(pid=>sideOf(pid)==="mine").map(screenOf),ai=shown.filter(pid=>sideOf(pid)==="ai").map(screenOf);
- const state={layout:{stacks,focused:Dock.focus?panelTitle(Dock.focus):null},ai:{panels:ai},mine:{files:mine.filter(x=>x.type==="file"),other:mine.filter(x=>x.type!=="file")},
+ const state={layout:{stacks,focused:Dock.focus||null,nesting:layoutShape(Dock.layout.root)},ai:{panels:ai},mine:{files:mine.filter(x=>x.type==="file"),other:mine.filter(x=>x.type!=="file")},
+  sidebar:{open:S.ui.side.open,section:S.ui.side.section,sections:sideOrder()},layouts:Object.keys(S.ui.presets||{}),theme:S.ui.theme,
   open_but_hidden:Object.keys(Dock.panels).filter(pid=>!shown.includes(pid)).map(panelTitle),recent_files:Dwell.recent.slice(0,20),selection:Sel.text?shorten(Sel.text,600):undefined};
  return rpc("screen",{state});
 }
+/* The split tree in brief, so an agent can see how the panels sit before it rearranges them. */
+function layoutShape(n){return n.t==="stack"?{tabs:n.tabs}:{split:n.dir,sizes:n.sizes.map(x=>+x.toFixed(2)),parts:n.kids.map(layoutShape)};}
 function trackDwell(){
  const pid=Dock.focus,p=Dock.panels[pid],path=p?.type==="file"&&!document.hidden?p.path:null;
  if(path!==Dwell.path){
@@ -108,7 +121,8 @@ async function onEvent(evt){
  if(evt.type==="agent")return chatEvent(evt);
  if(evt.type==="run")return runEvent(evt);
  if(evt.type==="kernel"){kernelEvent(evt);if(["run_finished","batch_finished"].includes(evt.kind))journalsChanged();return;}
- if(evt.type==="changed"){fileChanged(evt);browserChanged(evt.paths);mapsChanged();journalsChanged();if(evt.external||evt.paths.some(p=>/^(topics|cards|lessons|notes|insights|notebooks)\//.test(p)))refreshState();return;}
+ if(evt.type==="ui"){const result=await runUiOps(evt.ops);return rpc("ui_done",{request:evt.request,result});}
+ if(evt.type==="changed"){fileChanged(evt);sideChanged(evt.paths);mapsChanged();journalsChanged();homesChanged();if(evt.external||evt.paths.some(p=>/^(topics|cards|lessons|notes|insights|notebooks)\//.test(p)))refreshState();return;}
  if(evt.type==="open"){openFile(evt.path,{line:evt.line,highlight:evt.highlight,cell:evt.cell});return;}
  if(evt.type==="env"){
   toast(evt.message,evt.ok?"info":"error");
@@ -128,29 +142,32 @@ async function onAction(a){
  case "modal-close":return closeModal();
  case "new-menu":return newMenu(a);
  case "palette":return palette();
- case "theme":S.theme=S.theme==="dark"?"light":"dark";localStorage.setItem("lattice-theme",S.theme);document.documentElement.dataset.theme=S.theme;return renderTop();
+ case "theme":S.ui.theme=S.ui.theme==="dark"?"light":"dark";applyUi();return saveUi();
+ case "side-section":{const k=a.dataset.section;if(S.ui.side.open&&S.ui.side.section===k)return showSection(k,false);return showSection(k,true);}
+ case "side-stage":Side.stage=a.dataset.stage;return renderSide();
+ case "open-home":return openPanel({type:"home"});
+ case "ui-restore":return restoreUi(a.dataset.snapshot);
  case "new-note":return newScratch("note");
  case "new-code":return newScratch("code");
  case "new-notebook":return newScratch("notebook");
  case "new-card":{const title=prompt("知识卡的标题：");if(!title)return;const r=await rpc("doc_create",{kind:"card",title,topic:S.data.active_topic});await refreshState();return openFile(r.path);}
  case "open-agent":return openPanel({type:"chat",agent:a.dataset.agent});
- case "open-browser":return openPanel({type:"browser"});
  case "open-map":return openPanel({type:"map",topic:S.data.active_topic||null});
  case "open-journal":return openPanel({type:"journal"});
  case "open-review":return openPanel({type:"review"},{reuse:false});
  case "open-settings":return openPanel({type:"settings"});
  case "open-file":return openFile(a.dataset.path||a.dataset.id,{line:a.dataset.line?Number(a.dataset.line):null,highlight:a.dataset.highlight||null});
  case "open-doc":{const d=(S.data.docs||[]).find(x=>x.id===a.dataset.id);if(d)return openFile(d.path);return toast("找不到这个文档，它可能已经被删除","error");}
- case "open-dir":Browser.open.add(a.dataset.path);openPanel({type:"browser"});return renderBrowser();
+ case "open-dir":Side.open.add(a.dataset.path);return showSection("files");
  case "open-thread":return openPanel({type:"chat",agent:a.dataset.agent||"tutor",thread:a.dataset.thread});
  case "open-practice":return openPractice(a.dataset.id);
  case "open-ref":return openRef(a.dataset.ref);
  case "open-url":return rpc("open_url",{url:a.dataset.url});
  case "open-vault":return rpc("open_folder",{});
- case "tree-toggle":{const p=a.dataset.path;Browser.open.has(p)?Browser.open.delete(p):Browser.open.add(p);return renderBrowser();}
- case "project-add":{const r=await rpc("project_add",{},0);if(r){delete Browser.entries[""];await refreshState();renderBrowser();toast("已挂载 "+r.name+"：你能读写，AI 只读");}return;}
- case "project-remove":if(!confirm("取消挂载这个目录？目录本身不会被改动。"))return;await rpc("project_remove",{id:a.dataset.id});delete Browser.entries[""];await refreshState();return renderBrowser();
- case "import-md":{const r=await rpc("import_markdown",{},0);if(r){toast("导入了 "+r.count+" 篇");browserChanged(["notes/x"]);refreshState();}return;}
+ case "tree-toggle":{const p=a.dataset.path;Side.open.has(p)?Side.open.delete(p):Side.open.add(p);return renderSide();}
+ case "project-add":{const r=await rpc("project_add",{},0);if(r){delete Side.entries[""];await refreshState();renderSide();toast("已挂载 "+r.name+"：你能读写，AI 只读");}return;}
+ case "project-remove":if(!confirm("取消挂载这个目录？目录本身不会被改动。"))return;await rpc("project_remove",{id:a.dataset.id});delete Side.entries[""];await refreshState();return renderSide();
+ case "import-md":{const r=await rpc("import_markdown",{},0);if(r){toast("导入了 "+r.count+" 篇");sideChanged(["notes/x"]);refreshState();}return;}
  case "export":{const r=await rpc("export",{},0);if(r)toast("已导出到 "+r);return;}
  case "chat-send":return chatSend(pid);
  case "chat-cancel":return rpc("cancel",{thread:Chat[pid].thread});
@@ -186,10 +203,6 @@ async function onAction(a){
   return go();
  }
  case "organizer-dismiss":Organizer.text="";return renderOrganizer();
- case "cfg-save":return saveSettings(a.closest(".panel"));
- case "cfg-test":await saveSettings(a.closest(".panel"));el("#cfg-test-result").textContent="正在读取模型列表…";return rpc("test_api",{agent:a.dataset.agent});
- case "cfg-clear-key":if(!confirm("清除本机保存的这个 Key？环境变量里的不受影响。"))return;await rpc("settings_save",{config:{apis:{[a.dataset.api]:{clear_key:true}}}});return renderSettings(a.closest(".panel"));
- case "env-install":{const input=a.closest(".env-box").querySelector("[data-env-install]"),pkgs=input.value.split(/\s+/).filter(Boolean);if(!pkgs.length)return;await rpc("env_install",{name:"default",packages:pkgs});input.value="";return toast("正在安装 "+pkgs.join("、")+"…");}
  case "topic-focus":{await rpc("focus",{topic:a.dataset.id});await refreshState();followingPanels().forEach(x=>loadChat(x));
   let tutor=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="tutor"&&!Dock.panels[x].thread);if(!tutor)openPanel({type:"chat",agent:"tutor"});else activate(tutor);return;}
  case "topic-delete":{if(!confirm("删除这个主题？里面的卡片、笔记和对话都会留下，只是不再属于它。主题文件会留在学习库的历史里。"))return;
@@ -197,6 +210,7 @@ async function onAction(a){
  case "version-view":case "version-restore":return versionAction(kind,a);
  case "file-history":return showHistory(pid);
  }
+ if(a.closest(".panel-settings")){const r=await settingsAction(kind,a);if(r!==null)return r;}
  return fileAction(kind,a);
 }
 async function openRef(ref){
@@ -217,8 +231,8 @@ function onSelect(e){
  else{const s=window.getSelection();text=s?.toString()||"";if(s?.rangeCount)rect=s.getRangeAt(0).getBoundingClientRect();}
  if(!text.trim()){hidePop();return;}
  Sel.text=text.slice(0,5000);Object.keys(Chat).forEach(updateComposer);reportScreen();
- if(!rect)return;hidePop();
- const pop=h('<div id="sel-pop"><button data-action="ask-flash">'+svg("spark",13)+' 问快答</button><button data-action="ask-tutor">'+svg("bot",13)+' 问主讲</button></div>');
+ if(!rect||S.ui.selection_popup===false)return;hidePop();
+ const pop=h('<div id="sel-pop"><button data-action="ask-flash">'+svg("spark",13)+' 问快答</button><button data-action="ask-tutor">'+svg("bot",13)+' 问主会话</button></div>');
  document.body.appendChild(pop);
  const x=Math.min(Math.max(8,rect.left+rect.width/2-pop.offsetWidth/2),innerWidth-pop.offsetWidth-8),y=rect.top-pop.offsetHeight-8;
  pop.style.left=x+"px";pop.style.top=(y<8?rect.bottom+8:y)+"px";
@@ -239,7 +253,7 @@ function initInteractions(){
   const t=e.target;
   if(t.id==="palette-q")return paletteFilter(t.value);
   if(t.dataset.composer){if(Chat[t.dataset.composer])Chat[t.dataset.composer].input=t.value;return;}
-  if(t.dataset.browserSearch!==undefined){clearTimeout(Browser.timer);Browser.query=t.value;Browser.timer=setTimeout(async()=>{Browser.hits=t.value.trim()?await safe(()=>rpc("search",{query:t.value})):null;renderBrowser();},300);return;}
+  if(t.dataset.sideInput&&sideInput(t))return;
   if(fileInput(t))reportScreen();
  });
  document.addEventListener("change",e=>{
@@ -247,7 +261,7 @@ function initInteractions(){
   if(t.dataset.mapTopic!==undefined){Dock.panels[t.dataset.mapTopic].topic=t.value||null;saveLayout();refreshTab(t.dataset.mapTopic);return loadMap(t.dataset.mapTopic);}
   if(t.dataset.journalType!==undefined){Dock.panels[t.dataset.journalType].group=t.value;saveLayout();return loadJournal(t.dataset.journalType);}
   if(t.dataset.journalDays!==undefined){Dock.panels[t.dataset.journalDays].days=Number(t.value);saveLayout();return loadJournal(t.dataset.journalDays);}
-  if(t.dataset.cfgAgent&&t.dataset.key==="api"){const api=S.config.apis.find(x=>x.id===t.value);const m=t.closest(".agent-card").querySelector('[data-key="model"]');if(api?.default_model&&m)m.value=api.default_model;return;}
+  if(t.closest(".panel-settings")&&settingsChange(t))return;
   safe(()=>fileChange(t));
  });
  document.addEventListener("keydown",e=>{
@@ -259,12 +273,17 @@ function initInteractions(){
    e.preventDefault();const at=items.indexOf(document.activeElement),next=e.key==="ArrowDown"?Math.min(at+1,items.length-1):at-1;
    if(next<0)el("#palette-q")?.focus();else items[next].focus();return;
   }
-  if(t.dataset?.composer&&mod&&e.key==="Enter"){e.preventDefault();safe(()=>chatSend(t.dataset.composer));return;}
+  if((t.dataset?.composer||t.classList?.contains("quiz-free"))&&e.key==="Enter"&&!e.isComposing&&e.keyCode!==229){
+   const send=S.ui.send_key==="ctrl"?mod:!e.shiftKey&&!mod;
+   if(send){e.preventDefault();if(t.dataset.composer)safe(()=>chatSend(t.dataset.composer));else t.closest(".lblock")?.querySelector('[data-action="quiz-answer"]')?.click();}
+   return;
+  }
   if(fileKey(e))return;
   if(mod&&e.key.toLowerCase()==="k"){e.preventDefault();palette();return;}
   if(mod&&e.key.toLowerCase()==="s"){e.preventDefault();safe(async()=>{await flushAll();toast("已保存");});return;}
   if(mod&&e.key.toLowerCase()==="n"){e.preventDefault();safe(()=>newScratch("note"));return;}
   if(mod&&e.key.toLowerCase()==="j"){e.preventDefault();const f=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="flash")||openPanel({type:"chat",agent:"flash"});activate(f);setTimeout(()=>Dock.els[f]?.querySelector(".composer textarea")?.focus(),50);return;}
+  if(mod&&e.key.toLowerCase()==="b"){e.preventDefault();showSection(null,!S.ui.side.open);return;}
   if(mod&&e.key.toLowerCase()==="w"&&Dock.focus){e.preventDefault();safe(()=>closePanel(Dock.focus));return;}
  });
  document.addEventListener("mouseup",e=>setTimeout(()=>onSelect(e),0));
@@ -274,16 +293,16 @@ function initInteractions(){
  setInterval(()=>safe(flushAll),25000);
 }
 async function boot(){
- document.documentElement.dataset.theme=S.theme;
  try{
   if(typeof qt==="undefined"||!qt.webChannelTransport)throw new Error("必须由 Lattice 桌面程序启动（缺少本地 Qt WebChannel）");
   new QWebChannel(qt.webChannelTransport,async channel=>{
    try{
     S.bridge=channel.objects.backend;
     S.bridge.event.connect(raw=>safe(()=>onEvent(JSON.parse(raw))));
-    S.data=await rpc("bootstrap");S.config=S.data.config;
-    el("#app").innerHTML='<header id="topbar"></header><div id="dock-wrap"><div id="dock"></div><div id="floats"></div></div><div id="organizer" hidden></div><div id="drop-mark"></div><datalist id="doc-titles"></datalist>';
-    renderTop();initInteractions();loadLayout(S.data.layout);await refreshState();reportScreen();
+    S.data=await rpc("bootstrap");S.config=S.data.config;S.ui=S.config.ui;
+    el("#app").innerHTML='<div id="shell"><nav id="activity"></nav><aside id="side"></aside><div id="side-gutter"></div><div id="dock-wrap"><div id="dock"></div><div id="floats"></div></div></div>'+
+     '<footer id="status"></footer><div id="organizer" hidden></div><div id="drop-mark"></div><datalist id="doc-titles"></datalist>';
+    applyUi();initInteractions();initSideResize();loadLayout(S.data.layout);await refreshState();renderSide();reportScreen();
     if(S.data.migrated)toast("已把原来的学习数据迁移成文件，放在 "+S.data.vault);
     if(S.data.problems?.length)console.warn("读不了的文件",S.data.problems);
    }catch(err){console.error(err);el("#app").innerHTML='<div class="boot">初始化失败：'+esc(err.message)+'<br/><button class="btn" onclick="location.reload()">重试</button></div>';}

@@ -1,6 +1,6 @@
 "use strict";
 /* Lattice UI core: no remote services; all data passes through QWebChannel. */
-const S={bridge:null,theme:localStorage.getItem("lattice-theme")||"dark",data:null,config:null,toastTimer:null};
+const S={bridge:null,ui:{theme:"dark",side:{open:true,width:270,section:"topics",order:[],hidden:[]},presets:{}},data:null,config:null,toastTimer:null};
 const el=s=>document.querySelector(s);
 const all=(s,root=document)=>Array.from(root.querySelectorAll(s));
 function esc(v){return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
@@ -85,7 +85,7 @@ let _mmTimer=null,_mmSeq=0,_mmInited=false;
 function scheduleMermaid(){clearTimeout(_mmTimer);_mmTimer=setTimeout(runMermaid,60);}
 async function runMermaid(){
  if(typeof mermaid==="undefined")return;
- if(!_mmInited){_mmInited=true;try{mermaid.initialize({startOnLoad:false,theme:S.theme==="dark"?"dark":"default",securityLevel:"strict",fontFamily:"inherit"});}catch(_){return;}}
+ if(!_mmInited){_mmInited=true;try{mermaid.initialize({startOnLoad:false,theme:S.ui.theme==="dark"?"dark":"default",securityLevel:"strict",fontFamily:"inherit"});}catch(_){return;}}
  for(const n of all(".mermaid:not([data-processed='true'])")){
   n.dataset.processed="true";const src=n.textContent;
   try{const out=await mermaid.render("mm"+(++_mmSeq),src);n.innerHTML=out.svg;}
@@ -145,4 +145,4 @@ const stageColor={suggested:"#5b6675",seen:"#e0be88",explained:"#b5a8fa",applied
 const linkName={prerequisite:"是前置",part_of:"是一部分",related:"有关联",applies_to:"应用于",contrasts:"对比",explains:"解释了",branch_of:"分支自",mentions:"提到"};
 const kindName={topic:"主题",card:"知识卡",lesson:"课程",note:"笔记",insight:"薄弱点",notebook:"实验笔记",file:"文件"};
 const journalName={asked:"提问",answered:"作答",judged:"AI 判断",explained:"讲解",ran:"运行",viewed:"查看",wrote:"写作",staged:"理解阶段",reviewed:"回顾",detour:"岔开",bridged:"接回主干",insight:"薄弱点",organized:"整理",searched:"联网",installed:"装包",action:"AI 动作",undo:"撤销"};
-function who(actor){return actor==="me"?"我":({tutor:"主讲",flash:"快答",coach:"练习教练",organizer:"整理",lattice:"Lattice",app:"Lattice"})[actor]||actor;}
+function who(actor){return actor==="me"?"我":({tutor:"主会话",flash:"快答",coach:"练习教练",organizer:"整理",lattice:"Lattice",app:"Lattice"})[actor]||actor;}

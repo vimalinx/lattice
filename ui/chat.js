@@ -3,7 +3,8 @@
    the learner reads, answers its questions, and takes what they want to their side. */
 const Chat={};
 const AGENT_ICON={tutor:"bot",flash:"spark",coach:"code",organizer:"edit"};
-const AGENT_HINT={tutor:"想到什么，直接说。Ctrl + Enter 发送",flash:"这个词什么意思？这行为什么这样写？",coach:"说说你的想法、预测，或者哪里卡住了"};
+const AGENT_HINT={tutor:"想到什么，直接说",flash:"这个词什么意思？这行为什么这样写？",coach:"说说你的想法、预测，或者哪里卡住了"};
+function sendHint(){return S.ui.send_key==="ctrl"?"Ctrl + Enter 发送":"Enter 发送，Shift + Enter 换行";}
 function agentTitle(agent){return S.data?.agents?.[agent]||agent;}
 function topicTitle(id){return id?(S.data?.topics||[]).find(t=>t.id===id)?.title||"已删除的主题":"";}
 panelType("chat",{side:"ai",icon:p=>AGENT_ICON[p.agent]||"bot",
@@ -55,7 +56,7 @@ function renderChat(pid,keepScroll=true){
 function chatWelcome(agent,data){
  if(agent==="coach")return '<h3>练习开始了</h3><p>教练会一步步带你写。</p>';
  if(agent==="flash")return '<h3>小问题，不必打断大思路。</h3><p>选中任何地方的文字或代码再提问，快答会结合你正在看的内容来解释。</p>';
- return '<h3>想到什么，直接说。</h3><p>主讲会跟着你的话题走。它能看到你的知识图、学习轨迹和你此刻打开的东西；值得长期深入的内容，它会整理成主题，并定一条主干路线。</p>';
+ return '<h3>想到什么，直接说。</h3><p>主会话会跟着你的话题走。它能看到你的知识图、学习轨迹和你此刻打开的东西；值得长期深入的内容，它会整理成主题，并定一条主干路线。</p>';
 }
 function chatHead(pid){
  const p=Dock.panels[pid],st=Chat[pid],d=st.data,cfg=S.config?.agents?.[p.agent]||{};
@@ -65,12 +66,12 @@ function chatHead(pid){
   const pr=d.practice;
   tools=button(svg("file",13)+" 练习文件","open-file",'data-path="'+esc(pr.file||"")+'"',"ghost sm")+
    (pr.state==="active"?button("看看我的代码","chat-task",'data-pid="'+pid+'" data-task="check"',"ghost sm")+button("给点提示","chat-task",'data-pid="'+pid+'" data-task="hint"',"ghost sm")+
-    button(svg("check",13)+" 结束并复盘","practice-end",'data-pid="'+pid+'"',"primary sm"):'<span class="chip">'+(pr.state==="reviewing"?"主讲复盘中":"已复盘")+'</span>');
+    button(svg("check",13)+" 结束并复盘","practice-end",'data-pid="'+pid+'"',"primary sm"):'<span class="chip">'+(pr.state==="reviewing"?"主会话复盘中":"已复盘")+'</span>');
  }else if(p.agent==="tutor"){
   tools=button(svg("book",13)+" 提炼知识卡","chat-task",'data-pid="'+pid+'" data-task="capture"',"ghost sm")+iconButton("plus","chat-new","开新会话",'data-pid="'+pid+'"');
  }else if(p.agent==="flash")tools=iconButton("plus","chat-new","开新会话",'data-pid="'+pid+'"');
  const topic=d.head?.topic;
- return '<span class="agent-badge a-'+esc(p.agent)+'">'+svg(AGENT_ICON[p.agent]||"bot",14)+'</span><div class="chat-who"><b>'+esc(agentTitle(p.agent))+'</b><small>'+esc(cfg.label||"")+' · <span class="'+(busy?"working":"")+'">'+esc(state)+'</span></small></div>'+
+ return '<div class="chat-who"><b>'+esc(agentTitle(p.agent))+'</b><small>'+esc(cfg.label||"")+' · <span class="'+(busy?"working":"")+'">'+esc(state)+'</span></small></div>'+
   (p.agent!=="coach"?(topic?'<a class="topic-chip" data-action="open-doc" data-id="'+esc(topic)+'" title="打开主题">'+svg("map",12)+' '+esc(topicTitle(topic))+'</a>':'<span class="topic-chip quiet">默认对话</span>'):"")+
   '<div class="chat-tools">'+tools+'</div>';
 }
@@ -98,7 +99,7 @@ function messageTools(pid,m){
  const agent=Dock.panels[pid].agent,out=[];
  if(agent==="tutor")out.push(button(svg("code",12)+" 开始练习","practice-start",'data-pid="'+pid+'" data-mid="'+m.id+'" title="让练习教练带着你一步步把这段内容写出来"',"ghost sm"));
  if(agent==="tutor"||agent==="flash")out.push(button(svg("card",12)+" 存成卡片","message-card",'data-pid="'+pid+'" data-mid="'+m.id+'"',"ghost sm"));
- if(agent==="flash")out.push(button("交给主讲深入讲","message-escalate",'data-pid="'+pid+'" data-mid="'+m.id+'"',"ghost sm"));
+ if(agent==="flash")out.push(button("交给主会话深入讲","message-escalate",'data-pid="'+pid+'" data-mid="'+m.id+'"',"ghost sm"));
  return '<div class="msg-tools">'+out.join("")+'</div>';
 }
 function actionChips(actions,undone=[],live=false){
@@ -106,7 +107,8 @@ function actionChips(actions,undone=[],live=false){
  return '<div class="actions">'+actions.map(a=>{
   const gone=undone.includes(a.id)||(S.data?.undone||[]).includes(a.id);
   return '<div class="action'+(gone?" undone":"")+'">'+svg(live?"spark":"check",12)+'<span>'+esc(a.summary)+'</span>'+
-   (a.ref&&!gone?(a.ref.startsWith("handoff:")?button("请主讲接住","handoff",'data-topic="'+esc(a.ref.slice(8))+'"',"ghost xs"):button("查看","open-ref",'data-ref="'+esc(a.ref)+'"',"ghost xs")):"")+
+   (a.ref&&!gone?(a.ref.startsWith("handoff:")?button("请主会话接住","handoff",'data-topic="'+esc(a.ref.slice(8))+'"',"ghost xs"):
+    a.ref.startsWith("ui:")?(live?"":button(svg("undo",11)+" 还原界面","ui-restore",'data-snapshot="'+esc(a.ref.slice(3))+'"',"ghost xs")):button("查看","open-ref",'data-ref="'+esc(a.ref)+'"',"ghost xs")):"")+
    (a.undoable&&!gone&&!live?button(svg("undo",11)+" 撤销","undo",'data-id="'+esc(a.id)+'"',"ghost xs"):gone?'<small>已撤销</small>':"")+'</div>';
  }).join("")+'</div>';
 }
@@ -149,7 +151,7 @@ function patchLive(pid){
 }
 function composerHtml(pid){
  const p=Dock.panels[pid];
- return '<textarea rows="2" data-composer="'+pid+'" placeholder="'+esc(AGENT_HINT[p.agent]||"")+'"></textarea><div class="composer-bar"><span class="composer-note"></span><span class="composer-btn"></span></div>';
+ return '<textarea rows="2" data-composer="'+pid+'" placeholder="'+esc((AGENT_HINT[p.agent]||"")+" · "+sendHint())+'"></textarea><div class="composer-bar"><span class="composer-note"></span><span class="composer-btn"></span></div>';
 }
 function updateComposer(pid){
  const node=Dock.els[pid],st=Chat[pid],p=Dock.panels[pid];if(!node||!st?.data)return;
@@ -183,7 +185,7 @@ function chatEvent(evt){
   const st=Chat[pid];
   if(evt.kind==="chunk"){st.stream+=evt.text;st.waiting="";patchLive(pid);continue;}
   if(evt.kind==="status"){if(st.data){st.data.status=evt.state;st.data.busy=!["ready","offline","error","cancelled"].includes(evt.state)||st.data.busy;}const head=Dock.els[pid]?.querySelector(".chat-head");if(head)head.innerHTML=chatHead(pid);continue;}
-  if(evt.kind==="tool_wait"){st.waiting={shell:"正在命令行里查看…",run:"正在运行代码…",web_search:"正在联网搜索…",web_fetch:"正在读网页…",install:"正在装包…"}[evt.name]||"";patchLive(pid);continue;}
+  if(evt.kind==="tool_wait"){st.waiting={ui:"正在调整界面…",shell:"正在命令行里查看…",run:"正在运行代码…",web_search:"正在联网搜索…",web_fetch:"正在读网页…",install:"正在装包…"}[evt.name]||"";patchLive(pid);continue;}
   if(evt.kind==="tool"){st.waiting="";if(evt.actions?.length){st.live.push(...evt.actions);patchLive(pid);}continue;}
   if(evt.kind==="error"){st.error=evt.message||"请求失败";patchLive(pid);continue;}
   if(evt.kind==="finished"){
@@ -214,13 +216,13 @@ async function openPractice(id){
 }
 async function endPractice(pid){
  const st=Chat[pid];
- if(!confirm("结束这次练习，交给主讲复盘？结束后这个练习就不能再继续对话了。"))return;
+ if(!confirm("结束这次练习，交给主会话复盘？结束后这个练习就不能再继续对话了。"))return;
  if(typeof flushAll==="function")await flushAll();
  const r=await rpc("practice_end",{id:st.thread});
  let tutor=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="tutor");
  if(!tutor)tutor=openPanel({type:"chat",agent:"tutor"});else activate(tutor);
  await loadChat(pid);setTimeout(()=>Object.keys(Chat).filter(x=>Chat[x].thread===r.tutor_thread||Dock.panels[x]?.agent==="tutor").forEach(x=>loadChat(x)),300);
- toast("已交给主讲复盘");
+ toast("已交给主会话复盘");
 }
 async function messageToCard(pid,mid){
  const st=Chat[pid],m=st.data.messages.find(x=>String(x.id)===String(mid));if(!m)return;

@@ -55,9 +55,11 @@ class Bridge(QObject):
     def __init__(self, parent=None, root=None, config_path=None, migrate=True):
         super().__init__(parent)
         self._init_log()
-        self.lattice = Lattice(root or VAULT_PATH, migrate_from=LEGACY_DB if migrate and root is None else None)
-        self.root = self.lattice.root
         self.config = Config(config_path)
+        # LATTICE_VAULT wins; otherwise the location chosen in settings; otherwise ~/Lattice.
+        chosen = self.config.read()["vault"] if not os.environ.get("LATTICE_VAULT") else ""
+        self.lattice = Lattice(root or (Path(chosen).expanduser() if chosen else VAULT_PATH), migrate_from=LEGACY_DB if migrate and root is None else None)
+        self.root = self.lattice.root
         self.envs = Envs(self.lattice.vault)
         if not self.lattice.vault.path("envs/default.txt").exists():
             self.envs.wanted("default")
@@ -69,6 +71,7 @@ class Bridge(QObject):
         self.runs, self.kernels, self.kernel_states, self.batches = {}, {}, {}, {}
         self.screen, self.edits, self.last_write = {}, {}, 0.0
         self.tests, self._retired = [], []
+        self.ui_waiters = {}
         self.closing = False
         self.state_path = self.root / ".lattice" / "state.json"
         self._done.connect(lambda then, result: then(result))
@@ -78,7 +81,7 @@ class Bridge(QObject):
         self.sync_timer.timeout.connect(self.sync)
         self.sync_timer.start(2000)
         self.commit_timer = QTimer(self)
-        self.commit_timer.timeout.connect(lambda: time.monotonic() - self.last_write > 30 and self.commit_mine())
+        self.commit_timer.timeout.connect(lambda: time.monotonic() - self.last_write > self.config.read()["commit_idle"] and self.commit_mine())
         self.commit_timer.start(10000)
 
     @staticmethod
@@ -174,7 +177,8 @@ class Bridge(QObject):
     def rpc_state(self):
         l = self.lattice
         docs = l.index.rows("SELECT id, kind, title, topic, path, updated FROM docs ORDER BY updated DESC LIMIT 3000")
-        return {"topics": l.topics(), "active_topic": l.active_topic(), "docs": docs, "projects": l.projects(),
+        return {"topics": l.topics(), "active_topic": l.active_topic(), "docs": docs, "projects": l.projects(), "cards": l.cards(),
+                "insights": [i for i in l.insights() if i["state"] == "active"],
                 "due": len(l.due_cards()), "practices": l.practices(), "busy": sorted(self.busy), "status": self.status,
                 "kernels": self.kernel_states, "running": [{"run": k, "path": v["path"], "by": v["by"]} for k, v in self.runs.items()],
                 "agents": {name: AGENT_NAMES[name] for name in agents.NAMES}, "undone": sorted(l.undone())}
@@ -928,7 +932,7 @@ class Bridge(QObject):
             if review_thread == thread:
                 # finish_practice_review clears the entry; one still here means the review never landed.
                 self.reviews.pop(ident, None)
-                errors.append("复盘没有完成，可以在练习里重新复盘" if reason != "end_turn" else "主讲没有记下这次复盘的结论，可以在练习里重新复盘")
+                errors.append("复盘没有完成，可以在练习里重新复盘" if reason != "end_turn" else "主会话没有记下这次复盘的结论，可以在练习里重新复盘")
         if turn.refocus and agent == "tutor":
             target_topic = turn.focus
             if target_topic != topic:
@@ -1004,7 +1008,7 @@ class Bridge(QObject):
             raise ValueError("练习教练还在回答，等它说完或先停止")
         tutor = self.lattice.thread_for("tutor", p["topic"])
         if tutor in self.busy:
-            raise ValueError("主讲正在回答，等它说完再结束练习")
+            raise ValueError("主会话正在回答，等它说完再结束练习")
         pointer = (f"\n\n（这次练习是 practice:{id}，练习文件是 {p['file']}。先用 read 读 practice:{id}："
                    "练习依据、全部对话、练习文件的最终内容和运行记录，再复盘。）")
         self.lattice.practice_state(id, "reviewing")
@@ -1044,7 +1048,9 @@ class Bridge(QObject):
 
     # ---- settings ---------------------------------------------------------------------------------------------
     def rpc_settings(self):
-        return self.config.public()
+        from .runner import RUNNERS
+        return {**self.config.public(), "vault_path": str(self.root), "env_vault": bool(os.environ.get("LATTICE_VAULT")),
+                "default_runners": RUNNERS, "agent_names": AGENT_NAMES}
 
     def rpc_settings_save(self, config):
         return self.config.save(config)
@@ -1056,6 +1062,61 @@ class Bridge(QObject):
         worker.event.connect(self.api_event)
         worker.start()
         return {"state": "testing"}
+
+    def rpc_ui_save(self, ui):
+        return self.config.save_ui(ui)
+
+    def ui_request(self, agent, ops, done):
+        """Ask the interface to carry out an agent's UI operations; done() gets what actually happened."""
+        ident = uid()
+        self.ui_waiters[ident] = done
+        self.announce({"type": "ui", "request": ident, "ops": ops, "agent": agent})
+        QTimer.singleShot(20000, lambda: self.ui_waiters.pop(ident, None) and done({"error": "界面没有响应"}))
+
+    def rpc_ui_done(self, request, result):
+        waiter = self.ui_waiters.pop(request, None)
+        if waiter:
+            waiter(result)
+        return bool(waiter)
+
+    def rpc_agent_definition(self, name):
+        shipped = agents.load(Path("/nonexistent"), name)
+        return {"definition": agents.load(self.root, name), "shipped": shipped, "overridden": agents.overridden(self.root, name),
+                "tools": [{"name": n, "description": t["description"]} for n, t in tools.TOOLS.items()]}
+
+    def rpc_agent_save(self, name, history, tools, policy, blocks=True):
+        self.commit_mine()
+        rel = agents.save(self.lattice.vault, name, history, tools, policy, blocks)
+        self.lattice.index.reindex(rel)
+        self.lattice.vault.commit(f"改写了{AGENT_NAMES[name]}的规则", "me")
+        return self.rpc_agent_definition(name)
+
+    def rpc_agent_reset(self, name):
+        self.commit_mine()
+        rel = agents.reset(self.lattice.vault, name)
+        self.lattice.index.unindex(rel)
+        self.lattice.vault.commit(f"{AGENT_NAMES[name]}的规则恢复默认", "me")
+        return self.rpc_agent_definition(name)
+
+    def rpc_rules(self):
+        from .model import RULES
+        return {"text": self.lattice.vault.read_text("AGENTS.md") if self.lattice.vault.path("AGENTS.md").exists() else "",
+                "shipped": RULES.read_text(encoding="utf-8")}
+
+    def rpc_rules_save(self, text):
+        self.commit_mine()
+        self.lattice.vault.write_text("AGENTS.md", text)
+        self.lattice.vault.commit("改写了学习库的规矩", "me")
+        return True
+
+    def rpc_env_save(self, name, text):
+        """The learner edits an environment's definition; the environment follows it on its next use."""
+        rel = self.envs.definition_rel(name)
+        self.commit_mine()
+        self.lattice.vault.write_text(rel, text if text.endswith("\n") else text + "\n")
+        self.lattice.index.reindex(rel)
+        self.lattice.vault.commit(f"改了环境「{name}」的定义", "me")
+        return self.rpc_env_info(name)
 
     def rpc_export(self, path=None):
         """The vault is the archive: every file as it is, without the index, git or machine-local state."""
