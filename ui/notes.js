@@ -39,6 +39,44 @@ function pathMoved(old,now){
  saveLayout();
 }
 
+/* ---- ![[note]] and ![[note#section]]: another note's text shown in this one ------------------------------------ */
+const Embeds={cache:new Map(),version:0};
+function noteContent(path){
+ if(!Embeds.cache.has(path))Embeds.cache.set(path,rpc("file_read",{path}).then(d=>({title:d.doc?.title||d.card?.title||d.topic?.title||baseName(path),
+  body:d.doc?.body??d.card?.body??d.topic?.notes??d.content??""})).catch(()=>null));
+ return Embeds.cache.get(path);
+}
+// One section: from its heading down to the next heading of the same or a higher level.
+function sectionOf(body,heading){
+ const lines=String(body||"").split("\n"),want=heading.trim().toLowerCase();let start=-1,level=0;
+ for(let i=0;i<lines.length;i++){
+  const m=/^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(lines[i]);if(!m)continue;
+  if(start<0){if(m[2].trim().toLowerCase()===want){start=i;level=m[1].length;}}
+  else if(m[1].length<=level)return lines.slice(start,i).join("\n");
+ }
+ return start<0?null:lines.slice(start).join("\n");
+}
+async function fillEmbed(box,base,depth=0){
+ const raw=box.dataset.embed,hash=raw.indexOf("#"),name=(hash<0?raw:raw.slice(0,hash)).trim(),section=hash<0?"":raw.slice(hash+1).trim();
+ const path=resolveWiki(name),label=esc(name)+(section?" › "+esc(section):"");
+ if(!path){box.innerHTML='<div class="embed-head">'+svg("document",12)+' <a data-wiki="'+esc(name)+'">'+label+'</a><small>还没有这篇，点一下新建</small></div>';return;}
+ if(path===base||depth>=3){box.innerHTML='<div class="embed-head">'+svg(fileIcon(path),12)+' <a data-action="open-file" data-path="'+esc(path)+'">'+label+'</a><small>'+(path===base?"不能嵌入它自己":"嵌得太深了，点开看")+'</small></div>';return;}
+ const note=await noteContent(path);
+ if(!note){box.innerHTML='<div class="embed-head">'+label+'<small>读不到</small></div>';return;}
+ const text=section?sectionOf(note.body,section):note.body;
+ box.innerHTML='<div class="embed-head">'+svg(fileIcon(path),12)+' <a data-action="open-file" data-path="'+esc(path)+'">'+esc(note.title)+(section?" › "+esc(section):"")+'</a></div>'+
+  '<div class="embed-body markdown">'+(text==null?'<p class="muted">这篇里没有「'+esc(section)+'」这一节。</p>':text.trim()?markdown(text):'<p class="muted">（还是空的）</p>')+'</div>';
+ hydrateVault(box.querySelector(".embed-body"),path,depth+1);
+}
+// A note that changed is shown anew wherever it is embedded.
+function embedsChanged(paths){
+ let hit=false;for(const p of paths||[])if(Embeds.cache.delete(p))hit=true;
+ if(!hit)return;
+ Embeds.version++;
+ all(".embed[data-embed][data-filled]").forEach(box=>{const base=box.closest(".panel")&&Dock.panels[box.closest(".panel").dataset.pid]?.path;fillEmbed(box,base,box.parentElement?.closest(".embed")?1:0);});
+ refreshEditors();
+}
+
 /* ---- which note the side panels follow --------------------------------------------------------------------------- */
 function isNotePanel(pid){const st=Files[pid];return !!(st?.data&&(st.data.doc||st.data.card||st.data.topic||(st.data.ext||"").toLowerCase()===".md"));}
 function noteFollow(){

@@ -120,22 +120,26 @@ function markdown(text){
  const src=String(text||""),codes=[],maths=[];
  const masked=src.replace(/(`+)([\s\S]*?)\1/g,m=>{codes.push(m);return "\u0000"+(codes.length-1)+"\u0000";})
   .replace(MATH_RE,(m,a,b,c,d)=>{maths.push({tex:a??b??c??d,display:a!=null||b!=null});return "\uE000"+(maths.length-1)+"\uE001";});
- // [[target|shown]] links, ![[image]] embeds and #tags; images from the vault are filled in afterwards (hydrateImages).
+ // [[target|shown]] links, ![[image]] and ![[note]] embeds, #tags; what comes from the vault is filled in afterwards (hydrateVault).
  const linked=masked.replace(/(!?)\[\[([^\]\n]+)\]\]/g,(_,bang,inner)=>{
    const bar=inner.indexOf("|"),target=(bar<0?inner:inner.slice(0,bar)).split("#")[0].trim(),shown=bar<0?inner:inner.slice(bar+1);
    if(bang&&/\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(target))return '<img data-vault-src="'+esc(target)+'" alt="'+esc(bar<0?"":shown)+'"/>';
+   if(bang)return '<span class="embed" data-embed="'+esc(bar<0?inner:inner.slice(0,bar))+'"></span>';
    return '<a class="wikilink" data-wiki="'+esc(target)+'">'+esc(shown)+'</a>';})
   .replace(/(^|[\s(（])#([^\s#.,;:!?，。；：！？、()（）\[\]{}<>"'`*]+)/gm,(m,pre,tag)=>/^\d+$/.test(tag)?m:pre+'<a class="tag" data-tag="'+esc(tag)+'">#'+esc(tag)+'</a>')
   .replace(/\u0000(\d+)\u0000/g,(_,i)=>codes[+i]);
  try{
   // A table scrolls inside its own frame when it is wider than the text.
-  const out=DOMPurify.sanitize(marked.parse(linked,{breaks:true,gfm:true}),{ADD_ATTR:["data-wiki","data-tag","data-vault-src"]}).replace(/<table>/g,'<div class="table-wrap"><table>').replace(/<\/table>/g,"</table></div>")
+  const out=DOMPurify.sanitize(marked.parse(linked,{breaks:true,gfm:true}),{ADD_ATTR:["data-wiki","data-tag","data-vault-src","data-embed"]}).replace(/<table>/g,'<div class="table-wrap"><table>').replace(/<\/table>/g,"</table></div>")
    .replace(/\uE000(\d+)\uE001/g,(_,i)=>maths[+i]?texHtml(maths[+i].tex.trim(),maths[+i].display):"");if(out.includes('class="mermaid"'))scheduleMermaid();return out;}
  catch(_){return '<pre>'+esc(text)+'</pre>';}
 }
-/* Images in rendered Markdown that name a vault file: load them through the backend (the page cannot read the vault). */
-function hydrateImages(root,base){
- if(typeof vaultImage!=="function"||!root)return;
+/* What rendered Markdown names in the vault: images, loaded through the backend (the page cannot read the vault),
+   and embedded notes (notes.js). depth counts embeds inside embeds. */
+function hydrateVault(root,base,depth=0){
+ if(!root)return;
+ if(typeof fillEmbed==="function")for(const e of all(".embed[data-embed]:not([data-filled])",root)){e.dataset.filled="1";fillEmbed(e,base,depth);}
+ if(typeof vaultImage!=="function")return;
  for(const img of all("img",root)){
   const src=img.dataset.vaultSrc||(img.getAttribute("src")&&!/^(https?:|data:|qrc:|blob:)/.test(img.getAttribute("src"))?img.getAttribute("src"):null);
   if(!src||img.dataset.hydrated)continue;img.dataset.hydrated="1";img.removeAttribute("src");

@@ -324,8 +324,11 @@ class Bridge(QObject):
         self.edits[new] = time.monotonic()
         title = l.doc(ident)["title"] if l.index.locate(ident) else current["title"]
         # Renaming keeps every [[link]] to it working.
-        relinked = l.relink(current["title"], title) if renamed else 0
-        return {"path": new, "mtime": l.vault.mtime(new), "title": title, "relinked": relinked}
+        relinked = l.relink(current["title"], title) if renamed else []
+        if relinked:
+            # Other notes were rewritten: open windows showing them reload.
+            self.changed(relinked)
+        return {"path": new, "mtime": l.vault.mtime(new), "title": title, "relinked": len(relinked)}
 
     def rpc_file_create(self, folder="code", name="未命名.py", content=""):
         rel = self.lattice.create_file(folder, name, content)
@@ -386,7 +389,7 @@ class Bridge(QObject):
                 return part
             done.append(True)
             return pattern.sub(swap, part, count=1)
-        l._edit_doc(row["id"], lambda a, b: (a, outside_code(b, once)))
+        self.changed([l._edit_doc(row["id"], lambda a, b: (a, outside_code(b, once)))])
         self.last_write = time.monotonic()
         return True
 

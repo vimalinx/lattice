@@ -161,7 +161,7 @@ async function onEvent(evt){
  if(evt.type==="run")return runEvent(evt);
  if(evt.type==="kernel"){kernelEvent(evt);if(["run_finished","batch_finished"].includes(evt.kind))journalsChanged();return;}
  if(evt.type==="ui"){const result=await runUiOps(evt.ops);return rpc("ui_done",{request:evt.request,result});}
- if(evt.type==="changed"){fileChanged(evt);sideChanged(evt.paths);mapsChanged();journalsChanged();homesChanged();if(evt.external||evt.paths.some(p=>/^(topics|cards|lessons|notes|insights|notebooks)\//.test(p)))refreshState();return;}
+ if(evt.type==="changed"){fileChanged(evt);embedsChanged(evt.paths);sideChanged(evt.paths);mapsChanged();journalsChanged();homesChanged();if(evt.external||evt.paths.some(p=>/^(topics|cards|lessons|notes|insights|notebooks)\//.test(p)))refreshState();return;}
  if(evt.type==="open"){openFile(evt.path,{line:evt.line,highlight:evt.highlight,cell:evt.cell});return;}
  if(evt.type==="env"){
   toast(evt.message,evt.ok?"info":"error");

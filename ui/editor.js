@@ -100,6 +100,18 @@ class Check extends CV.WidgetType{
  ignoreEvent(){return true;}
 }
 const imageCache=new Map();
+class Embed extends CV.WidgetType{
+ constructor(target,base,at,version){super();this.target=target;this.base=base;this.at=at;this.version=version;}
+ eq(o){return o.target===this.target&&o.at===this.at&&o.version===this.version;}
+ toDOM(view){
+  const box=document.createElement("span");box.className="embed cm-embed";box.dataset.embed=this.target;box.dataset.filled="1";
+  fillEmbed(box,this.base,0);
+  // Links inside follow on click; anywhere else puts the cursor in the ![[…]] to change it.
+  box.addEventListener("mousedown",e=>{if(e.button!==0||e.target.closest("a"))return;e.preventDefault();view.focus();view.dispatch({selection:{anchor:this.at}});});
+  return box;
+ }
+ ignoreEvent(){return true;}
+}
 class Picture extends CV.WidgetType{
  constructor(src,alt,base){super();this.src=src;this.alt=alt;this.base=base;}
  eq(o){return o.src===this.src&&o.alt===this.alt;}
@@ -166,6 +178,10 @@ function livePreview(opts){
     case "WikiLink":case "WikiEmbed":{
      const skip=name==="WikiEmbed"?3:2,{target,shown,bar}=wikiParts(doc.sliceString(n.from+skip,n.to-2));
      if(name==="WikiEmbed"&&IMAGE_RE.test(target)&&!near(n.from,n.to)){out.push(CV.Decoration.replace({widget:new Picture(target,shown,opts.path)}).range(n.from,n.to));return false;}
+     if(name==="WikiEmbed"&&!near(n.from,n.to)){
+      const inner=doc.sliceString(n.from+3,n.to-2),bar2=inner.indexOf("|");
+      out.push(CV.Decoration.replace({widget:new Embed((bar2<0?inner:inner.slice(0,bar2)).trim(),opts.path,n.from+3,typeof Embeds==="undefined"?0:Embeds.version)}).range(n.from,n.to));return false;
+     }
      const cls="cm-wikilink"+(opts.resolve(target)?"":" cm-unresolved");
      if(near(n.from,n.to)){out.push(CV.Decoration.mark({class:cls+" cm-src",attributes:{"data-wiki":target}}).range(n.from,n.to));return false;}
      const start=n.from+skip+(bar<0?0:bar+1);hide(n.from,start);hide(n.to-2,n.to);
@@ -260,7 +276,7 @@ class Grid extends CV.WidgetType{
  constructor(src,from,base){super();this.src=src;this.from=from;this.base=base;}
  eq(o){return o.src===this.src&&o.from===this.from;}
  toDOM(view){
-  const box=document.createElement("div");box.className="cm-grid markdown";box.innerHTML=markdown(this.src);hydrateImages(box,this.base);
+  const box=document.createElement("div");box.className="cm-grid markdown";box.innerHTML=markdown(this.src);hydrateVault(box,this.base);
   box.addEventListener("mousedown",e=>{
    if(e.button!==0||e.target.closest("a"))return;
    e.preventDefault();

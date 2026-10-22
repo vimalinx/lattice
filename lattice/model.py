@@ -622,13 +622,12 @@ class Lattice:
     def relink(self, old, new):
         """A renamed document keeps its links: [[old]] (with a heading or shown text) becomes [[new]] everywhere."""
         if not old or not new or old == new:
-            return 0
+            return []
         pattern = re.compile(r"(!?\[\[)" + re.escape(old) + r"(?=\s*[\]|#])", re.I)
-        changed = 0
+        changed = []
         for d in self.index.rows("SELECT id, body FROM docs WHERE body LIKE ?", ("%[[%",)):
             if pattern.search(d["body"] or ""):
-                self._edit_doc(d["id"], lambda a, b: (a, outside_code(b, lambda part: pattern.sub(lambda m: m.group(1) + new, part))))
-                changed += 1
+                changed.append(self._edit_doc(d["id"], lambda a, b: (a, outside_code(b, lambda part: pattern.sub(lambda m: m.group(1) + new, part)))))
         return changed
 
     def note_links(self, ident):

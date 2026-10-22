@@ -80,7 +80,7 @@ function renderFile(pid){
  else body=textView(pid);
  destroyEditors(node);
  node.innerHTML='<div class="file">'+fileBar(pid)+(st.conflict?conflictBar(pid):"")+body+'</div>';
- mountEditors(node);fitAreas(node);hydrateImages(node,d.path);
+ mountEditors(node);fitAreas(node);hydrateVault(node,d.path);
 }
 function fileBar(pid){
  const st=Files[pid],d=st.data,p=Dock.panels[pid];
@@ -329,6 +329,8 @@ async function saveFile(pid){
   st.dirty=true;throw e;
  }
  refreshTab(pid);
+ // Wherever this note is embedded, show what was just saved.
+ embedsChanged([p.path,d.path]);
  const s=Dock.els[pid]?.querySelector(".save-state");if(s){s.textContent="已保存";s.className="save-state";}
 }
 async function flushFile(pid){
@@ -424,7 +426,7 @@ function fileInput(t){
 }
 function previewSoon(pid,text){
  const st=Files[pid];clearTimeout(st.timers.preview);
- st.timers.preview=setTimeout(()=>{const pv=Dock.els[pid]?.querySelector(".md-preview");if(pv&&pv.offsetParent){pv.innerHTML=markdown(text);hydrateImages(pv,Dock.panels[pid]?.path);}},250);
+ st.timers.preview=setTimeout(()=>{const pv=Dock.els[pid]?.querySelector(".md-preview");if(pv&&pv.offsetParent){pv.innerHTML=markdown(text);hydrateVault(pv,Dock.panels[pid]?.path);}},250);
 }
 // Ctrl + E: between editing (live preview, or whichever editing view was last used) and reading.
 async function toggleReading(pid){
