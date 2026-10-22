@@ -9,7 +9,7 @@ function clearSelection(){
 }
 async function refreshState(){
  const st=await safe(()=>rpc("state"));if(!st)return;
- Object.assign(S.data,st);renderTop();sideChanged([]);homesChanged();
+ Object.assign(S.data,st);renderTop();sideChanged([]);homesChanged();cardViewsChanged();
  const titles=el("#doc-titles");if(titles)titles.innerHTML=(S.data.docs||[]).slice(0,800).map(d=>'<option value="'+esc(d.title)+'">').join("");
  Object.keys(Dock.panels).forEach(refreshTab);
 }
@@ -45,12 +45,13 @@ function saveUi(now=false){
 }
 const NEW_ITEMS=[
  ["写记录","new-note","edit","随手写，关掉后 AI 帮你整理"],["写代码","new-code","code","任何语言，写完就能运行"],["新实验笔记","new-notebook","flask","Jupyter 格式，在沙箱内核里运行"],
- ["新知识卡","new-card","card","自己记下一个知识点"],["主会话","open-agent","bot","",'data-agent="tutor"'],["快答","open-agent","spark","",'data-agent="flash"']];
+ ["新知识卡","new-card","card","自己记下一个知识点"],["主会话","open-agent","bot","",'data-agent="tutor"'],["快答","open-agent","spark","",'data-agent="flash"'],
+ ["新工作区…","space-new","layout","自己搭一套窗口组合"]];
 // Panels that already have a button of their own; the palette still lists them as commands.
-const PANEL_ITEMS=[["开始","open-home","home",""],["知识图","open-map","network",""],["学习轨迹","open-journal","history",""],["回顾","open-review","refresh",""],["设置","open-settings","sliders",""]];
+const PANEL_ITEMS=[["开始","open-home","home",""],["知识图","open-map","network",""],["学习轨迹","open-journal","history",""],["回顾","open-review","refresh",""],["卡片库","open-library","card",""],["记忆","open-memory","calendar",""],["设置","open-settings","sliders",""]];
 function newMenu(anchor){
  const r=anchor.getBoundingClientRect();
- const menu=h('<div class="menu" style="left:'+(r.right+6)+'px;top:'+r.top+'px">'+NEW_ITEMS.map(([t,a,i,d,x],k)=>(k===4?'<hr/>':'')+'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+(d?'<small>'+esc(d)+'</small>':"")+'</span></button>').join("")+'</div>');
+ const menu=h('<div class="menu" style="left:'+(r.right+6)+'px;top:'+r.top+'px">'+NEW_ITEMS.map(([t,a,i,d,x],k)=>(k===4||k===6?'<hr/>':'')+'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+(d?'<small>'+esc(d)+'</small>':"")+'</span></button>').join("")+'</div>');
  closeMenus();document.body.appendChild(menu);
 }
 function closeMenus(){all(".menu").forEach(m=>m.remove());}
@@ -120,8 +121,8 @@ function sendScreen(){
  const shown=[];eachStack(s=>{if(s.active)shown.push(s.active);});
  const mine=shown.filter(pid=>sideOf(pid)==="mine").map(screenOf),ai=shown.filter(pid=>sideOf(pid)==="ai").map(screenOf);
  const state={layout:{stacks,focused:Dock.focus||null,nesting:layoutShape(Dock.layout.root)},ai:{panels:ai},mine:{files:mine.filter(x=>x.type==="file"),other:mine.filter(x=>x.type!=="file")},
-  sidebar:{open:S.ui.side.open,section:S.ui.side.section,sections:sideOrder()},layouts:Object.keys(S.ui.presets||{}),theme:S.ui.theme,
-  open_but_hidden:Object.keys(Dock.panels).filter(pid=>!shown.includes(pid)).map(panelTitle),recent_files:Dwell.recent.slice(0,20),selection:Sel.text?shorten(Sel.text,600):undefined};
+  workspace:{now:currentSpace().name,sidebar:sideOpen()?(currentSpace().side||[]):"收起",all:visibleSpaces().map(x=>x.name)},theme:S.ui.theme,
+  open_but_hidden:stacks.flatMap(s=>s.tabs).filter(t=>!shown.includes(t.id)).map(t=>t.title),recent_files:Dwell.recent.slice(0,20),selection:Sel.text?shorten(Sel.text,600):undefined};
  return rpc("screen",{state});
 }
 /* The split tree in brief, so an agent can see how the panels sit before it rearranges them. */
@@ -179,9 +180,9 @@ async function onAction(a){
  case "new-menu":return newMenu(a);
  case "palette":return palette();
  case "theme":S.ui.theme=S.ui.theme==="dark"?"light":"dark";applyUi();return saveUi();
- case "side-collapse":return showSection(null,false);
- case "side-section":{const k=a.dataset.section;if(S.ui.side.open&&S.ui.side.section===k)return showSection(k,false);return showSection(k,true);}
+ case "side-collapse":return setSideOpen(false);
  case "side-stage":Side.stage=a.dataset.stage;return renderSide();
+ case "lib-stage":if(Dock.panels[pid]){Dock.panels[pid].stage=a.dataset.stage;saveLayout();renderLibrary(pid);}return;
  case "open-home":return openPanel({type:"home"});
  case "ui-restore":return restoreUi(a.dataset.snapshot);
  case "new-note":return newScratch("note");
@@ -191,11 +192,14 @@ async function onAction(a){
  case "open-agent":return openPanel({type:"chat",agent:a.dataset.agent});
  case "open-map":return openPanel({type:"map",topic:S.data.active_topic||null});
  case "open-journal":return openPanel({type:"journal"});
- case "open-review":return openPanel({type:"review"},{reuse:false});
+ case "open-review":{const had=findPanel({type:"review"}),id=openPanel({type:"review"});if(had)loadReview(Dock.els[id]);return;}
+ case "open-library":return openPanel({type:"library"});
+ case "open-memory":return openPanel({type:"memory"});
  case "open-settings":{const page=a.dataset.page,had=findPanel({type:"settings"}),id=openPanel({type:"settings",...(page?{page}:{})});if(had&&page)renderSettings(Dock.els[id],page);return;}
  case "open-file":return openFile(a.dataset.path||a.dataset.id,{line:a.dataset.line?Number(a.dataset.line):null,highlight:a.dataset.highlight||null});
  case "open-doc":{const d=(S.data.docs||[]).find(x=>x.id===a.dataset.id);if(d)return openFile(d.path);return toast("找不到这个文档，它可能已经被删除","error");}
- case "open-dir":Side.open.add(a.dataset.path);return showSection("files");
+ case "open-dir":{Side.open.add(a.dataset.path);if((currentSpace().side||[]).includes("files"))return setSideOpen(true);
+  const sp=visibleSpaces().find(x=>(x.side||[]).includes("files"));if(sp){switchSpace(sp.id);return setSideOpen(true);}return toast("没有哪个工作区的左栏放着「全部文件」");}
  case "open-thread":return openPanel({type:"chat",agent:a.dataset.agent||"tutor",thread:a.dataset.thread});
  case "open-practice":return openPractice(a.dataset.id);
  case "open-ref":return openRef(a.dataset.ref);
@@ -284,6 +288,7 @@ async function onAction(a){
  case "version-view":case "version-restore":return versionAction(kind,a);
  case "file-history":return showHistory(pid);
  }
+ if(kind.startsWith("space")||kind==="stack-unkeep"){const r=await spaceAction(kind,a);if(r!==null)return r;}
  if(a.closest(".panel-settings")){const r=await settingsAction(kind,a);if(r!==null)return r;}
  return fileAction(kind,a);
 }
@@ -330,12 +335,14 @@ function initInteractions(){
   if(t.dataset.uiRange){S.ui[t.dataset.uiRange]=Number(t.value);const out=t.parentElement.querySelector("[data-range-out]");if(out)out.textContent=t.value+" 字";applyUi();return saveUi();}
   if(t.closest?.(".panel-settings")&&settingsAutosave(t,false))return;
   if(t.dataset.sideInput&&sideInput(t))return;
+  if(t.dataset.libQuery&&libraryInput(t))return;
   if(fileInput(t))reportScreen();
  });
  document.addEventListener("change",e=>{
   const t=e.target;
   if(t.dataset.mapTopic!==undefined){Dock.panels[t.dataset.mapTopic].topic=t.value||null;saveLayout();refreshTab(t.dataset.mapTopic);return loadMap(t.dataset.mapTopic);}
   if(t.dataset.journalType!==undefined){Dock.panels[t.dataset.journalType].group=t.value;saveLayout();return loadJournal(t.dataset.journalType);}
+  if((t.dataset.libTopic||t.dataset.libSort||t.dataset.libDue)&&libraryInput(t))return;
   if(t.dataset.journalDays!==undefined){Dock.panels[t.dataset.journalDays].days=Number(t.value);saveLayout();return loadJournal(t.dataset.journalDays);}
   if(t.closest(".panel-settings")&&settingsChange(t))return;
   safe(()=>fileChange(t));
@@ -360,7 +367,8 @@ function initInteractions(){
   if(mod&&e.key.toLowerCase()==="s"){e.preventDefault();safe(async()=>{await flushAll();toast("已保存");});return;}
   if(mod&&e.key.toLowerCase()==="n"){e.preventDefault();safe(()=>newScratch("note"));return;}
   if(mod&&e.key.toLowerCase()==="j"){e.preventDefault();const f=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="flash")||openPanel({type:"chat",agent:"flash"});activate(f);setTimeout(()=>Dock.els[f]?.querySelector(".composer textarea")?.focus(),50);return;}
-  if(mod&&e.key.toLowerCase()==="b"){e.preventDefault();showSection(null,!S.ui.side.open);return;}
+  if(mod&&e.key.toLowerCase()==="b"){e.preventDefault();setSideOpen(!sideOpen());return;}
+  if(mod&&!e.altKey&&!e.shiftKey&&/^[1-9]$/.test(e.key)){const sp=visibleSpaces()[Number(e.key)-1];if(sp){e.preventDefault();switchSpace(sp.id);}return;}
   if(mod&&e.key.toLowerCase()==="w"&&Dock.focus){e.preventDefault();safe(()=>closePanel(Dock.focus));return;}
  });
  // Ctrl + wheel sizes the window under the mouse, not the whole program.
@@ -370,7 +378,11 @@ function initInteractions(){
   const pid=e.target.closest?.(".panel")?.dataset.pid;if(!pid)return;
   wheel+=e.deltaY;if(Math.abs(wheel)<60)return;stepZoom(pid,wheel<0?1:-1);wheel=0;
  },{passive:false,capture:true});
- document.addEventListener("contextmenu",e=>{const tab=e.target.closest?.(".tab");if(!tab)return;e.preventDefault();tabMenu(tab.dataset.pid,{x:e.clientX,y:e.clientY});});
+ document.addEventListener("contextmenu",e=>{
+  const tab=e.target.closest?.(".tab"),space=e.target.closest?.(".act.space");
+  if(tab){e.preventDefault();tabMenu(tab.dataset.pid,{x:e.clientX,y:e.clientY});}
+  else if(space){e.preventDefault();const r=space.getBoundingClientRect();spaceMenu(space.dataset.space,{x:r.right+8,y:r.top});}
+ });
  document.addEventListener("mouseup",e=>setTimeout(()=>onSelect(e),0));
  document.addEventListener("scroll",()=>{hidePop();reportScreen();},true);
  document.addEventListener("focusin",()=>reportScreen());

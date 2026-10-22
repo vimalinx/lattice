@@ -1,41 +1,41 @@
 "use strict";
-/* The panel layout: splits, tab stacks and floating windows. The layout belongs to the learner:
-   agents never move or close a panel; what they open lands in an existing stack of the same side. */
-const Dock={layout:null,panels:{},els:{},types:{},focus:null,lastStack:{ai:null,mine:null},saveTimer:null,drag:null};
+/* The panel layout: splits, tab stacks and floating windows, one arrangement per workspace (spaces.js).
+   Panels are shared: the same panel can sit in several workspaces, so the main conversation is one conversation everywhere.
+   What opens lands in an existing stack of the same side in the workspace on screen. */
+const Dock={layout:null,spaces:{},space:"chat",panels:{},els:{},types:{},focus:null,lastStack:{ai:null,mine:null},saveTimer:null,drag:null};
 function panelType(name,def){Dock.types[name]=def;}
 function newId(prefix){return prefix+Math.random().toString(36).slice(2,10);}
 function stackNode(tabs){return {t:"stack",id:newId("s"),tabs,active:tabs[0]||null};}
-/* Out of the box: the main conversation and quick answers apart on the left, the learner's side on the right. */
-function factoryLayout(){
- const main=newId("p"),flash=newId("p"),home=newId("p");
- return {panels:{[main]:{type:"chat",agent:"tutor"},[flash]:{type:"chat",agent:"flash"},[home]:{type:"home"}},
-  layout:{root:{t:"split",id:newId("n"),dir:"h",sizes:[.46,.54],kids:[{t:"split",id:newId("n"),dir:"v",sizes:[.7,.3],kids:[stackNode([main]),stackNode([flash])]},stackNode([home])]},floats:[]}};
-}
-function defaultChoice(){
- const preset=S.ui?.default_preset&&S.ui.presets?.[S.ui.default_preset];
- return preset?JSON.parse(JSON.stringify(preset)):factoryLayout();
-}
-function defaultLayout(){const chosen=defaultChoice();Dock.panels=chosen.panels;return chosen.layout;}
-/* Replace the whole layout; panels that stay keep their state, the rest are closed. */
-async function applyLayout(saved){
+function setLayout(layout){layout.floats=layout.floats||[];Dock.layout=layout;Dock.spaces[Dock.space]=layout;}
+function dockSnapshot(){return JSON.parse(JSON.stringify({spaces:Dock.spaces,space:Dock.space,panels:Dock.panels}));}
+/* Go back to a snapshot of every workspace; panels that stay keep their state, the rest are closed. */
+async function restoreDock(saved){
  if(typeof flushAll==="function")await flushAll();
  const next=JSON.parse(JSON.stringify(saved));
  for(const pid of Object.keys(Dock.panels)){
-  const keep=next.panels[pid]&&panelKey(next.panels[pid])===panelKey(Dock.panels[pid]);
-  if(keep){Dock.panels[pid]=next.panels[pid];applyView(pid);}
-  else{const t=Dock.types[Dock.panels[pid].type];const node=Dock.els[pid];delete Dock.panels[pid];delete Dock.els[pid];if(t?.unmount)safe(()=>t.unmount({},node));node?.remove();}
+  if(next.panels[pid]&&panelKey(next.panels[pid])===panelKey(Dock.panels[pid])){Dock.panels[pid]=next.panels[pid];applyView(pid);}
+  else unmountPanel(pid);
  }
- Dock.layout=next.layout;Dock.layout.floats=Dock.layout.floats||[];
+ Dock.spaces=next.spaces;Dock.space=next.space;setLayout(Dock.spaces[Dock.space]);
  for(const [pid,params] of Object.entries(next.panels))if(!Dock.panels[pid]){Dock.panels[pid]=params;mountPanel(pid);}
  tidy();renderDock();saveLayout();
 }
-function currentLayout(){return JSON.parse(JSON.stringify({layout:Dock.layout,panels:Dock.panels}));}
 function sideOf(pid){const p=Dock.panels[pid];return p?(Dock.types[p.type]?.side||"mine"):"mine";}
+// A panel that lists things to open (the card library, the map) opens them beside itself, not on top of itself.
+function hosts(pid){const p=Dock.panels[pid];return !!p&&Dock.types[p.type]?.host!==false;}
+function remember(pid){const s=stackOf(pid);if(s&&hosts(pid))Dock.lastStack[sideOf(pid)]=s.id;}
 
 /* ---- tree helpers ---------------------------------------------------------------------------- */
-function eachStack(fn){
+function eachStack(fn,layout=Dock.layout){
  const walk=n=>{if(!n)return;if(n.t==="stack")fn(n);else n.kids.forEach(walk);};
- walk(Dock.layout.root);Dock.layout.floats.forEach(f=>fn(f.stack,f));
+ walk(layout.root);(layout.floats||[]).forEach(f=>fn(f.stack,f));
+}
+function usedPanels(){const used=new Set();Object.values(Dock.spaces).forEach(l=>eachStack(s=>s.tabs.forEach(pid=>used.add(pid)),l));return used;}
+// Panels no workspace shows any more are closed for good.
+async function dropUnused(){
+ const used=usedPanels(),gone=Object.keys(Dock.panels).filter(pid=>!used.has(pid));
+ if(gone.length&&typeof flushAll==="function")await flushAll();
+ gone.forEach(unmountPanel);
 }
 function findStack(id){let found=null;eachStack(s=>{if(s.id===id)found=s;});return found;}
 function stackOf(pid){let found=null;eachStack(s=>{if(s.tabs.includes(pid))found=s;});return found;}
@@ -45,7 +45,8 @@ function parentOf(target,n=Dock.layout.root,parent=null){
  return undefined;
 }
 function normalize(n){
- if(n.t==="stack")return n.tabs.length?n:null;
+ // A stack marked keep is a workspace's place for things to open: it stays even when empty.
+ if(n.t==="stack")return n.tabs.length||n.keep?n:null;
  const kids=[],sizes=[];
  n.kids.forEach((k,i)=>{const kept=normalize(k);if(!kept)return;
   if(kept.t==="split"&&kept.dir===n.dir){kept.kids.forEach((kk,j)=>{kids.push(kk);sizes.push(n.sizes[i]*kept.sizes[j]);});}
@@ -81,8 +82,11 @@ function panelKey(p){return p.type+":"+(p.path||p.thread||p.agent||"")+(p.type==
 function findPanel(params){const key=panelKey(params);return Object.keys(Dock.panels).find(pid=>panelKey(Dock.panels[pid])===key)||null;}
 function targetStack(side){
  const remembered=findStack(Dock.lastStack[side]);
- if(remembered)return remembered;
- let found=null;eachStack(s=>{if(!found&&s.tabs.some(pid=>sideOf(pid)===side))found=s;});
+ if(remembered&&(remembered.tabs.length?remembered.tabs.some(pid=>sideOf(pid)===side&&hosts(pid)):remembered.keep))return remembered;
+ let found=null;
+ if(side==="mine")eachStack(s=>{if(!found&&s.keep&&!s.tabs.length)found=s;});
+ eachStack(s=>{if(!found&&s.tabs.some(pid=>sideOf(pid)===side&&hosts(pid)))found=s;});
+ if(side==="mine")eachStack(s=>{if(!found&&s.keep)found=s;});
  if(found)return found;
  // No stack of this side yet: open one beside everything, AI on the left, mine on the right.
  const s=stackNode([]),root=Dock.layout.root;
@@ -92,6 +96,7 @@ function targetStack(side){
 }
 function openPanel(params,opts={}){
  let pid=opts.reuse===false?null:findPanel(params);
+ // Already open, maybe in another workspace: show the same panel here too.
  if(pid){activate(pid);if(opts.then)opts.then(pid);return pid;}
  pid=newId("p");Dock.panels[pid]=params;
  const side=Dock.types[params.type]?.side||"mine";
@@ -102,15 +107,24 @@ function openPanel(params,opts={}){
  if(opts.then)opts.then(pid);
  return pid;
 }
-function activate(pid){const s=stackOf(pid);if(!s)return;s.active=pid;Dock.focus=pid;Dock.lastStack[sideOf(pid)]=s.id;renderDock();saveLayout();}
+function activate(pid){
+ if(!Dock.panels[pid])return;
+ let s=stackOf(pid);if(!s){s=targetStack(sideOf(pid));s.tabs.push(pid);}
+ s.active=pid;Dock.focus=pid;remember(pid);renderDock();saveLayout();
+}
+/* Closing a tab takes the panel out of this workspace; it is closed for good once no workspace shows it. */
 async function closePanel(pid){
  const p=Dock.panels[pid],type=Dock.types[p?.type];
- if(type?.beforeClose&&await type.beforeClose(p,Dock.els[pid])===false)return;
- detach(pid);delete Dock.panels[pid];
- const node=Dock.els[pid];delete Dock.els[pid];
- if(type?.unmount)safe(()=>type.unmount(p,node));
- node?.remove();
+ const elsewhere=Object.entries(Dock.spaces).some(([id,l])=>{if(id===Dock.space)return false;let hit=false;eachStack(s=>{if(s.tabs.includes(pid))hit=true;},l);return hit;});
+ if(!elsewhere&&type?.beforeClose&&await type.beforeClose(p,Dock.els[pid])===false)return;
+ detach(pid);if(!elsewhere)unmountPanel(pid);
  tidy();renderDock();saveLayout();
+}
+function unmountPanel(pid){
+ const p=Dock.panels[pid],type=Dock.types[p?.type],node=Dock.els[pid];
+ delete Dock.panels[pid];delete Dock.els[pid];
+ if(type?.unmount)safe(()=>type.unmount(p||{},node));
+ node?.remove();
 }
 function mountPanel(pid){
  const p=Dock.panels[pid],type=Dock.types[p.type];
@@ -201,23 +215,30 @@ function stackEl(s,floating=null){
   // Sizes measured while a panel was detached are wrong; let it fit itself once it is visible.
   const p=Dock.panels[s.active],t=Dock.types[p?.type];if(t?.shown)requestAnimationFrame(()=>t.shown(p,Dock.els[s.active]));
  }
- else if(!s.tabs.length)node.lastElementChild.appendChild(h('<div class="stack-empty">'+emptyState("layout","这里是空的","把标签拖到这里，或者从上面的「＋」打开。")+'</div>'));
+ else if(!s.tabs.length)node.lastElementChild.appendChild(h('<div class="stack-empty">'+emptyState("layout","这里是空的",s.keep?"从左栏打开的东西放在这里，也可以把标签拖进来。":"把标签拖到这里，或者从上面的「＋」打开。")+
+  (s.keep?'<button class="ghost xs" data-action="stack-unkeep" data-stack="'+s.id+'">不要这一块</button>':"")+'</div>'));
  return node;
 }
 function saveLayout(){
  clearTimeout(Dock.saveTimer);
- Dock.saveTimer=setTimeout(()=>safe(()=>rpc("layout_save",{layout:{layout:Dock.layout,panels:Dock.panels}})),600);
+ Dock.saveTimer=setTimeout(()=>safe(()=>rpc("layout_save",{layout:{spaces:Dock.spaces,space:Dock.space,panels:Dock.panels}})),600);
  if(typeof reportScreen==="function")reportScreen();
 }
+/* Every workspace's arrangement comes back as it was left; one never opened yet is built from its default when first shown. */
 function loadLayout(saved){
- const ok=saved&&saved.layout&&saved.panels&&saved.layout.root;
- if(ok){Dock.layout=saved.layout;Dock.panels=saved.panels;Dock.layout.floats=Dock.layout.floats||[];
-  const known=new Set();eachStack(s=>{s.tabs=s.tabs.filter(pid=>Dock.panels[pid]&&Dock.types[Dock.panels[pid].type]);s.tabs.forEach(t=>known.add(t));});
-  Object.keys(Dock.panels).forEach(pid=>{if(!known.has(pid))delete Dock.panels[pid];});
-  tidy();
+ Dock.panels=saved?.panels||{};
+ // A layout saved before there were workspaces becomes the conversation workspace.
+ Dock.spaces=saved?.spaces||(saved?.layout?.root?{chat:saved.layout}:{});
+ for(const [id,l] of Object.entries(Dock.spaces)){
+  if(!l?.root||!spaceOf(id)){delete Dock.spaces[id];continue;}
+  eachStack(s=>{s.tabs=s.tabs.filter(pid=>Dock.panels[pid]&&Dock.types[Dock.panels[pid].type]);},l);
  }
- if(!ok||!Object.keys(Dock.panels).length)Dock.layout=defaultLayout();
+ const used=usedPanels();Object.keys(Dock.panels).forEach(pid=>{if(!used.has(pid))delete Dock.panels[pid];});
+ Dock.space=spaceOf(saved?.space)&&!spaceOf(saved.space).hidden?saved.space:visibleSpaces()[0].id;
  Object.keys(Dock.panels).forEach(mountPanel);
+ if(!Dock.spaces[Dock.space])Dock.spaces[Dock.space]=layoutFromSpec(spaceOf(Dock.space).spec);
+ Object.values(Dock.spaces).forEach(l=>{Dock.layout=l;l.floats=l.floats||[];tidy();});
+ setLayout(Dock.spaces[Dock.space]);
  renderDock();
 }
 
@@ -263,7 +284,7 @@ function initDock(){
    if(target.tabs.length===1&&target.tabs[0]===pid)return;
    detach(pid);splitBeside(target,zone,stackNode([pid]));
   }
-  Dock.lastStack[sideOf(pid)]=stackOf(pid)?.id;
+  remember(pid);
   tidy();renderDock();saveLayout();
  });
  document.addEventListener("mousedown",e=>{
@@ -274,7 +295,7 @@ function initDock(){
   const move=e.target.closest?.("[data-float-move]"),size=e.target.closest?.("[data-float-resize]");
   if(move||size){e.preventDefault();startFloatDrag((move||size).dataset.floatMove||size.dataset.floatResize,!!size,e);return;}
   const panel=e.target.closest?.(".panel");
-  if(panel){const pid=panel.dataset.pid,s=stackOf(pid);Dock.focus=pid;if(s)Dock.lastStack[sideOf(pid)]=s.id;}
+  if(panel){Dock.focus=panel.dataset.pid;remember(panel.dataset.pid);}
  },true);
 }
 function findSplit(id,n=Dock.layout.root){
@@ -311,10 +332,14 @@ const UiSnapshots={};
 function resolvePanel(ref){
  if(!ref)return null;
  if(Dock.panels[ref])return ref;
- const ids=Object.keys(Dock.panels),title=String(ref);
+ // By title, those in this workspace first.
+ const here=[];eachStack(s=>here.push(...s.tabs));
+ const ids=[...here,...Object.keys(Dock.panels).filter(pid=>!here.includes(pid))],title=String(ref);
  return ids.find(pid=>panelTitle(pid)===title)||ids.find(pid=>Dock.panels[pid].path===title)||ids.find(pid=>panelTitle(pid).includes(title))||null;
 }
 function paramsOf(op){
+ // A panel as a saved arrangement writes it: its own parameters, type included.
+ if(op.type&&!op.panel){if(!Dock.types[op.type])throw new Error("没有这种面板："+op.type);return {...op};}
  const type=op.panel||"file";
  if(type==="chat")return {type,agent:op.agent||"tutor",...(op.thread?{thread:op.thread}:{})};
  if(type==="file"){if(!op.path)throw new Error("打开文件要给 path");return {type,path:op.path};}
@@ -336,13 +361,15 @@ function placePanel(pid,where,to){
 function buildSpec(spec,used){
  if(Array.isArray(spec))spec={tabs:spec};
  if(spec.tabs){
-  const tabs=spec.tabs.map(ref=>{
+  const tabs=[];
+  for(const ref of spec.tabs){
    let pid=typeof ref==="string"?resolvePanel(ref):findPanel(paramsOf(ref));
    if(!pid&&typeof ref==="object"){pid=newId("p");Dock.panels[pid]=paramsOf(ref);mountPanel(pid);}
    if(!pid)throw new Error("找不到面板："+ref);
-   used.add(pid);return pid;
-  });
-  return {...stackNode(tabs),active:tabs.includes(resolvePanel(spec.active))?resolvePanel(spec.active):tabs[0]};
+   // One panel shows in one place per workspace.
+   if(!used.has(pid)){used.add(pid);tabs.push(pid);}
+  }
+  return {...stackNode(tabs),...(spec.keep?{keep:true}:{}),active:tabs.includes(resolvePanel(spec.active))?resolvePanel(spec.active):tabs[0]||null};
  }
  const parts=(spec.parts||[]).map(x=>buildSpec(x,used));
  if(!parts.length)throw new Error("layout 的 parts 不能为空");
@@ -351,7 +378,7 @@ function buildSpec(spec,used){
 }
 async function runUiOps(ops){
  const snapshot=newId("u");
- UiSnapshots[snapshot]={layout:currentLayout(),ui:JSON.parse(JSON.stringify(S.ui))};
+ UiSnapshots[snapshot]={dock:dockSnapshot(),ui:JSON.parse(JSON.stringify(S.ui))};
  const results=[];
  for(const op of ops||[]){
   try{
@@ -367,15 +394,17 @@ async function runUiOps(ops){
     else placePanel(pid,op.where,resolvePanel(op.to));
     results.push({ok:true,panel:pid});
    }else if(op.do==="layout"){
-    const used=new Set(),root=buildSpec(op.spec||{},used);
-    for(const pid of Object.keys(Dock.panels))if(!used.has(pid)){const t=Dock.types[Dock.panels[pid].type],node=Dock.els[pid];if(t?.beforeClose)await t.beforeClose(Dock.panels[pid],node);delete Dock.panels[pid];delete Dock.els[pid];if(t?.unmount)safe(()=>t.unmount({},node));node?.remove();}
-    Dock.layout={root,floats:[]};results.push({ok:true});
-   }else if(op.do==="preset"){
-    const preset=S.ui.presets?.[op.name];if(!preset)throw new Error("没有叫「"+op.name+"」的布局");
-    await applyLayout(preset);results.push({ok:true});
+    setLayout(layoutFromSpec(op.spec||{}));await dropUnused();results.push({ok:true});
+   }else if(op.do==="workspace"){
+    const found=findSpace(op.name);
+    if(op.new){
+     if(!op.name)throw new Error("新工作区要给 name");
+     const lists=(op.side||[]).filter(k=>SIDE_SECTIONS[k]);
+     createSpace({name:String(op.name).slice(0,20),icon:SPACE_ICONS.includes(op.icon)?op.icon:"layout",side:lists,spec:op.spec||null});
+    }else{if(!found)throw new Error("没有这个工作区："+op.name+"；有："+visibleSpaces().map(x=>x.name).join("、"));switchSpace(found.id);}
+    results.push({ok:true,workspace:currentSpace().name});
    }else if(op.do==="sidebar"){
-    if(op.section&&!SIDE_SECTIONS[op.section])throw new Error("左栏没有这个分区："+op.section);
-    showSection(op.section,op.open!==false);results.push({ok:true});
+    setSideOpen(op.open!==false);results.push({ok:true});
    }else if(op.do==="set"&&(op.key==="zoom"||op.panel&&VIEW_KEYS.includes(op.key))){
     const pid=resolvePanel(op.panel);if(!pid)throw new Error(op.key+" 要给 panel：面板 id 或标题");
     if(op.key==="zoom"&&op.value!=null&&!(Number(op.value)>0))throw new Error("zoom 的 value 是倍数，比如 1.2");
@@ -387,11 +416,11 @@ async function runUiOps(ops){
    }else throw new Error("不认识的操作："+op.do);
   }catch(e){results.push({ok:false,error:e.message});}
  }
- tidy();renderDock();saveLayout();
- const panels=Object.keys(Dock.panels).map(pid=>({id:pid,title:panelTitle(pid),type:Dock.panels[pid].type}));
- return {snapshot,results,panels};
+ tidy();renderDock();saveLayout();renderSide();
+ const panels=[];eachStack(s=>s.tabs.forEach(pid=>panels.push({id:pid,title:panelTitle(pid),type:Dock.panels[pid].type})));
+ return {snapshot,workspace:currentSpace().name,results,panels};
 }
 async function restoreUi(snapshot){
  const s=UiSnapshots[snapshot];if(!s)return toast("这次改动之前的界面已经找不到了（重启过）","error");
- S.ui=s.ui;applyUi();saveUi();await applyLayout(s.layout);renderSide();toast("界面已还原");
+ S.ui=s.ui;applyUi();saveUi();await restoreDock(s.dock);renderSide();toast("界面已还原");
 }

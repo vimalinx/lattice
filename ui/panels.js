@@ -1,8 +1,8 @@
 "use strict";
-/* The learner's other panels: the start page, the knowledge map, the journal, reviews and settings. */
+/* The learner's other panels: the start page, the knowledge map, the journal, reviews, the card library, memory and settings. */
 /* ---- the knowledge map ---------------------------------------------------------------------------------- */
 const MapState={};
-panelType("map",{side:"mine",icon:"network",title:p=>p.topic?"知识图 · "+topicTitle(p.topic):"知识图",
+panelType("map",{side:"mine",host:false,icon:"network",title:p=>p.topic?"知识图 · "+topicTitle(p.topic):"知识图",
  mount(p,node,pid){
   node.innerHTML='<div class="map"><div class="map-bar"><select data-map-topic="'+pid+'"></select><span class="map-stats muted"></span><span class="grow"></span>'+
    iconButton("refresh","map-relayout","重新排布",'data-pid="'+pid+'"')+'</div><div class="map-body"><div class="map-canvas"></div><aside class="map-route"></aside></div></div>';
@@ -58,6 +58,89 @@ async function loadReview(node){
  await BLOCKS.cards({cards:due.map(c=>c.id),review:true},body.firstElementChild,{});
 }
 
+/* ---- the card library: every card, to browse and pick from ------------------------------------------------------ */
+panelType("library",{side:"mine",host:false,icon:"card",title:()=>"卡片库",
+ mount(p,node,pid){node.innerHTML='<div class="library"><div class="lib-bar"></div><div class="lib-list" data-keep-scroll></div></div>';renderLibrary(pid);},
+ screen(p){return {view:"卡片库",filter:{query:p.query||"",stage:p.stage||"",topic:p.topic??"全部",sort:p.sort||"due",due_only:!!p.due_only}};}});
+const LIB_SORT=[["due","先到期的"],["updated","最近改过的"],["stage","理解阶段"],["title","标题"]];
+// When a card comes up next: the backend's rule, a day after it was saved if never reviewed; cards still to explore are not scheduled.
+function cardDueAt(c){return c.stage==="suggested"?Infinity:Date.parse(c.due||"")||Date.parse(c.created)+864e5;}
+function dueText(c){
+ if(c.stage==="suggested")return "不排期";
+ if(c.due_now)return "到期";
+ const days=Math.round((new Date(cardDueAt(c)).setHours(0,0,0,0)-new Date().setHours(0,0,0,0))/864e5);
+ return days<=0?"今天":days===1?"明天":days+" 天后";
+}
+function renderLibrary(pid,full=true){
+ const p=Dock.panels[pid],node=Dock.els[pid]?.querySelector(".library");if(!p||!node)return;
+ if(full)node.querySelector(".lib-bar").innerHTML='<input class="side-input" data-lib-query="'+pid+'" placeholder="搜标题、自测题和正文…" value="'+esc(p.query||"")+'"/>'+
+  '<div class="lib-filters"><select data-lib-topic="'+pid+'">'+opt(p.topic??"*",[["*","全部主题"],["","不属于主题的"],...(S.data.topics||[]).map(t=>[t.id,t.title])])+'</select>'+
+  '<select data-lib-sort="'+pid+'">'+opt(p.sort||"due",LIB_SORT)+'</select>'+
+  '<label class="check inline-check"><input type="checkbox" data-lib-due="'+pid+'"'+(p.due_only?" checked":"")+'/> 只看到期</label>'+iconButton("plus","new-card","新知识卡")+'</div>'+
+  '<div class="stage-chips">'+[["","全部"],...Object.entries(stageName)].map(([v,t])=>'<button class="'+((p.stage||"")===v?"on":"")+'" data-action="lib-stage" data-pid="'+pid+'" data-stage="'+v+'">'+esc(t)+'</button>').join("")+'</div>';
+ const q=(p.query||"").trim().toLowerCase(),order=Object.keys(stageName);
+ const cards=(S.data.cards||[]).filter(c=>(!p.stage||c.stage===p.stage)&&(p.topic==null||(c.topic||"")===p.topic)&&(!p.due_only||c.due_now)&&
+  (!q||(c.title+" "+(c.question||"")+" "+(c.excerpt||"")).toLowerCase().includes(q)));
+ const sort={due:(a,b)=>cardDueAt(a)-cardDueAt(b),updated:(a,b)=>String(b.updated).localeCompare(String(a.updated)),
+  stage:(a,b)=>order.indexOf(a.stage)-order.indexOf(b.stage)||a.title.localeCompare(b.title,"zh"),title:(a,b)=>a.title.localeCompare(b.title,"zh")}[p.sort||"due"];
+ cards.sort(sort);
+ const every=S.data.cards||[];
+ node.querySelector(".lib-list").innerHTML='<p class="lib-count muted small">'+cards.length+' 张'+(cards.length!==every.length?"（共 "+every.length+" 张）":"")+(S.data.due?' · '+S.data.due+' 张到期':"")+'</p>'+
+  (cards.map(c=>'<button class="lib-card" data-action="open-file" data-path="'+esc(c.path)+'">'+
+   '<span class="lib-top"><span class="stage stage-'+esc(c.stage)+'">'+esc(stageName[c.stage]||c.stage)+'</span><small class="'+(c.due_now?"due":"")+'">'+esc(dueText(c))+'</small></span>'+
+   '<b>'+esc(c.title)+'</b>'+((c.question||c.excerpt)?'<span class="lib-text">'+esc(c.question||c.excerpt)+'</span>':"")+
+   '<small class="lib-foot">'+esc(c.topic?topicTitle(c.topic):"不属于主题")+(c.reviews?" · 回顾过 "+c.reviews+" 次":"")+'</small></button>').join("")||
+   emptyState("card",every.length?"没有符合的卡片":"还没有知识卡",every.length?"换个筛选试试。":"和主会话学着学着，它会把讲清楚的知识点存成卡；也可以在左栏点「＋」自己记一张。"));
+}
+function libraryInput(t){
+ const pid=t.dataset.libQuery||t.dataset.libTopic||t.dataset.libSort||t.dataset.libDue,p=Dock.panels[pid];if(!p)return false;
+ if(t.dataset.libQuery){p.query=t.value;renderLibrary(pid,false);}
+ else if(t.dataset.libTopic){p.topic=t.value==="*"?null:t.value;renderLibrary(pid,false);}
+ else if(t.dataset.libSort){p.sort=t.value;renderLibrary(pid,false);}
+ else{p.due_only=t.checked;renderLibrary(pid,false);}
+ saveLayout();return true;
+}
+
+/* ---- memory: how the cards are holding up, from their schedule and the learner's own ratings --------------------- */
+panelType("memory",{side:"mine",icon:"calendar",title:()=>"记忆",
+ mount(p,node,pid){node.innerHTML='<div class="memory" data-keep-scroll></div>';loadMemory(pid);},
+ screen(){return {view:"记忆：各理解阶段有多少卡、接下来两周每天到期多少、最近 30 天的回顾和老是记不住的卡"};}});
+const dayKey=d=>{d=new Date(d);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");};
+function bars(cols,height=86){
+ const top=Math.max(1,...cols.map(c=>c.parts.reduce((a,x)=>a+x.n,0)));
+ return '<div class="bars" style="--h:'+height+'px">'+cols.map(c=>{const sum=c.parts.reduce((a,x)=>a+x.n,0);
+  return '<div class="bar" title="'+esc(c.tip)+'"><span class="bar-n">'+(sum||"")+'</span><span class="bar-stack">'+c.parts.map(x=>x.n?'<i style="height:'+(x.n/top*height).toFixed(1)+'px;background:'+x.color+'"></i>':"").join("")+'</span><small>'+esc(c.label)+'</small></div>';}).join("")+'</div>';
+}
+async function loadMemory(pid){
+ const node=Dock.els[pid]?.querySelector(".memory");if(!node)return;
+ const cards=S.data.cards||[],today=new Date();today.setHours(0,0,0,0);
+ const reviews=await rpc("journal",{types:["reviewed"],since:new Date(today-29*864e5).toISOString(),limit:500});
+ const order=Object.keys(stageName),count=k=>cards.filter(c=>c.stage===k).length;
+ const todayKey=dayKey(today),doneToday=reviews.filter(r=>dayKey(r.at)===todayKey).length;
+ // Next two weeks: what is overdue counts today.
+ const ahead=Array.from({length:14},(_,i)=>({n:0,day:new Date(+today+i*864e5)}));
+ cards.forEach(c=>{const at=cardDueAt(c);if(at===Infinity)return;const i=Math.max(0,Math.floor((new Date(at).setHours(0,0,0,0)-today)/864e5));if(i<14)ahead[i].n++;});
+ const label=(d,i)=>i===0?"今天":i===1?"明天":(d.getMonth()+1)+"/"+d.getDate();
+ const RATE={again:["忘了","var(--red)"],hard:["费劲","var(--amber)"],good:["记得","var(--accent)"]};
+ const past=Array.from({length:30},(_,i)=>{const d=new Date(+today-(29-i)*864e5),k=dayKey(d),rs=reviews.filter(r=>dayKey(r.at)===k);
+  return {label:i%5===4||i===29?(d.getMonth()+1)+"/"+d.getDate():"",tip:(d.getMonth()+1)+"/"+d.getDate()+"："+rs.length+" 次",parts:Object.entries(RATE).map(([r,[,color]])=>({n:rs.filter(x=>x.data.rating===r).length,color}))};});
+ // Cards forgotten most often lately: again counts fully, hard by half.
+ const weight={};reviews.forEach(r=>{const id=r.refs[0];if(id&&r.data.rating!=="good")weight[id]=(weight[id]||0)+(r.data.rating==="again"?1:.5);});
+ const hard=Object.entries(weight).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([id,w])=>({card:cards.find(c=>c.id===id),w})).filter(x=>x.card);
+ const total=cards.length||1;
+ node.innerHTML='<div class="mem-stats"><div><b>'+cards.length+'</b><small>张卡</small></div><div><b>'+(S.data.due||0)+'</b><small>现在到期</small></div><div><b>'+doneToday+'</b><small>今天回顾</small></div><div><b>'+reviews.length+'</b><small>近 30 天回顾</small></div></div>'+
+  (S.data.due?'<div class="inline">'+button(svg("refresh",13)+" 回顾到期的 "+S.data.due+" 张","open-review","","primary sm")+'</div>':"")+
+  '<h4>理解阶段</h4><div class="stage-bar">'+order.map(k=>count(k)?'<i style="flex:'+count(k)/total+';background:'+stageColor[k]+'" title="'+esc(stageName[k])+' '+count(k)+'"></i>':"").join("")+'</div>'+
+  '<div class="stage-legend">'+order.map(k=>'<span><i class="stage-dot" style="background:'+stageColor[k]+'"></i>'+esc(stageName[k])+' '+count(k)+'</span>').join("")+'</div>'+
+  '<h4>接下来两周到期</h4>'+(ahead.some(x=>x.n)?bars(ahead.map((x,i)=>({label:label(x.day,i),tip:label(x.day,i)+"："+x.n+" 张",parts:[{n:x.n,color:"var(--ai)"}]}))):'<p class="muted">两周内没有要回顾的卡。还在「待探索」的卡不排期，标成「接触过」以后才开始排。</p>')+
+  '<h4>最近 30 天的回顾</h4>'+(reviews.length?bars(past,64)+'<div class="stage-legend">'+Object.values(RATE).map(([t,c])=>'<span><i class="stage-dot" style="background:'+c+'"></i>'+t+'</span>').join("")+'</div>':'<p class="muted">还没有回顾过。卡片到期后在「回顾」里自评，这里就会有记录。</p>')+
+  '<h4>最近老是记不住的</h4>'+(hard.length?hard.map(x=>sideRow("card",x.card.title,'data-action="open-file" data-path="'+esc(x.card.path)+'"',esc(stageName[x.card.stage]||"")+" · "+dueText(x.card))).join(""):'<p class="muted">没有。自评「忘了」或「费劲」的卡会排在这里。</p>');
+}
+function cardViewsChanged(){
+ clearTimeout(MapState.ctimer);
+ MapState.ctimer=setTimeout(()=>Object.keys(Dock.panels).forEach(pid=>{const t=Dock.panels[pid].type;if(t==="library")renderLibrary(pid);else if(t==="memory")safe(()=>loadMemory(pid));}),400);
+}
+
 /* ---- the start page: where I am, what is waiting, what changed ---------------------------------------- */
 panelType("home",{side:"mine",icon:"home",title:()=>"开始",mount(p,node){node.innerHTML='<div class="home" data-keep-scroll></div>';renderHome(node);},
  screen(){return {view:"开始"};}});
@@ -80,7 +163,7 @@ async function renderHome(node){
 function homesChanged(){clearTimeout(MapState.htimer);MapState.htimer=setTimeout(()=>Object.keys(Dock.panels).filter(pid=>Dock.panels[pid].type==="home").forEach(pid=>renderHome(Dock.els[pid])),1200);}
 
 /* ---- settings: everything is changeable here ------------------------------------------------------------- */
-const SETTINGS_PAGES=[["look","外观与交互","sun"],["layout","布局与左栏","layout"],["agents","四个 AI","bot"],["apis","模型连接","link"],["web","联网","search"],
+const SETTINGS_PAGES=[["look","外观与交互","sun"],["layout","工作区与左栏","layout"],["agents","四个 AI","bot"],["apis","模型连接","link"],["web","联网","search"],
  ["run","运行与环境","terminal"],["vault","学习库","folder"],["rules","学习库的规矩","shield"],["keys","快捷键","cmd"]];
 panelType("settings",{side:"mine",icon:"sliders",title:()=>"设置",
  mount(p,node,pid){node.innerHTML='<div class="settings-shell"><nav class="settings-nav"></nav><div class="settings" data-keep-scroll></div></div>';renderSettings(node,p.page||"look");},
@@ -106,7 +189,7 @@ const SETTINGS_RENDER={
    '<div class="range-row"><input type="range" min="20" max="120" step="1" data-ui-range="read_width" value="'+(readChars(u.read_width)||42)+'"'+(readChars(u.read_width)?"":" disabled")+'/>'+
    '<b data-range-out="read_width">'+(readChars(u.read_width)?readChars(u.read_width)+" 字":"不限")+'</b>'+
    '<label class="check inline-check"><input type="checkbox" data-read-unlimited'+(readChars(u.read_width)?"":" checked")+'/> 不限</label></div>'+
-   '<h3>每种窗口的大小</h3><p class="muted">新开的窗口按这里的比例显示，文字、代码、间距和图标一起缩放。某一个窗口还可以单独调：鼠标放在它上面按 Ctrl + 滚轮，或者聚焦后按 Ctrl + = / Ctrl + - / Ctrl + 0，标签上右键也能调；单独调过的会在标签上显示百分比，存布局时一起存下。</p>'+
+   '<h3>每种窗口的大小</h3><p class="muted">新开的窗口按这里的比例显示，文字、代码、间距和图标一起缩放。某一个窗口还可以单独调：鼠标放在它上面按 Ctrl + 滚轮，或者聚焦后按 Ctrl + = / Ctrl + - / Ctrl + 0，标签上右键也能调；单独调过的会在标签上显示百分比，跟着工作区一起记住。</p>'+
    '<div class="zoom-grid">'+ZOOM_KINDS.map(([k,t])=>'<label>'+esc(t)+'<span class="unit"><input type="number" step="5" min="60" max="250" data-zoom-kind="'+k+'" value="'+Math.round((Number(u.zoom?.[k])||1)*100)+'"/>%</span></label>').join("")+'</div>'+
    (Object.values(Dock.panels).some(p=>p.zoom)?'<div class="inline"><span class="muted">有 '+Object.values(Dock.panels).filter(p=>p.zoom).length+' 个窗口单独调过大小。</span>'+button("全部恢复成各自的默认","zoom-reset-all","","ghost sm")+'</div>':"")+
    '<label>模型的思考过程<select data-ui="thinking">'+opt(u.thinking||"collapsed",[["collapsed","折叠，只显示用时和一句摘要"],["open","展开"],["hidden","不显示"]])+'</select></label>'+
@@ -117,17 +200,18 @@ const SETTINGS_RENDER={
    saveBar();
  },
  layout(){
-  const u=S.ui,presets=Object.keys(u.presets||{});
-  return '<h3>布局</h3><p class="muted">面板随你拖：拖到另一组标签上并排，拖到边缘分栏，标签上的按钮可以浮出。把满意的样子存下来，以后一键套用；设为默认的那个，在「恢复默认布局」和新学习库里都会用到。</p>'+
-   '<div class="inline"><input data-preset-name placeholder="给当前布局起个名字"/>'+button(svg("save",13)+" 存为布局","preset-save","","primary sm")+button("把当前布局设为默认","preset-default-current","","ghost sm")+'</div>'+
-   (presets.length?'<div class="preset-list">'+presets.map(n=>'<div class="preset"><b>'+esc(n)+'</b>'+(u.default_preset===n?'<span class="chip on">默认</span>':"")+'<span class="grow"></span>'+
-    button("套用","preset-apply",'data-name="'+esc(n)+'"',"ghost xs")+(u.default_preset===n?button("取消默认","preset-default",'data-name=""',"ghost xs"):button("设为默认","preset-default",'data-name="'+esc(n)+'"',"ghost xs"))+
-    button("用当前布局覆盖","preset-overwrite",'data-name="'+esc(n)+'"',"ghost xs")+button("删除","preset-delete",'data-name="'+esc(n)+'"',"ghost xs")+'</div>').join("")+'</div>':'<p class="muted">还没有存过布局。</p>')+
-   '<div class="inline">'+button("恢复默认布局","layout-default","","ghost sm")+button("恢复出厂布局","layout-factory","","ghost sm")+'</div>'+
-   '<h3>左栏</h3><label class="check"><input type="checkbox" data-side-open'+(u.side.open?" checked":"")+'/> 展开左栏 <small>（点活动栏上当前分区的图标也能收起）</small></label>'+
-   '<label>左栏宽度<input type="number" min="180" max="560" data-side-width value="'+esc(u.side.width)+'"/></label>'+
-   '<div class="field-label">分区：顺序和显示</div><div class="section-list">'+[...sideOrder(),...(u.side.hidden||[])].filter((k,i,a)=>a.indexOf(k)===i&&SIDE_SECTIONS[k]).map((k,i)=>'<div class="preset">'+svg(SIDE_SECTIONS[k].icon,14)+' '+esc(SIDE_SECTIONS[k].title)+'<span class="grow"></span>'+
-    '<label class="check inline-check"><input type="checkbox" data-side-show="'+k+'"'+((u.side.hidden||[]).includes(k)?"":" checked")+'/> 显示</label>'+iconButton("arrowup","side-move","上移",'data-key="'+k+'"')+'</div>').join("")+'</div>';
+  const list=spaceList(),b=(t,a,id,extra="")=>button(t,a,'data-space="'+esc(id)+'" '+extra,"ghost xs");
+  return '<h3>工作区</h3><p class="muted">活动栏上的每个图标是一个工作区：一套窗口组合，左栏放它自己的列表。同一个对话、同一个文件可以同时出现在几个工作区里。'+
+   '在工作区里拖动、分栏、浮出都会自动记住；「设为默认」以后，「恢复默认」就回到那时的样子。活动栏上的图标右键也能改，Ctrl + 1～9 切换。</p>'+
+   '<div class="preset-list">'+list.map((sp,i)=>'<div class="preset'+(sp.hidden?" off":"")+'">'+svg(sp.icon||"layout",14)+' <b>'+esc(sp.name)+'</b>'+
+    (sp.id===Dock.space?'<span class="chip on">当前</span>':"")+(sp.hidden?'<span class="chip">隐藏了</span>':"")+
+    '<span class="muted small">'+esc((sp.side||[]).map(k=>SIDE_SECTIONS[k]?.title).filter(Boolean).join("、")||"左栏不放列表")+'</span><span class="grow"></span>'+
+    (sp.hidden?b("显示","space-show",sp.id):sp.id===Dock.space?b("把现在的样子设为默认","space-keep",sp.id):b("切换","space",sp.id))+
+    b("改","space-edit",sp.id)+b("恢复默认","space-reset",sp.id)+(i>0?iconButton("arrowup","space-move","往上挪",'data-space="'+esc(sp.id)+'" data-dir="-1"'):"")+
+    (sp.hidden?"":b(sp.builtin?"隐藏":"删除","space-remove",sp.id))+'</div>').join("")+'</div>'+
+   '<div class="inline">'+button(svg("plus",13)+" 新工作区","space-new","","primary sm")+'</div>'+
+   '<h3>左栏</h3><p class="muted">每个工作区的左栏各自收起、展开：点它右上角的按钮、再点一次活动栏上这个工作区的图标，或者按 Ctrl + B。</p>'+
+   '<label>左栏宽度<input type="number" min="180" max="560" data-side-width value="'+esc(S.ui.side.width)+'"/></label>';
  },
  async agents(c){
   const cards=[];
@@ -266,17 +350,6 @@ async function settingsAction(kind,a){
   await saveSettings(node);return toast("已存进学习库的 agents/"+n+".md");
  }
  case "agent-reset":if(!confirm("删掉你改写的规则，恢复成默认的？改写过的版本留在学习库的历史里。"))return;await rpc("agent_reset",{name:a.dataset.name});return again();
- case "preset-save":case "preset-overwrite":{
-  const name=kind==="preset-save"?node.querySelector("[data-preset-name]").value.trim():a.dataset.name;if(!name)return toast("先给布局起个名字");
-  S.ui.presets={...(S.ui.presets||{}),[name]:currentLayout()};await saveUi(true);toast("已存为布局「"+name+"」");return again();
- }
- case "preset-apply":return applyLayout(S.ui.presets[a.dataset.name]);
- case "preset-default":S.ui.default_preset=a.dataset.name||null;await saveUi(true);return again();
- case "preset-default-current":S.ui.presets={...(S.ui.presets||{}),"默认":currentLayout()};S.ui.default_preset="默认";await saveUi(true);toast("当前布局已设为默认");return again();
- case "preset-delete":if(!confirm("删除布局「"+a.dataset.name+"」？"))return;delete S.ui.presets[a.dataset.name];if(S.ui.default_preset===a.dataset.name)S.ui.default_preset=null;await saveUi(true);return again();
- case "layout-default":return applyLayout(defaultChoice());
- case "layout-factory":if(!confirm("换回出厂的布局？现在开着的面板会关掉（内容都已保存）。"))return;return applyLayout(factoryLayout());
- case "side-move":{const order=sideOrder(),i=order.indexOf(a.dataset.key);if(i>0){[order[i-1],order[i]]=[order[i],order[i-1]];S.ui.side.order=order;saveUi();renderSide();}return again();}
  case "runner-add":{const ext=node.querySelector("[data-runner-new]").value.trim(),cmd=node.querySelector("[data-runner-new-cmd]").value.trim();if(!ext||!cmd)return;
   S.config=await rpc("settings_save",{config:{runners:{...S.config.runners,[ext.startsWith(".")?ext:"."+ext]:cmd}}});return again();}
  case "env-create":{const n=node.querySelector("[data-env-new]").value.trim();if(!n)return;await rpc("env_save",{name:n,text:"ipykernel\nnumpy\nmatplotlib\n"});Settings.env=n;return again();}
@@ -287,16 +360,14 @@ async function settingsAction(kind,a){
  }
  return null;
 }
-const ZOOM_KINDS=[["chat:tutor","主会话"],["chat:flash","快答"],["chat:coach","练习教练"],["file","文件"],["home","开始"],["map","知识图"],["journal","学习轨迹"],["review","回顾"],["settings","设置"]];
+const ZOOM_KINDS=[["chat:tutor","主会话"],["chat:flash","快答"],["chat:coach","练习教练"],["file","文件"],["home","开始"],["map","知识图"],["journal","学习轨迹"],["review","回顾"],["library","卡片库"],["memory","记忆"],["settings","设置"]];
 function settingsChange(t){
  if(t.dataset.readUnlimited!==undefined){S.ui.read_width=t.checked?"none":42;applyUi();saveUi();renderSettings(t.closest(".panel"),"look");return true;}
  if(t.dataset.uiRange){S.ui[t.dataset.uiRange]=Number(t.value);applyUi();saveUi();return true;}
  if(t.dataset.zoomKind){const v=Math.max(60,Math.min(250,Number(t.value)||100))/100;S.ui.zoom={...(S.ui.zoom||{}),[t.dataset.zoomKind]:v};applyUi();saveUi();return true;}
  if(t.dataset.ui){const k=t.dataset.ui;S.ui[k]=t.type==="checkbox"?t.checked:t.type==="number"?Number(t.value):t.value;applyUi();saveUi();
   if(k==="thinking")Object.keys(Chat).forEach(x=>{Chat[x].thoughts={};Chat[x].liveOpen=null;renderChat(x);});return true;}
- if(t.dataset.sideOpen!==undefined){S.ui.side.open=t.checked;saveUi();renderSide();return true;}
  if(t.dataset.sideWidth!==undefined){S.ui.side.width=Math.max(180,Math.min(560,Number(t.value)));saveUi();renderSide();return true;}
- if(t.dataset.sideShow){const k=t.dataset.sideShow,hidden=new Set(S.ui.side.hidden||[]);t.checked?hidden.delete(k):hidden.add(k);S.ui.side.hidden=[...hidden];if(!t.checked&&S.ui.side.section===k)S.ui.side.section=sideOrder()[0];saveUi();renderSide();return true;}
  if(t.dataset.envPick!==undefined){Settings.env=t.value;renderSettings(t.closest(".panel"),"run");return true;}
  if(t.dataset.cfgAgent&&t.dataset.key==="api"){const api=S.config.apis.find(x=>x.id===t.value);const m=t.closest(".agent-edit").querySelector('[data-key="model"]');if(api?.default_model&&m)m.value=api.default_model;}
  return settingsAutosave(t,true);

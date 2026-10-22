@@ -247,8 +247,10 @@ class Lattice:
         out = []
         for row in self.docs("card"):
             a = row["attrs"]
+            # The opening words of the explanation, so a list of cards says what each is about.
+            excerpt = re.sub(r"\s+", " ", re.sub(r"[#>*`_|]|\[\[|\]\]", "", split_mine(row["body"])[0])).strip()[:140]
             out.append({"id": row["id"], "path": row["path"], "title": row["title"], "topic": row["topic"], "stage": a.get("stage", "suggested"),
-                        "question": a.get("question", ""), "due": stamp_of(a["due"]) if a.get("due") else None,
+                        "question": a.get("question", ""), "excerpt": excerpt, "due": stamp_of(a["due"]) if a.get("due") else None,
                         "reviews": int(a.get("reviews") or 0), "created": row["created"], "updated": row["updated"]})
         return out
 

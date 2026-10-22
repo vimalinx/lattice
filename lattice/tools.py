@@ -207,13 +207,13 @@ def _run_brief(e):
     return {"at": e["at"][:16], "by": e["actor"], **{k: e["data"].get(k) for k in ("file", "cell", "state", "summary", "sandbox")}}
 
 
-LIST_KINDS = ["topics", "cards", "notes", "lessons", "insights", "notebooks", "practices", "threads", "files", "projects", "envs", "layouts"]
+LIST_KINDS = ["topics", "cards", "notes", "lessons", "insights", "notebooks", "practices", "threads", "files", "projects", "envs"]
 
 
-@tool("list", ALL, "列出学习库里某一类东西的全部（和界面上开着什么无关）：topics 主题、cards 知识卡（含理解阶段和是否到期）、notes 笔记、lessons 课程、insights 薄弱点和做得好的地方、notebooks 实验笔记、practices 练习、threads 全部对话、files 代码和数据文件、projects 挂载的目录（只读）、envs Python 环境和包、layouts 学习者存过的界面布局。可以按 topic（给空字符串就是不属于任何主题的）、stage（卡片）、state、query（标题里包含）筛选。",
+@tool("list", ALL, "列出学习库里某一类东西的全部（和界面上开着什么无关）：topics 主题、cards 知识卡（含理解阶段和是否到期）、notes 笔记、lessons 课程、insights 薄弱点和做得好的地方、notebooks 实验笔记、practices 练习、threads 全部对话、files 代码和数据文件、projects 挂载的目录（只读）、envs Python 环境和包。可以按 topic（给空字符串就是不属于任何主题的）、stage（卡片）、state、query（标题里包含）筛选。",
       {"kind": {"type": "string", "enum": LIST_KINDS}, "topic": S, "stage": S, "state": S, "query": S, "limit": I}, ["kind"])
 def list_kind(ctx, kind, topic=None, stage=None, state=None, query=None, limit=200):
-    if kind in ("projects", "envs", "layouts"):
+    if kind in ("projects", "envs"):
         return ctx.bridge.catalog(kind)
     return ctx.bridge.catalog(kind, topic=topic, stage=stage, state=state, query=query, limit=limit)
 
@@ -449,17 +449,20 @@ def hand_to_tutor(ctx, summary):
 
 # ---- the interface ----------------------------------------------------------------------------------
 
-UI_OP = {"type": "object", "properties": {"do": {"type": "string", "enum": ["open", "close", "focus", "move", "float", "layout", "preset", "sidebar", "set"]},
-                                          "panel": S, "agent": S, "path": S, "topic": S, "where": S, "to": S, "name": S, "section": S,
+UI_OP = {"type": "object", "properties": {"do": {"type": "string", "enum": ["open", "close", "focus", "move", "float", "layout", "workspace", "sidebar", "set"]},
+                                          "panel": S, "agent": S, "path": S, "topic": S, "where": S, "to": S, "name": S, "icon": S,
+                                          "side": {"type": "array", "items": S}, "new": {"type": "boolean"},
                                           "open": {"type": "boolean"}, "key": S, "value": {}, "spec": {"type": "object"}}, "required": ["do"]}
 
 
-@tool("ui", {"tutor", "flash", "coach"}, "控制整个界面，ops 按顺序执行：\n"
-      "- open：打开面板。panel 是 chat（给 agent：tutor 主会话 / flash 快答）、file（给 path）、map（可给 topic）、journal、review、settings、home；where 是 left / right / top / bottom（贴着 to 指定的面板分栏）、float（浮出）或 tab（默认：放进 to 所在的那组标签，不给 to 就放进同一侧最近用的那组）。\n"
+@tool("ui", {"tutor", "flash", "coach"}, "控制整个界面，ops 按顺序执行。界面分成几个工作区（活动栏上的图标，见 screen 的 workspace），每个是一套窗口组合，左栏放它自己的列表；"
+      "同一个面板（比如主会话）可以同时出现在几个工作区。下面的操作都作用在学习者眼前的这个工作区；对话工作区可以放任何面板，由你按需要安排。\n"
+      "- open：打开面板。panel 是 chat（给 agent：tutor 主会话 / flash 快答）、file（给 path）、map（可给 topic）、journal、review（回顾到期的卡）、library（卡片库）、memory（记忆：理解阶段、到期预报、回顾记录）、settings、home；where 是 left / right / top / bottom（贴着 to 指定的面板分栏）、float（浮出）或 tab（默认：放进 to 所在的那组标签，不给 to 就放进同一侧最近用的那组）。\n"
       "- close / focus / float：panel 是面板 id 或标题（从 screen 里看）。\n"
       "- move：把 panel 移到 to 旁边，where 同上。\n"
-      "- layout：整个替换布局。spec 是 {\"split\": \"h\"或\"v\", \"sizes\": [0.5, 0.5], \"parts\": [spec, ...]}，叶子是 {\"tabs\": [面板, ...]}；面板可以是已有面板的 id，也可以是一个 open 那样的对象。\n"
-      "- preset：套用学习者存过的布局 name。sidebar：切到左栏的 section（topics、cards、notes、lessons、work、practice、files、search），open 为 false 时收起。\n"
+      "- layout：整个替换这个工作区的布局。spec 是 {\"split\": \"h\"或\"v\", \"sizes\": [0.5, 0.5], \"parts\": [spec, ...]}，叶子是 {\"tabs\": [面板, ...]}；面板可以是已有面板的 id，也可以是一个 open 那样的对象。\n"
+      "- workspace：切到 name 那个工作区（名字或 id）。new 为 true 时新建一个并切过去：name、icon、side（左栏的列表：topics、cards、notes、lessons、work、practice、files、search）、spec（同 layout，不给就照现在的样子）。"
+      "sidebar：open 为 false 时收起这个工作区的左栏，true 展开。\n"
       "- set：改外观，key 是 theme（dark / light）、font_size、code_font_size、line_height、read_width（一行最多多少字，20～120，或 none 不限）、density（compact / comfortable）；"
       "key 为 zoom 时只改 panel 那一个窗口的大小，value 是倍数（1.2 即 120%）；给了 panel 的 line_height、read_width 也只改那一个窗口；value 为 null 恢复默认。\n"
       "界面只决定显示什么，不代表学习库里有什么：要知道有哪些卡片、笔记、主题、练习，用 list、graph 或 read 去查，不要从面板上推断。\n"

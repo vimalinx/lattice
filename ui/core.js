@@ -1,6 +1,6 @@
 "use strict";
 /* Lattice UI core: no remote services; all data passes through QWebChannel. */
-const S={bridge:null,ui:{theme:"dark",side:{open:true,width:270,section:"topics",order:[],hidden:[]},presets:{}},data:null,config:null,toastTimer:null};
+const S={bridge:null,ui:{theme:"dark",side:{width:270,closed:[]},spaces:[]},data:null,config:null,toastTimer:null};
 const el=s=>document.querySelector(s);
 const all=(s,root=document)=>Array.from(root.querySelectorAll(s));
 function esc(v){return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}

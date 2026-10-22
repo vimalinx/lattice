@@ -180,9 +180,6 @@ class Bridge(QObject):
             return self.lattice.projects()
         if kind == "envs":
             return [{"name": n, "definition": self.envs.definition_rel(n), "packages": self.envs.wanted(n), "ready": self.envs.ready(n)} for n in self.envs.names()]
-        if kind == "layouts":
-            ui = self.config.read()["ui"]
-            return [{"name": n, "default": n == ui.get("default_preset")} for n in (ui.get("presets") or {})]
         return self.lattice.catalog(kind, **filters)
 
     def rpc_list(self, kind, **filters):

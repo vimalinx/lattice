@@ -63,12 +63,12 @@ DEFAULTS = {
     "vault": "",
     # Seconds the learner pauses before their edits are committed.
     "commit_idle": 30,
-    # Everything about the interface: appearance, the sidebar, saved layouts.
+    # Everything about the interface: appearance, the sidebar, workspaces.
     # zoom: each kind of panel's default size ("chat:tutor", "file", ...); a window can still set its own.
+    # spaces: the learner's changes to the built-in workspaces and their own ones; side.closed: workspaces whose sidebar is folded.
     "ui": {"theme": "dark", "thinking": "collapsed", "font_size": 14.5, "code_font_size": 13, "line_height": 1.8, "read_width": 42, "zoom": {"chat:tutor": 1.1},
            "density": "comfortable", "send_key": "enter",
-           "selection_popup": True, "side": {"open": True, "width": 270, "section": "topics", "order": [], "hidden": []},
-           "presets": {}, "default_preset": None},
+           "selection_popup": True, "side": {"width": 270, "closed": []}, "spaces": []},
 }
 AGENT_FIELDS = ("api", "model", "max_tokens", "temperature")
 # Settings saved by earlier versions under flat names.
@@ -198,7 +198,7 @@ class Config:
         return self.public()
 
     def save_ui(self, ui):
-        """The interface's own preferences, saved as one object (appearance, sidebar, layouts)."""
+        """The interface's own preferences, saved as one object (appearance, sidebar, workspaces)."""
         if not isinstance(ui, dict) or len(json.dumps(ui, ensure_ascii=False)) > 4_000_000:
             raise ValueError("界面设置应为不超过 4MB 的对象")
         updated = self.read()

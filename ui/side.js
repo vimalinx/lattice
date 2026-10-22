@@ -1,6 +1,6 @@
 "use strict";
-/* The fixed left column: an activity bar, and one section per kind of material.
-   Each section answers a different question, so each has its own list instead of one shared tree:
+/* The fixed left column: an activity bar of workspaces, and the workspace's own lists beside it.
+   Each list answers a different question, so each kind of material has its own instead of one shared tree:
    what am I learning (topics), what do I know (cards), what have I written (notes),
    what was taught (lessons), what am I building (experiments and code), how am I doing (practice). */
 const SIDE_SECTIONS={
@@ -13,37 +13,35 @@ const SIDE_SECTIONS={
  files:{title:"全部文件",icon:"folder",render:filesSection},
  search:{title:"搜索",icon:"search",render:searchSection},
 };
-// Things that belong to a section live in its header (知识图 under 主题, 回顾 under 知识卡); only the rest sit at the bottom.
-const SIDE_LAUNCH=[["history","学习轨迹","open-journal"],["home","开始","open-home"]];
+// Things that belong to a list live in its header (知识图 under 主题, 回顾 under 知识卡); only the rest sit at the bottom.
+const SIDE_LAUNCH=[["search","搜索 · Ctrl K","palette"],["history","学习轨迹","open-journal"],["home","开始","open-home"]];
 const Side={entries:{},open:new Set(["code","notebooks","data"]),query:"",hits:null,stage:"",cardQuery:""};
-function sideOrder(){
- const order=(S.ui.side.order||[]).filter(k=>SIDE_SECTIONS[k]);
- return [...order,...Object.keys(SIDE_SECTIONS).filter(k=>!order.includes(k))].filter(k=>!(S.ui.side.hidden||[]).includes(k));
-}
 function renderActivity(){
  const bar=el("#activity");if(!bar)return;
- const side=S.ui.side;
  bar.innerHTML='<div class="act-logo" title="Lattice">'+logo()+'</div>'+
   '<button class="act" data-action="new-menu" title="打开 / 新建">'+svg("plus",19)+'</button>'+
-  sideOrder().map(k=>'<button class="act'+(side.open&&side.section===k?" on":"")+'" data-action="side-section" data-section="'+k+'" title="'+esc(SIDE_SECTIONS[k].title)+'">'+svg(SIDE_SECTIONS[k].icon,19)+
-   (k==="cards"&&S.data.due?'<i class="badge">'+S.data.due+'</i>':"")+'</button>').join("")+
+  visibleSpaces().map((sp,i)=>'<button class="act space'+(sp.id===Dock.space?" on":"")+'" data-action="space" data-space="'+esc(sp.id)+'" title="'+esc(sp.name)+(i<9?" · Ctrl "+(i+1):"")+'（右键改）">'+svg(sp.icon||"layout",19)+
+   ((sp.side||[]).includes("cards")&&S.data.due?'<i class="badge">'+S.data.due+'</i>':"")+'</button>').join("")+
   '<span class="grow"></span>'+
   SIDE_LAUNCH.map(([i,t,a])=>'<button class="act" data-action="'+a+'" title="'+esc(t)+'">'+svg(i,18)+'</button>').join("")+
   '<button class="act" data-action="theme" title="切换明暗">'+svg(S.ui.theme==="dark"?"sun":"moon",17)+'</button>'+
   '<button class="act" data-action="open-settings" title="设置">'+svg("sliders",18)+'</button>';
 }
+/* The sidebar shows the workspace's own lists; with more than one, each gets its own heading and buttons. */
 async function renderSide(){
  renderActivity();
- const box=el("#side"),side=S.ui.side;if(!box)return;
- box.hidden=!side.open;el("#side-gutter").hidden=!side.open;
- box.style.width=side.width+"px";
- if(!side.open)return;
- const sec=SIDE_SECTIONS[side.section]||SIDE_SECTIONS.topics;
- const scroll=box.querySelector(".side-body")?.scrollTop||0,same=box.dataset.section===side.section;
+ const box=el("#side"),sp=currentSpace();if(!box)return;
+ const lists=(sp.side||[]).filter(k=>SIDE_SECTIONS[k]),open=sideOpen()&&lists.length>0;
+ box.hidden=!open;el("#side-gutter").hidden=!open;
+ box.style.width=S.ui.side.width+"px";
+ if(!open)return;
+ const scroll=box.querySelector(".side-body")?.scrollTop||0,same=box.dataset.space===sp.id;
  const focusId=document.activeElement?.closest?.("#side")?document.activeElement.dataset.sideInput:null;
- const html=await sec.render();
- box.dataset.section=side.section;
- box.innerHTML='<div class="side-head"><b>'+esc(sec.title)+'</b>'+(html.tools?html.tools+'<span class="side-sep"></span>':"")+iconButton("collapse","side-collapse","收起 · Ctrl B")+'</div><div class="side-body">'+html.body+'</div>';
+ const parts=[];for(const k of lists)parts.push({k,...await SIDE_SECTIONS[k].render()});
+ box.dataset.space=sp.id;
+ const one=parts.length===1,tools=one?parts[0].tools:"";
+ box.innerHTML='<div class="side-head"><b>'+esc(one?SIDE_SECTIONS[parts[0].k].title:sp.name)+'</b>'+(tools?tools+'<span class="side-sep"></span>':"")+iconButton("collapse","side-collapse","收起 · Ctrl B")+'</div>'+
+  '<div class="side-body">'+(one?parts[0].body:parts.map(x=>'<div class="side-part"><div class="side-sub"><b>'+esc(SIDE_SECTIONS[x.k].title)+'</b>'+(x.tools||"")+'</div>'+x.body+'</div>').join(""))+'</div>';
  if(same)box.querySelector(".side-body").scrollTop=scroll;
  if(focusId){const f=box.querySelector('[data-side-input="'+focusId+'"]');if(f){f.focus();f.setSelectionRange(f.value.length,f.value.length);}}
 }
@@ -125,11 +123,6 @@ function sideInput(t){
  if(t.dataset.sideInput==="cards"){Side.cardQuery=t.value;renderSide();return true;}
  if(t.dataset.sideInput==="search"){Side.query=t.value;clearTimeout(Side.stimer);Side.stimer=setTimeout(async()=>{Side.hits=t.value.trim()?await safe(()=>rpc("search",{query:t.value})):null;renderSide();},300);return true;}
  return false;
-}
-function showSection(section,open=true){
- const side=S.ui.side;
- if(section)side.section=section;
- side.open=open;saveUi();renderSide();
 }
 function initSideResize(){
  el("#side-gutter").addEventListener("mousedown",e=>{
