@@ -86,6 +86,7 @@ label.check input{margin:0}
 #side-gutter:hover{background:var(--accent)}
 .side-head{display:flex;align-items:center;gap:4px;padding:10px 10px 6px 14px;font-size:12.5px}
 .side-head b{flex:1;letter-spacing:.3px}
+.side-sep{width:1px;height:14px;background:var(--line-soft);margin:0 2px}
 .side-body{flex:1;overflow:auto;padding:0 6px 24px}
 .side-row{display:flex;align-items:center;gap:7px;padding:4px 8px 4px calc(8px + var(--d,0)*14px);border-radius:6px;cursor:pointer;white-space:nowrap;min-width:0;font-size:12.5px;color:var(--text)}
 .side-row>svg{flex:0 0 auto;color:var(--muted)}

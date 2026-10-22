@@ -179,6 +179,7 @@ async function onAction(a){
  case "new-menu":return newMenu(a);
  case "palette":return palette();
  case "theme":S.ui.theme=S.ui.theme==="dark"?"light":"dark";applyUi();return saveUi();
+ case "side-collapse":return showSection(null,false);
  case "side-section":{const k=a.dataset.section;if(S.ui.side.open&&S.ui.side.section===k)return showSection(k,false);return showSection(k,true);}
  case "side-stage":Side.stage=a.dataset.stage;return renderSide();
  case "open-home":return openPanel({type:"home"});

@@ -43,7 +43,7 @@ async function renderSide(){
  const focusId=document.activeElement?.closest?.("#side")?document.activeElement.dataset.sideInput:null;
  const html=await sec.render();
  box.dataset.section=side.section;
- box.innerHTML='<div class="side-head"><b>'+esc(sec.title)+'</b>'+(html.tools||"")+'</div><div class="side-body">'+html.body+'</div>';
+ box.innerHTML='<div class="side-head"><b>'+esc(sec.title)+'</b>'+(html.tools?html.tools+'<span class="side-sep"></span>':"")+iconButton("collapse","side-collapse","收起 · Ctrl B")+'</div><div class="side-body">'+html.body+'</div>';
  if(same)box.querySelector(".side-body").scrollTop=scroll;
  if(focusId){const f=box.querySelector('[data-side-input="'+focusId+'"]');if(f){f.focus();f.setSelectionRange(f.value.length,f.value.length);}}
 }
