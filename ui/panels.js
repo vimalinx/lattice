@@ -182,7 +182,7 @@ const opt=(value,list)=>list.map(([v,t])=>'<option value="'+esc(v)+'"'+(String(v
 const SETTINGS_RENDER={
  look(c){
   const u=S.ui;
-  return '<h3>外观</h3><div class="three"><label>主题<select data-ui="theme">'+opt(u.theme,[["dark","深色"],["light","浅色"]])+'</select></label>'+
+  return themeSettings()+'<h3>外观</h3><div class="three"><label>深色还是浅色<select data-ui="theme">'+opt(u.theme,[["dark","深色"],["light","浅色"]])+'</select></label>'+
    '<label>正文字号<input type="number" step="0.5" min="11" max="24" data-ui="font_size" value="'+esc(u.font_size)+'"/></label>'+
    '<label>代码字号<input type="number" step="0.5" min="10" max="24" data-ui="code_font_size" value="'+esc(u.code_font_size)+'"/></label></div>'+
    '<div class="three"><label>行距<input type="number" step="0.05" min="1.3" max="2.4" data-ui="line_height" value="'+esc(u.line_height)+'"/></label>'+

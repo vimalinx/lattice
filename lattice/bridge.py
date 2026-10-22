@@ -388,6 +388,12 @@ class Bridge(QObject):
         self.lattice.vault.commit("装上技能 " + slug, "me")
         return {"path": target + "/SKILL.md"}
 
+    def rpc_skill_trial(self, slug, agent="tutor"):
+        """A conversation of its own for trying a skill, apart from the main conversation and its history."""
+        found = skills.find(self.root, slug)
+        agent = agent if agent in found["agents"] else found["agents"][0]
+        return {"thread": self.lattice.thread_new(agent, None, "试用 · " + found["title"], {"trial": found["slug"]})["id"], "agent": agent}
+
     def rpc_skill_install_many(self, slugs):
         self.commit_mine()
         for slug in slugs[:100]:

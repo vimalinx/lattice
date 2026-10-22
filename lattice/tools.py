@@ -465,7 +465,9 @@ def hand_to_tutor(ctx, summary):
 UI_OP = {"type": "object", "properties": {"do": {"type": "string", "enum": ["open", "close", "focus", "move", "float", "layout", "workspace", "sidebar", "set"]},
                                           "panel": S, "agent": S, "path": S, "topic": S, "where": S, "to": S, "name": S, "icon": S,
                                           "side": {"type": "array", "items": S}, "new": {"type": "boolean"},
-                                          "open": {"type": "boolean"}, "key": S, "value": {}, "spec": {"type": "object"}}, "required": ["do"]}
+                                          "open": {"type": "boolean"}, "key": S, "value": {}, "spec": {"type": "object"},
+                                          "base": S, "vars": {"type": "object"}, "css": S, "font": S, "mono": S, "note": S,
+                                          "apply": {"type": "boolean"}, "replace": {"type": "boolean"}, "delete": {"type": "boolean"}}, "required": ["do"]}
 
 
 @tool("ui", {"tutor", "flash", "coach"}, "控制整个界面，ops 按顺序执行。界面分成几个工作区（活动栏上的图标，见 screen 的 workspace），每个是一套窗口组合，左栏放它自己的列表；"
@@ -476,6 +478,13 @@ UI_OP = {"type": "object", "properties": {"do": {"type": "string", "enum": ["ope
       "- layout：整个替换这个工作区的布局。spec 是 {\"split\": \"h\"或\"v\", \"sizes\": [0.5, 0.5], \"parts\": [spec, ...]}，叶子是 {\"tabs\": [面板, ...]}；面板可以是已有面板的 id，也可以是一个 open 那样的对象。\n"
       "- workspace：切到 name 那个工作区（名字或 id）。new 为 true 时新建一个并切过去：name、icon、side（左栏的列表：topics、cards、notes、lessons、work、practice、files、search）、spec（同 layout，不给就照现在的样子）。"
       "sidebar：open 为 false 时收起这个工作区的左栏，true 展开。\n"
+      "- theme：设计并套用一个主题（颜色和风格）。name 是主题名（同名就是在原来的上面改；name 为「默认」时回到默认外观）；base 是 dark 或 light，从哪种外观改起；"
+      "vars 是要改的颜色变量 {名字: CSS 颜色}，能改的有 bg（窗口底色）、panel（面板）、panel-hi（弹窗和输入框）、surface（卡片和按钮）、surface-hover、line、line-soft（边框）、"
+      "text、muted、subtle（三档文字）、accent（强调色）、accent-ink（强调色上的字）、accent-glow（强调色浅底）、ai、ai-glow（AI 的颜色）、amber、red、green、code-bg、code-text、"
+      "select-bg、active-line、tk-kw / tk-str / tk-num / tk-com / tk-fn / tk-type / tk-prop / tk-op / tk-tag（代码高亮）、rb0 / rb1 / rb2（彩虹括号）、shadow 和 pop-shadow（完整的 box-shadow 值）、veil（弹窗遮罩）；"
+      "font、mono 是正文和代码字体（本机装了的字体名）；css 是额外的 CSS，用来改圆角、阴影、间距等风格（不能用 url() 和 @import）；note 一句话说明这个主题；"
+      "apply 为 false 时只存不套用；replace 为 true 时颜色整套替换而不是合并；delete 为 true 时删掉这个主题。结果里的 warnings 会指出对比度不够、看不清的组合，要改到没有 warnings。"
+      "学习者能一键还原到你改之前。\n"
       "- set：改外观，key 是 theme（dark / light）、font_size、code_font_size、line_height、read_width（一行最多多少字，20～120，或 none 不限）、density（compact / comfortable）；"
       "key 为 zoom 时只改 panel 那一个窗口的大小，value 是倍数（1.2 即 120%）；给了 panel 的 line_height、read_width 也只改那一个窗口；value 为 null 恢复默认。\n"
       "界面只决定显示什么，不代表学习库里有什么：要知道有哪些卡片、笔记、主题、练习，用 list、graph 或 read 去查，不要从面板上推断。\n"

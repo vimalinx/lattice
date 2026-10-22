@@ -10,7 +10,7 @@ function topicTitle(id){return id?(S.data?.topics||[]).find(t=>t.id===id)?.title
 panelType("chat",{side:"ai",icon:p=>AGENT_ICON[p.agent]||"bot",
  title(p,node){
   const st=Chat[node?.dataset.pid],head=st?.data?.head;
-  if(p.agent==="coach")return head?.title||"练习";
+  if(p.agent==="coach"||head?.trial)return head?.title||"练习";
   const topic=head?.topic;return agentTitle(p.agent)+(topic?" · "+topicTitle(topic):"");
  },
  mount(p,node,pid){

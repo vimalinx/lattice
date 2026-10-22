@@ -34,6 +34,7 @@ function applyUi(){
  root.dataset.theme=u.theme==="light"?"light":"dark";root.dataset.density=u.density||"comfortable";
  root.style.setProperty("--font-size",(Number(u.font_size)||14.5)+"px");root.style.setProperty("--code-size",(Number(u.code_font_size)||13)+"px");
  root.style.setProperty("--line-height",String(Number(u.line_height)||1.8));root.style.setProperty("--read-width",readWidth(u.read_width));
+ applyTheme();
  Object.keys(Dock.panels).forEach(applyView);
  renderActivity();
 }
@@ -137,6 +138,7 @@ function sendScreen(){
  const shown=[];eachStack(s=>{if(s.active)shown.push(s.active);});
  const mine=shown.filter(pid=>sideOf(pid)==="mine").map(screenOf),ai=shown.filter(pid=>sideOf(pid)==="ai").map(screenOf);
  const state={layout:{stacks,focused:Dock.focus||null,nesting:layoutShape(Dock.layout.root)},ai:{panels:ai},mine:{files:mine.filter(x=>x.type==="file"),other:mine.filter(x=>x.type!=="file")},
+  look:{base:S.ui.theme,theme:S.ui.theme_custom||"默认",...(activeTheme()?{vars:activeTheme().vars,font:activeTheme().font||undefined,css:activeTheme().css?activeTheme().css.slice(0,600):undefined}:{}),saved:Object.keys(S.ui.themes||{})},
   workspace:{now:currentSpace().name,sidebar:sideOpen()?(currentSpace().side||[]):"收起",all:visibleSpaces().map(x=>x.name)},theme:S.ui.theme,
   open_but_hidden:stacks.flatMap(s=>s.tabs).filter(t=>!shown.includes(t.id)).map(t=>t.title),recent_files:Dwell.recent.slice(0,20),selection:Sel.text?shorten(Sel.text,600):undefined};
  return rpc("screen",{state});
@@ -197,7 +199,12 @@ async function onAction(a){
  case "new-menu":return newMenu(a);
  case "stack-add":return stackMenu(a,a.dataset.stack);
  case "palette":return palette();
- case "theme":S.ui.theme=S.ui.theme==="dark"?"light":"dark";applyUi();return saveUi();
+ case "theme":
+  // With a theme of its own in use, the button goes back to the plain look first.
+  if(S.ui.theme_custom){S.ui.theme_custom=null;toast("回到默认主题；设置的「外观」里可以再选回来");}else S.ui.theme=S.ui.theme==="dark"?"light":"dark";
+  applyUi();return saveUi();
+ case "theme-use":S.ui.theme_custom=a.dataset.name||null;if(S.ui.theme_custom)S.ui.theme=S.ui.themes[S.ui.theme_custom].base;applyUi();saveUi();return renderSettings(a.closest(".panel"),"look");
+ case "theme-delete":{if(!await ask("删掉以后可以再让 AI 做一个。",{title:"删除主题「"+a.dataset.name+"」？",danger:true,ok:"删除"}))return;themeOp({name:a.dataset.name,delete:true});return renderSettings(a.closest(".panel"),"look");}
  case "side-collapse":return setSideOpen(false);
  case "side-stage":Side.stage=a.dataset.stage;return renderSide();
  case "lib-stage":if(Dock.panels[pid]){Dock.panels[pid].stage=a.dataset.stage;saveLayout();renderLibrary(pid);}return;
@@ -361,6 +368,7 @@ function initInteractions(){
    // A / on its own picks a skill for this message.
    if(t.value==="/"){t.value="";if(Chat[pid])Chat[pid].input="";safe(()=>skillMenu(pid,t.closest(".capsule")||t));}
    return;}
+  if(t.dataset.themeVar){themeColorInput(t);return;}
   if(t.dataset.uiRange){S.ui[t.dataset.uiRange]=Number(t.value);const out=t.parentElement.querySelector("[data-range-out]");if(out)out.textContent=t.value+" 字";applyUi();return saveUi();}
   if(t.dataset.apiQuery!==undefined){Settings.apiQuery=t.value;const n=t.closest(".panel");renderSettings(n,"apis").then(()=>{const f=n.querySelector("[data-api-query]");if(f){f.focus();f.setSelectionRange(f.value.length,f.value.length);}});return;}
   if(t.closest?.(".panel-settings")&&settingsAutosave(t,false))return;

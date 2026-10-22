@@ -19,7 +19,7 @@ async function skillsSection(){
  const list=(await skillList()).filter(s=>s.state!=="absent"),q=SkillSide.query.trim().toLowerCase();
  const shown=list.filter(s=>!q||(s.title+s.name+s.description).toLowerCase().includes(q));
  const row=s=>sideRow(catIcon(s.category),s.title,'data-action="open-file" data-path="skills/'+esc(s.slug)+'/SKILL.md" title="'+esc(s.description)+'"',
-  s.enabled?(s.state==="update"?"有新版本":""):"已停用",'<button class="row-btn" data-action="skill-try" data-slug="'+esc(s.slug)+'" title="在主会话里用它">'+svg("bot",12)+'</button>'+
+  s.enabled?(s.state==="update"?"有新版本":""):"已停用",'<button class="row-btn" data-action="skill-try" data-slug="'+esc(s.slug)+'" title="开个临时会话试用">'+svg("bot",12)+'</button>'+
   '<button class="row-btn" data-action="skill-toggle" data-slug="'+esc(s.slug)+'" title="'+(s.enabled?"停用":"启用")+'">'+svg(s.enabled?"eye":"check",12)+'</button>');
  return {tools:iconButton("store","open-skills","技能商城")+iconButton("plus","skill-new","新建技能"),
   body:'<input class="side-input" data-side-input="skills" placeholder="筛选技能…" value="'+esc(SkillSide.query)+'"/>'+
@@ -64,7 +64,7 @@ async function skillDetail(slug){
   '<p class="muted">'+esc(s.description)+'</p><div class="markdown skill-body">'+markdown(full.body)+'</div>'+
   (full.files?.length?'<div class="field-label">附带的文件</div><div class="sk-files">'+full.files.map(f=>s.state==="absent"?'<span>'+svg("document",12)+' '+esc(f)+'</span>':'<a data-action="open-file" data-path="skills/'+esc(s.slug)+'/'+esc(f)+'">'+svg("document",12)+' '+esc(f)+'</a>').join("")+'</div>':"")+
   '<div class="modal-actions">'+(s.state==="absent"?button(svg("download",13)+" 装上","skill-install",'data-slug="'+esc(slug)+'"',"primary"):
-   button("在主会话里试用","skill-try",'data-slug="'+esc(slug)+'"',"primary")+button("打开文件改","skill-open",'data-slug="'+esc(slug)+'"',"ghost"))+'</div></div>',"large");
+   button("开个临时会话试用","skill-try",'data-slug="'+esc(slug)+'"',"primary")+button("打开文件改","skill-open",'data-slug="'+esc(slug)+'"',"ghost"))+'</div></div>',"large");
 }
 // Pick a skill for the next message in this conversation (or the main conversation, from the store).
 function useSkill(pid,s){
@@ -87,10 +87,12 @@ async function skillAction(kind,a){
    await rpc("skill_uninstall",{slug});await list();return skillsChanged();}
   case "skill-toggle":{const s=(await skillList()).find(x=>x.slug===slug);await rpc("skill_enable",{slug,on:!s.enabled});await list();skillsChanged();return toast(s.enabled?"停用了；AI 不会再看到它":"启用了");}
   case "skill-open":closeModal();return openFile("skills/"+slug+"/SKILL.md");
-  case "skill-try":{closeModal();const s=(await skillList()).find(x=>x.slug===slug);if(!s)return;
-   const agent=s.agents.includes("tutor")?"tutor":s.agents[0];let target=Object.keys(Chat).find(x=>Dock.panels[x]?.agent===agent&&!Dock.panels[x].thread);
-   if(!target)target=openPanel({type:"chat",agent});else activate(target);
-   const go=()=>{if(!Chat[target]?.data)return setTimeout(go,150);useSkill(target,s);};return go();}
+  case "skill-try":{
+   // A trial runs in a conversation of its own, so nothing of it lands in the main conversation.
+   closeModal();const s=(await skillList()).find(x=>x.slug===slug);if(!s)return;
+   const r=await rpc("skill_trial",{slug,agent:s.agents.includes("tutor")?"tutor":s.agents[0]});
+   const target=openPanel({type:"chat",agent:r.agent,thread:r.thread});
+   const go=()=>{if(!Chat[target]?.data)return setTimeout(go,150);useSkill(target,s);toast("这是试用「"+s.title+"」的单独会话，不会进主会话");};return go();}
   case "skill-new":{const title=await askText("新技能叫什么","",{hint:"比如「讲公式的三步法」；建好后会打开它的 SKILL.md，照模板写做法",ok:"新建"});if(!title)return;
    const r=await rpc("skill_create",{title});await list();skillsChanged();return openFile(r.path);}
   case "skill-import":{const r=await rpc("skill_import",{});if(!r)return;await list();skillsChanged();toast("导入了；Claude 的技能文件夹也能直接导入");return openFile(r.path);}

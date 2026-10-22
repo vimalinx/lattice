@@ -419,6 +419,8 @@ async function runUiOps(ops){
      createSpace({name:String(op.name).slice(0,20),icon:SPACE_ICONS.includes(op.icon)?op.icon:"layout",side:lists,spec:op.spec||null});
     }else{if(!found)throw new Error("没有这个工作区："+op.name+"；有："+visibleSpaces().map(x=>x.name).join("、"));switchSpace(found.id);}
     results.push({ok:true,workspace:currentSpace().name});
+   }else if(op.do==="theme"){
+    results.push(themeOp(op));
    }else if(op.do==="sidebar"){
     setSideOpen(op.open!==false);results.push({ok:true});
    }else if(op.do==="set"&&(op.key==="zoom"||op.panel&&VIEW_KEYS.includes(op.key))){

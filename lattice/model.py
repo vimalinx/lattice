@@ -822,7 +822,9 @@ class Lattice:
 
     def thread_for(self, agent, topic=None):
         """The conversation an agent is having about a topic (None: the default conversation)."""
-        row = self.index.one("SELECT id FROM threads WHERE agent=? AND topic IS ? AND json_extract(head,'$.practice') IS NULL ORDER BY created DESC LIMIT 1",
+        # Practice conversations and skill trials are threads of their own, never the conversation itself.
+        row = self.index.one("SELECT id FROM threads WHERE agent=? AND topic IS ? AND json_extract(head,'$.practice') IS NULL "
+                             "AND json_extract(head,'$.trial') IS NULL ORDER BY created DESC LIMIT 1",
                              (agent, topic))
         if row:
             return row["id"]
