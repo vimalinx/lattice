@@ -47,6 +47,30 @@ def title_of(value):
     return value
 
 
+# [[target]], [[target|shown text]], [[target#heading]], and ![[embedded]].
+WIKI = re.compile(r"!?\[\[([^\]\n]+)\]\]")
+TAG = re.compile(r"(?<![\w#&/])#([^\s#.,;:!?，。；：！？、()（）\[\]{}<>\"'`*]+)")
+CODE = re.compile(r"```.*?```|~~~.*?~~~|`[^`\n]*`", re.S)
+
+
+def wiki_target(raw):
+    return raw.split("|", 1)[0].split("#", 1)[0].strip()
+
+
+def outside_code(body, change):
+    """Apply change() to the parts of a Markdown text that are not code."""
+    out, last = [], 0
+    for m in CODE.finditer(body or ""):
+        out += [change(body[last:m.start()]), m.group(0)]
+        last = m.end()
+    return "".join(out + [change((body or "")[last:])])
+
+
+def inline_tags(body):
+    """#tags in a document's text, outside code; a tag needs something besides digits."""
+    return [t for t in dict.fromkeys(TAG.findall(CODE.sub("", body or ""))) if not t.isdigit()]
+
+
 def split_mine(body):
     """A card body and the learner's own section under '## 我的理解'."""
     match = re.search(r"^## 我的理解[ \t]*$", body, re.M)
@@ -413,7 +437,9 @@ class Lattice:
         return self.doc(attrs["id"])
 
     def note_create(self, title, body, folder="随手记", tags=(), by="me", topic=None):
-        folder = "notes/" + (re.sub(r'[\\:*?"<>|]', " ", str(folder or "随手记")).strip(" /")[:80] or "随手记")
+        """A note in a folder under notes/; an empty folder means notes/ itself."""
+        clean = "/".join(p for p in re.sub(r'[\\:*?"<>|]', " ", str("随手记" if folder is None else folder)).split("/") if p.strip() and p.strip() not in (".", ".."))
+        folder = "notes" + ("/" + clean.strip()[:120] if clean.strip() else "")
         attrs = {"id": uid(), "kind": "note", "title": title_of(title), "tags": [text(str(t), 40) for t in list(tags)[:20]], "by": by, "topic": topic}
         return self._write_doc(folder, attrs, text(body))
 
@@ -534,12 +560,127 @@ class Lattice:
         return target
 
     def delete_file(self, path):
-        _, rel = self.resolve(path)
-        if rel is None or rel.startswith(APPEND_ONLY) or rel in {"AGENTS.md", ""}:
+        absolute, rel = self.resolve(path)
+        if rel is None or rel.startswith(APPEND_ONLY) or rel in {"AGENTS.md", ""} or "/" not in rel and absolute.is_dir():
             raise ValueError("这个文件不能删除")
+        inside = [self.vault.rel(p) for p in absolute.rglob("*") if p.is_file()] if absolute.is_dir() else [rel]
         self.vault.remove(rel)
-        self.index.unindex(rel)
+        for f in inside:
+            self.index.unindex(f)
         return True
+
+    # ---- managing notes and their folders: the learner's own filing ------------------------------------------
+    def _movable(self, path):
+        absolute, rel = self.resolve(path)
+        if rel is None or "/" not in rel or rel.startswith(APPEND_ONLY) or rel.startswith(".lattice/") or not absolute.exists():
+            raise ValueError("这个不能移动或改名")
+        return absolute, rel
+
+    def _relocate(self, rel, target):
+        absolute = self.vault.path(rel)
+        if self.vault.path(target).exists():
+            raise ValueError("那里已经有同名的了：" + target)
+        inside = [self.vault.rel(p) for p in absolute.rglob("*") if p.is_file()] if absolute.is_dir() else [rel]
+        self.vault.move(rel, target)
+        for old in inside:
+            self.index.unindex(old)
+            self.index.reindex(target + old[len(rel):])
+        return target
+
+    def move_into(self, path, folder):
+        """Move a file or folder into another folder of the same kind, so a note stays a note."""
+        _, rel = self._movable(path)
+        dest_abs, dest = self.resolve(folder)
+        if dest is None or not dest_abs.is_dir():
+            raise ValueError("目标不是学习库里的文件夹")
+        if dest.split("/", 1)[0] != rel.split("/", 1)[0]:
+            raise ValueError("只能移到同一类的文件夹里（笔记留在笔记里）")
+        if dest == rel or dest.startswith(rel + "/"):
+            raise ValueError("不能把文件夹移进它自己里面")
+        if rel.rsplit("/", 1)[0] == dest:
+            return rel
+        return self._relocate(rel, dest + "/" + rel.rsplit("/", 1)[-1])
+
+    def folder_rename(self, path, name):
+        absolute, rel = self._movable(path)
+        if not absolute.is_dir():
+            raise ValueError("这不是文件夹")
+        clean = re.sub(r'[\\/:*?"<>|]', " ", str(name)).strip()[:120]
+        if not clean or clean in (".", ".."):
+            raise ValueError("文件夹名不能为空")
+        return self._relocate(rel, rel.rsplit("/", 1)[0] + "/" + clean)
+
+    def folder_create(self, parent, name):
+        absolute, rel = self.resolve(parent)
+        clean = "/".join(p.strip() for p in re.sub(r'[\\:*?"<>|]', " ", str(name)).split("/") if p.strip() and p.strip() not in (".", ".."))
+        if rel is None or not rel or rel.startswith(APPEND_ONLY) or rel.startswith(".lattice") or not clean:
+            raise ValueError("这里不能建文件夹")
+        target = self.vault.path(rel + "/" + clean[:120])
+        target.mkdir(parents=True, exist_ok=True)
+        return self.vault.rel(target)
+
+    def relink(self, old, new):
+        """A renamed document keeps its links: [[old]] (with a heading or shown text) becomes [[new]] everywhere."""
+        if not old or not new or old == new:
+            return 0
+        pattern = re.compile(r"(!?\[\[)" + re.escape(old) + r"(?=\s*[\]|#])", re.I)
+        changed = 0
+        for d in self.index.rows("SELECT id, body FROM docs WHERE body LIKE ?", ("%[[%",)):
+            if pattern.search(d["body"] or ""):
+                self._edit_doc(d["id"], lambda a, b: (a, outside_code(b, lambda part: pattern.sub(lambda m: m.group(1) + new, part))))
+                changed += 1
+        return changed
+
+    def note_links(self, ident):
+        """For one document: what links to it, where its title appears without a link, and what it links to."""
+        row = self.doc(ident)
+        key = row["title"].casefold()
+        docs = self.index.rows("SELECT id, kind, title, path, body FROM docs")
+        by_title = {}
+        for d in docs:
+            by_title.setdefault(d["title"].casefold(), d)
+        brief = lambda d: {"id": d["id"], "kind": d["kind"], "title": d["title"], "path": d["path"]}
+        backlinks, unlinked = [], []
+        for d in docs:
+            if d["id"] == row["id"]:
+                continue
+            lines = (d["body"] or "").split("\n")
+            linked = [i for i, l in enumerate(lines) if any(wiki_target(m).casefold() == key for m in WIKI.findall(l))]
+            if linked:
+                backlinks.append({**brief(d), "lines": [{"line": i + 1, "text": lines[i].strip()[:240]} for i in linked[:5]]})
+                continue
+            if len(key) >= 2:
+                plain = [i for i, l in enumerate(lines) if key in WIKI.sub("", l).casefold()]
+                if plain:
+                    unlinked.append({**brief(d), "lines": [{"line": i + 1, "text": lines[i].strip()[:240]} for i in plain[:3]]})
+        known = {b["id"] for b in backlinks}
+        for l in self.links_of(row["id"]):
+            other = l["source"] if l["target"] == row["id"] else None
+            if other and other not in known:
+                d = next((x for x in docs if x["id"] == other), None)
+                if d:
+                    known.add(other)
+                    backlinks.append({**brief(d), "lines": [], "link": l["kind"]})
+        outgoing, seen = [], set()
+        for raw in WIKI.findall(row["body"] or ""):
+            name = wiki_target(raw)
+            if not name or name.casefold() in seen:
+                continue
+            seen.add(name.casefold())
+            d = by_title.get(name.casefold())
+            path = d["path"] if d else (name if self.vault.path(name).is_file() else None) if "/" in name or "." in name else None
+            outgoing.append({"name": name, "path": path, "kind": d["kind"] if d else ("file" if path else None)})
+        return {"title": row["title"], "backlinks": backlinks[:100], "unlinked": unlinked[:60], "outgoing": outgoing[:200]}
+
+    def tags(self):
+        """Every tag, from documents' attributes and #tags in their text, with the documents that carry it."""
+        out = {}
+        for d in self.index.rows("SELECT id, kind, title, path, attrs, body FROM docs"):
+            a = json.loads(d["attrs"])
+            names = {str(t).strip().lstrip("#") for t in (a.get("tags") or []) if str(t).strip()} | set(inline_tags(d["body"]))
+            for n in names:
+                out.setdefault(n, []).append({"id": d["id"], "kind": d["kind"], "title": d["title"], "path": d["path"]})
+        return sorted(({"tag": k, "count": len(v), "docs": v} for k, v in out.items()), key=lambda x: (-x["count"], x["tag"].casefold()))
 
     def tree(self, path=""):
         """One level of a folder: the vault root, a vault folder, or a mounted folder."""
@@ -920,8 +1061,8 @@ class Lattice:
             edges.append({"id": "r:" + l["id"], "source": l["source"], "target": l["target"], "kind": l["kind"], "why": l["why"]})
         pairs = {frozenset((e["source"], e["target"])) for e in edges}
         for d in docs:
-            for name in dict.fromkeys(re.findall(r"\[\[([^\]]+)\]\]", d["body"] or "")):
-                target = by_title.get(name.strip().casefold())
+            for name in dict.fromkeys(wiki_target(m) for m in WIKI.findall(d["body"] or "")):
+                target = by_title.get(name.casefold())
                 if target and target != d["id"] and frozenset((d["id"], target)) not in pairs:
                     pairs.add(frozenset((d["id"], target)))
                     edges.append({"id": "w:" + d["id"] + ":" + target, "source": d["id"], "target": target, "kind": "mentions"})

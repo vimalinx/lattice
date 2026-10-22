@@ -9,8 +9,9 @@ const SPACES=[
  // The card library is this workspace's list, so its sidebar stays empty unless the learner adds one.
  {id:"cards",name:"知识卡",icon:"card",side:[],
   spec:{split:"h",sizes:[.38,.62],parts:[{tabs:[{type:"library"}]},{split:"v",sizes:[.7,.3],parts:[{tabs:[{type:"review"},{type:"memory"}],keep:true},{tabs:[FLASH]}]}]}},
+ // Notes as in Obsidian: the folder tree on the left, the note in the middle, its outline and links beside it.
  {id:"notes",name:"笔记与课程",icon:"document",side:["notes","lessons"],
-  spec:{split:"h",sizes:[.66,.34],parts:[{tabs:[],keep:true},{tabs:[FLASH]}]}},
+  spec:{split:"h",sizes:[.7,.3],parts:[{tabs:[],keep:true},{split:"v",sizes:[.56,.44],parts:[{tabs:[{type:"noteinfo"}]},{tabs:[FLASH]}]}]}},
  {id:"work",name:"实验与代码",icon:"flask",side:["work","practice"],
   spec:{split:"h",sizes:[.64,.36],parts:[{tabs:[],keep:true},{tabs:[FLASH]}]}},
  {id:"map",name:"知识图",icon:"network",side:["topics"],
@@ -72,7 +73,7 @@ function switchSpace(id){
   setLayout(Dock.spaces[id]);tidy();
   const shown=[];eachStack(s=>{if(s.active)shown.push(s.active);});
   Dock.focus=shown.find(hosts)||shown[0]||null;
-  renderDock();saveLayout();spaceSettingsChanged();
+  renderDock();saveLayout();spaceSettingsChanged();noteFollow();
  }
  renderSide();
 }

@@ -6,7 +6,7 @@
 const SIDE_SECTIONS={
  topics:{title:"主题",icon:"map",render:topicsSection},
  cards:{title:"知识卡",icon:"card",render:cardsSection},
- notes:{title:"笔记",icon:"document",render:notesSection},
+ notes:{title:"笔记",icon:"document",render:()=>notesSection()},
  lessons:{title:"课程",icon:"book",render:lessonsSection},
  work:{title:"实验与代码",icon:"flask",render:workSection},
  practice:{title:"练习与薄弱点",icon:"code",render:practiceSection},
@@ -73,10 +73,6 @@ function cardsSection(){
   cards.map(c=>sideRow("card",c.title,'data-action="open-file" data-path="'+esc(c.path)+'"','<i class="stage-dot" style="background:'+stageColor[c.stage]+'"></i>'+(due.has(c.id)?" 到期":""))).join("")+
   (cards.length?"":'<p class="side-empty">没有符合的卡片。</p>')};
 }
-function notesSection(){
- const groups={};docsOf("note").forEach(n=>{const f=n.path.split("/").slice(1,-1).join("/")||"笔记";(groups[f]=groups[f]||[]).push(n);});
- return {tools:iconButton("plus","new-note","写记录"),body:Object.entries(groups).sort().map(([f,list])=>sideGroup(f,list.map(n=>sideRow("document",n.title,'data-action="open-file" data-path="'+esc(n.path)+'"',esc(fmtDate(n.updated)))))).join("")||'<p class="side-empty">还没有笔记。Ctrl+N 随手写一篇。</p>'};
-}
 function lessonsSection(){
  const groups={};docsOf("lesson").forEach(l=>{const t=topicTitle(l.topic)||"不属于主题";(groups[t]=groups[t]||[]).push(l);});
  return {tools:"",body:Object.entries(groups).map(([t,list])=>sideGroup(t,list.map(l=>sideRow("book",l.title,'data-action="open-file" data-path="'+esc(l.path)+'"')))).join("")||'<p class="side-empty">讲完值得回看的一步，主会话会把它存成课程。</p>'};
@@ -121,6 +117,7 @@ function sideChanged(paths){
 }
 function sideInput(t){
  if(t.dataset.sideInput==="cards"){Side.cardQuery=t.value;renderSide();return true;}
+ if(t.dataset.sideInput==="notes"){Notes.query=t.value;renderSide();return true;}
  if(t.dataset.sideInput==="search"){Side.query=t.value;clearTimeout(Side.stimer);Side.stimer=setTimeout(async()=>{Side.hits=t.value.trim()?await safe(()=>rpc("search",{query:t.value})):null;renderSide();},300);return true;}
  return false;
 }

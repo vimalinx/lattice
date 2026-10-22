@@ -23,7 +23,10 @@ async function restoreDock(saved){
 function sideOf(pid){const p=Dock.panels[pid];return p?(Dock.types[p.type]?.side||"mine"):"mine";}
 // A panel that lists things to open (the card library, the map) opens them beside itself, not on top of itself.
 function hosts(pid){const p=Dock.panels[pid];return !!p&&Dock.types[p.type]?.host!==false;}
-function remember(pid){const s=stackOf(pid);if(s&&hosts(pid))Dock.lastStack[sideOf(pid)]=s.id;}
+function remember(pid){
+ const s=stackOf(pid);if(s&&hosts(pid))Dock.lastStack[sideOf(pid)]=s.id;
+ if(typeof noteFollow==="function")noteFollow();
+}
 
 /* ---- tree helpers ---------------------------------------------------------------------------- */
 function eachStack(fn,layout=Dock.layout){
@@ -102,7 +105,7 @@ function openPanel(params,opts={}){
  const side=Dock.types[params.type]?.side||"mine";
  const stack=opts.stack?findStack(opts.stack)||targetStack(side):targetStack(side);
  stack.tabs.push(pid);
- if(opts.activate!==false)stack.active=pid;
+ if(opts.activate!==false){stack.active=pid;Dock.focus=pid;}
  mountPanel(pid);renderDock();saveLayout();
  if(opts.then)opts.then(pid);
  return pid;

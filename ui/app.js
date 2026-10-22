@@ -48,7 +48,8 @@ const NEW_ITEMS=[
  ["新知识卡","new-card","card","自己记下一个知识点"],["主会话","open-agent","bot","",'data-agent="tutor"'],["快答","open-agent","spark","",'data-agent="flash"'],
  ["新工作区…","space-new","layout","自己搭一套窗口组合"]];
 // Panels that already have a button of their own; the palette still lists them as commands.
-const PANEL_ITEMS=[["开始","open-home","home",""],["知识图","open-map","network",""],["学习轨迹","open-journal","history",""],["回顾","open-review","refresh",""],["卡片库","open-library","card",""],["记忆","open-memory","calendar",""],["设置","open-settings","sliders",""]];
+const PANEL_ITEMS=[["开始","open-home","home",""],["知识图","open-map","network",""],["学习轨迹","open-journal","history",""],["回顾","open-review","refresh",""],["卡片库","open-library","card",""],["记忆","open-memory","calendar",""],
+ ["快速打开笔记 · Ctrl O","note-switcher","document",""],["今天的日记","note-daily","calendar",""],["大纲与链接","open-noteinfo","list",""],["设置","open-settings","sliders",""]];
 function newMenu(anchor){
  const r=anchor.getBoundingClientRect();
  const menu=h('<div class="menu" style="left:'+(r.right+6)+'px;top:'+r.top+'px">'+NEW_ITEMS.map(([t,a,i,d,x],k)=>(k===4||k===6?'<hr/>':'')+'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+(d?'<small>'+esc(d)+'</small>':"")+'</span></button>').join("")+'</div>');
@@ -88,7 +89,7 @@ async function newScratch(kind){
   path=(await rpc("file_create",{folder:"code",name})).path;
  }
  await refreshState();
- openPanel({type:"file",path,scratch:kind!=="notebook"},{then:pid=>setTimeout(()=>Dock.els[pid]?.querySelector("textarea")?.focus(),300)});
+ openPanel({type:"file",path,scratch:kind!=="notebook"},{then:pid=>setTimeout(()=>focusEditor(Dock.els[pid]),400)});
 }
 /* ---- the command palette -------------------------------------------------------------------------------- */
 function palette(){
@@ -195,6 +196,7 @@ async function onAction(a){
  case "open-review":{const had=findPanel({type:"review"}),id=openPanel({type:"review"});if(had)loadReview(Dock.els[id]);return;}
  case "open-library":return openPanel({type:"library"});
  case "open-memory":return openPanel({type:"memory"});
+ case "open-noteinfo":return openPanel({type:"noteinfo"});
  case "open-settings":{const page=a.dataset.page,had=findPanel({type:"settings"}),id=openPanel({type:"settings",...(page?{page}:{})});if(had&&page)renderSettings(Dock.els[id],page);return;}
  case "open-file":return openFile(a.dataset.path||a.dataset.id,{line:a.dataset.line?Number(a.dataset.line):null,highlight:a.dataset.highlight||null});
  case "open-doc":{const d=(S.data.docs||[]).find(x=>x.id===a.dataset.id);if(d)return openFile(d.path);return toast("找不到这个文档，它可能已经被删除","error");}
@@ -289,6 +291,7 @@ async function onAction(a){
  case "file-history":return showHistory(pid);
  }
  if(kind.startsWith("space")||kind==="stack-unkeep"){const r=await spaceAction(kind,a);if(r!==null)return r;}
+ if(/^(note-|noteinfo-|folder-new|ni-|switcher-)/.test(kind)){const r=await notesAction(kind,a);if(r!==null)return r;}
  if(a.closest(".panel-settings")){const r=await settingsAction(kind,a);if(r!==null)return r;}
  return fileAction(kind,a);
 }
@@ -321,8 +324,8 @@ function initInteractions(){
  initDock();
  document.addEventListener("click",e=>{
   const wiki=e.target.closest("a[data-wiki]");
-  if(wiki){e.preventDefault();const name=wiki.dataset.wiki.trim().toLowerCase(),d=(S.data.docs||[]).find(x=>x.title.toLowerCase()===name);
-   if(d)openFile(d.path);else if(confirm("「"+wiki.dataset.wiki+"」还没有对应的文档，新建一篇笔记吗？"))safe(async()=>{const r=await rpc("doc_create",{kind:"note",title:wiki.dataset.wiki});await refreshState();openFile(r.path);});return;}
+  if(wiki){e.preventDefault();safe(()=>openWiki(wiki.dataset.wiki,wiki.closest(".panel")?.dataset.pid));return;}
+  const tag=e.target.closest("a.tag[data-tag]");if(tag){e.preventDefault();showTag(tag.dataset.tag);return;}
   const link=e.target.closest(".markdown a[href^='http']");if(link){e.preventDefault();safe(()=>rpc("open_url",{url:link.href}));return;}
   if(!e.target.closest(".menu,[data-action='new-menu']"))closeMenus();
   if(e.target.closest("[data-dismiss]")&&e.target===e.target.closest("[data-dismiss]")){closeModal();return;}
@@ -330,7 +333,8 @@ function initInteractions(){
  });
  document.addEventListener("input",e=>{
   const t=e.target;
-  if(t.id==="palette-q")return paletteFilter(t.value);
+  if(t.id==="palette-q")return t.dataset.switcher!=null?switcherFilter(t.value):paletteFilter(t.value);
+  if(t.dataset.niTagQuery){const p=Dock.panels[t.dataset.niTagQuery];if(p){p.tagQuery=t.value;renderTags(t.dataset.niTagQuery).then(()=>{const f=el('[data-ni-tag-query="'+t.dataset.niTagQuery+'"]');if(f){f.focus();f.setSelectionRange(f.value.length,f.value.length);}});}return;}
   if(t.dataset.composer){if(Chat[t.dataset.composer])Chat[t.dataset.composer].input=t.value;fitComposer(t.dataset.composer);return;}
   if(t.dataset.uiRange){S.ui[t.dataset.uiRange]=Number(t.value);const out=t.parentElement.querySelector("[data-range-out]");if(out)out.textContent=t.value+" 字";applyUi();return saveUi();}
   if(t.closest?.(".panel-settings")&&settingsAutosave(t,false))return;
@@ -349,6 +353,8 @@ function initInteractions(){
  });
  document.addEventListener("keydown",e=>{
   const mod=e.ctrlKey||e.metaKey,t=e.target;
+  // A key the editor already used (bold, indent, its search…) is not also a program shortcut.
+  if(e.defaultPrevented&&t.closest?.(".cm-editor"))return;
   if(e.key==="Escape"){if(el(".modal-backdrop")){closeModal();return;}closeMenus();hidePop();return;}
   if(el("#palette-list")&&["ArrowDown","ArrowUp","Enter"].includes(e.key)){
    const items=all("#palette-list .pal-item");if(!items.length)return;
@@ -364,6 +370,7 @@ function initInteractions(){
   if(mod&&!e.altKey&&["=","+","-","0"].includes(e.key)){const pid=panelHere();if(pid){e.preventDefault();stepZoom(pid,e.key==="0"?0:e.key==="-"?-1:1);}return;}
   if(fileKey(e))return;
   if(mod&&e.key.toLowerCase()==="k"){e.preventDefault();palette();return;}
+  if(mod&&e.key.toLowerCase()==="o"){e.preventDefault();switcher();return;}
   if(mod&&e.key.toLowerCase()==="s"){e.preventDefault();safe(async()=>{await flushAll();toast("已保存");});return;}
   if(mod&&e.key.toLowerCase()==="n"){e.preventDefault();safe(()=>newScratch("note"));return;}
   if(mod&&e.key.toLowerCase()==="j"){e.preventDefault();const f=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="flash")||openPanel({type:"chat",agent:"flash"});activate(f);setTimeout(()=>Dock.els[f]?.querySelector(".composer textarea")?.focus(),50);return;}

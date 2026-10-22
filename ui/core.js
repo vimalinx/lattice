@@ -25,6 +25,12 @@ function svg(name,size=18){
   search:'<circle cx="10.6" cy="10.6" r="6.5"/><path d="m15.6 15.6 5 5"/>',
   plus:'<path d="M12 5v14M5 12h14"/>',
   chevron:'<path d="m9 18 6-6-6-6"/>',
+  list:'<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>',
+  star:'<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+  sort:'<path d="M7 4v16m0 0-3-3m3 3 3-3M17 20V4m0 0-3 3m3-3 3 3"/>',
+  folderplus:'<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v6m-3-3h6"/>',
+  notenew:'<path d="M6 2h8l5 5v14a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M14 2v6h6M12 11v6m-3-3h6"/>',
+  fold:'<path d="m7 20 5-5 5 5M7 4l5 5 5-5"/>',
   collapse:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m6-11-3 3 3 3"/>',
   chevrondown:'<path d="m6 9 6 6 6-6"/>',
   arrow:'<path d="M5 12h14m-7-7 7 7-7 7"/>',
@@ -102,9 +108,24 @@ async function runMermaid(){
 function markdown(text){
  const src=String(text||""),codes=[];
  const masked=src.replace(/(`+)([\s\S]*?)\1/g,m=>{codes.push(m);return "\u0000"+(codes.length-1)+"\u0000";});
- const linked=masked.replace(/\[\[([^\]]+)\]\]/g,(_,name)=>'<a class="wikilink" data-wiki="'+esc(name)+'">'+esc(name)+'</a>').replace(/\u0000(\d+)\u0000/g,(_,i)=>codes[+i]);
- try{const out=DOMPurify.sanitize(marked.parse(linked,{breaks:true,gfm:true}),{ADD_ATTR:["data-wiki"]});if(out.includes('class="mermaid"'))scheduleMermaid();return out;}
+ // [[target|shown]] links, ![[image]] embeds and #tags; images from the vault are filled in afterwards (hydrateImages).
+ const linked=masked.replace(/(!?)\[\[([^\]\n]+)\]\]/g,(_,bang,inner)=>{
+   const bar=inner.indexOf("|"),target=(bar<0?inner:inner.slice(0,bar)).split("#")[0].trim(),shown=bar<0?inner:inner.slice(bar+1);
+   if(bang&&/\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(target))return '<img data-vault-src="'+esc(target)+'" alt="'+esc(bar<0?"":shown)+'"/>';
+   return '<a class="wikilink" data-wiki="'+esc(target)+'">'+esc(shown)+'</a>';})
+  .replace(/(^|[\s(（])#([^\s#.,;:!?，。；：！？、()（）\[\]{}<>"'`*]+)/gm,(m,pre,tag)=>/^\d+$/.test(tag)?m:pre+'<a class="tag" data-tag="'+esc(tag)+'">#'+esc(tag)+'</a>')
+  .replace(/\u0000(\d+)\u0000/g,(_,i)=>codes[+i]);
+ try{const out=DOMPurify.sanitize(marked.parse(linked,{breaks:true,gfm:true}),{ADD_ATTR:["data-wiki","data-tag","data-vault-src"]});if(out.includes('class="mermaid"'))scheduleMermaid();return out;}
  catch(_){return '<pre>'+esc(text)+'</pre>';}
+}
+/* Images in rendered Markdown that name a vault file: load them through the backend (the page cannot read the vault). */
+function hydrateImages(root,base){
+ if(typeof vaultImage!=="function"||!root)return;
+ for(const img of all("img",root)){
+  const src=img.dataset.vaultSrc||(img.getAttribute("src")&&!/^(https?:|data:|qrc:|blob:)/.test(img.getAttribute("src"))?img.getAttribute("src"):null);
+  if(!src||img.dataset.hydrated)continue;img.dataset.hydrated="1";img.removeAttribute("src");
+  vaultImage(src,base).then(url=>{if(url)img.src=url;else img.alt="图片找不到："+src;});
+ }
 }
 async function rpc(method,args={},timeout=240000){
  if(!S.bridge)throw new Error("本地桌面桥尚未连接");

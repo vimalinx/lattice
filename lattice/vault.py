@@ -178,6 +178,9 @@ class Vault:
         self.known.pop(old, None)
         if target.is_file():
             self.known[new] = self._stat(new)
+        else:
+            for k in [k for k in self.known if k.startswith(old + "/")]:
+                self.known[new + k[len(old):]] = self.known.pop(k)
         self.pending |= {old, new}
         return new
 

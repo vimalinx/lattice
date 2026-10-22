@@ -24,7 +24,7 @@ from PySide6.QtWidgets import QFileDialog
 from . import agents, tools
 from .envs import Envs, missing_module
 from .index import dump, uid
-from .model import Lattice, STAGES, readable_outputs, text
+from .model import Lattice, STAGES, outside_code, readable_outputs, text
 from .notebook import NotebookWorker
 from .providers import AGENT_NAMES, ApiWorker, Config
 from .runner import RunWorker, command_for, missing_tool, runner_for, tool_hint
@@ -165,11 +165,22 @@ class Bridge(QObject):
         except Exception as exc:
             LOG.warning("commit failed: %s", exc)
 
-    def rpc_bootstrap(self):
+    def _local_state(self):
+        """This machine's state for the vault (layout, bookmarks); it can be lost without losing any learning."""
         try:
-            state = json.loads(self.state_path.read_text(encoding="utf-8"))
+            return json.loads(self.state_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            state = {}
+            return {}
+
+    def _local_save(self, key, value):
+        state = self._local_state()
+        state[key] = value
+        tmp = self.state_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, self.state_path)
+
+    def rpc_bootstrap(self):
+        state = self._local_state()
         return {**self.rpc_state(), "vault": str(self.root), "layout": state.get("layout"), "config": self.config.public(),
                 "sandbox": {"ok": self.sandbox.available(), "why": self.sandbox.why_not()}, "migrated": self.lattice.migrated,
                 "problems": self.lattice.index.problems[:20]}
@@ -193,18 +204,20 @@ class Bridge(QObject):
                 "insights": self.catalog("insights", state="active"),
                 "due": sum(c["due_now"] for c in cards), "practices": self.catalog("practices"), "busy": sorted(self.busy), "status": self.status,
                 "kernels": self.kernel_states, "running": [{"run": k, "path": v["path"], "by": v["by"]} for k, v in self.runs.items()],
-                "agents": {name: AGENT_NAMES[name] for name in agents.NAMES}, "undone": sorted(l.undone())}
+                "agents": {name: AGENT_NAMES[name] for name in agents.NAMES}, "undone": sorted(l.undone()),
+                "starred": self._local_state().get("starred", [])}
 
     def rpc_layout_save(self, layout):
-        try:
-            state = json.loads(self.state_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            state = {}
-        state["layout"] = layout
-        tmp = self.state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, self.state_path)
+        self._local_save("layout", layout)
         return True
+
+    def rpc_star(self, id, on=True):
+        """Bookmark a document (by id, so it survives renames and moves)."""
+        starred = [x for x in self._local_state().get("starred", []) if x != id]
+        if on:
+            starred.insert(0, id)
+        self._local_save("starred", starred[:200])
+        return starred[:200]
 
     def rpc_tree(self, path=""):
         return self.lattice.tree(path)
@@ -287,6 +300,7 @@ class Bridge(QObject):
         kind = kind_of(rel)
         ident = l.index.one("SELECT id FROM files WHERE path=?", (rel,))["id"]
         current = l.doc(ident)
+        renamed = "title" in fields and str(fields["title"]).strip() and str(fields["title"]).strip() != current["title"]
         if kind == "card":
             card = l.card(ident)
             l.card_save({"id": ident, "title": fields.get("title", card["title"]), "body": fields.get("body", card["body"]),
@@ -308,14 +322,17 @@ class Bridge(QObject):
             l._edit_doc(ident, change)
         new = l.index.locate(ident) or rel
         self.edits[new] = time.monotonic()
-        return {"path": new, "mtime": l.vault.mtime(new), "title": l.doc(ident)["title"] if l.index.locate(ident) else current["title"]}
+        title = l.doc(ident)["title"] if l.index.locate(ident) else current["title"]
+        # Renaming keeps every [[link]] to it working.
+        relinked = l.relink(current["title"], title) if renamed else 0
+        return {"path": new, "mtime": l.vault.mtime(new), "title": title, "relinked": relinked}
 
     def rpc_file_create(self, folder="code", name="未命名.py", content=""):
         rel = self.lattice.create_file(folder, name, content)
         self.last_write = time.monotonic()
         return {"path": rel}
 
-    def rpc_doc_create(self, kind, title, topic=None, body=""):
+    def rpc_doc_create(self, kind, title, topic=None, body="", folder=None):
         l = self.lattice
         if kind == "topic":
             return {"path": l.topic_save({"title": title, "question": body})["path"]}
@@ -324,13 +341,67 @@ class Bridge(QObject):
         if kind == "lesson":
             return {"path": l.lesson_save({"title": title, "topic": topic, "body": body})["path"]}
         if kind == "note":
-            return {"path": l.note_create(title, body, "随手记", (), "me", topic)}
+            return {"path": l.note_create(title, body, "随手记" if folder is None else folder, (), "me", topic)}
         if kind == "notebook":
             return {"path": l.notebook_create(title, topic)}
         raise ValueError("不知道怎么新建这种文档")
 
     def rpc_file_rename(self, path, name):
         return {"path": self.lattice.rename_file(path, name)}
+
+    def rpc_move(self, path, folder):
+        self.last_write = time.monotonic()
+        return {"path": self.lattice.move_into(path, folder)}
+
+    def rpc_folder_create(self, parent, name):
+        return {"path": self.lattice.folder_create(parent, name)}
+
+    def rpc_folder_rename(self, path, name):
+        self.last_write = time.monotonic()
+        return {"path": self.lattice.folder_rename(path, name)}
+
+    def rpc_note_links(self, path):
+        _, rel = self.lattice.resolve(path)
+        row = self.lattice.index.one("SELECT id FROM files WHERE path=?", (rel,)) if rel else None
+        if not row or not row["id"]:
+            return {"title": "", "backlinks": [], "unlinked": [], "outgoing": []}
+        return self.lattice.note_links(row["id"])
+
+    def rpc_tags(self):
+        return self.lattice.tags()
+
+    def rpc_link_mention(self, path, title):
+        """Turn the first plain mention of a title in a document into a [[link]], keeping the words as written."""
+        l = self.lattice
+        _, rel = l.resolve(path)
+        row = l.index.one("SELECT id FROM files WHERE path=?", (rel,))
+        if not row or not row["id"] or not title:
+            raise ValueError("这个文件不是学习库里的文档")
+        pattern = re.compile(r"(?<!\[\[)" + re.escape(title) + r"(?![^\[\n]*\]\])", re.I)
+        swap = lambda m: "[[" + title + ("" if m.group(0) == title else "|" + m.group(0)) + "]]"
+        done = []
+
+        def once(part):
+            if done or not pattern.search(part):
+                return part
+            done.append(True)
+            return pattern.sub(swap, part, count=1)
+        l._edit_doc(row["id"], lambda a, b: (a, outside_code(b, once)))
+        self.last_write = time.monotonic()
+        return True
+
+    def rpc_attach_data(self, name, data):
+        """An image pasted or dropped into a note: saved under data/附件/, so the note can embed it."""
+        import base64
+        raw = base64.b64decode(str(data).split(",", 1)[-1])
+        if len(raw) > 50 * 1024 * 1024:
+            raise ValueError("文件超过 50MB")
+        stem, _, ext = str(name or "粘贴").rpartition(".")
+        rel = self.lattice.vault.unique("data/附件", stem or ext or "粘贴", "." + ext if stem and ext else ".png")
+        self.lattice.vault.write_bytes(rel, raw)
+        self.lattice.index.reindex(rel)
+        self.last_write = time.monotonic()
+        return {"path": rel}
 
     def rpc_file_delete(self, path):
         _, rel = self.lattice.resolve(path)

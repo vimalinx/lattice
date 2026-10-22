@@ -13,14 +13,14 @@ function fileIcon(path){
 panelType("file",{side:"mine",icon:p=>fileIcon(p.path),
  title(p,node){const st=Files[node?.dataset.pid];return st?.data?.doc?.title||st?.data?.card?.title||st?.data?.notebook?.title||baseName(p.path);},
  dirty(p,node){const st=Files[node?.dataset.pid];return !!(st&&(st.dirty||[...(st.cellDrafts||new Map()).keys()].length));},
- mount(p,node,pid){Files[pid]={dirty:false,mode:p.mode||"split",cellDrafts:new Map(),timers:{},edited:false};node.innerHTML='<div class="loading">正在打开 '+esc(baseName(p.path))+'…</div>';loadFile(pid);},
+ mount(p,node,pid){Files[pid]={dirty:false,mode:MD_MODES.some(m=>m[0]===p.mode)?p.mode:"live",cellDrafts:new Map(),timers:{},edited:false};node.innerHTML='<div class="loading">正在打开 '+esc(baseName(p.path))+'…</div>';loadFile(pid);},
  async beforeClose(p,node){
   const pid=node.dataset.pid,st=Files[pid];
   await flushFile(pid);
   if(p.scratch&&st?.edited&&S.config?.agent_auto_organize)safe(()=>organize(p.path));
   return true;
  },
- unmount(p,node){const pid=node.dataset.pid;viewedFlush(pid);delete Files[pid];},
+ unmount(p,node){const pid=node.dataset.pid;viewedFlush(pid);destroyEditors(node);delete Files[pid];},
  shown(p,node){if(node)fitAreas(node);},
  screen(p,node){return fileScreen(node.dataset.pid);}});
 function openFile(path,at=null){
@@ -36,19 +36,36 @@ async function loadFile(pid,keep=false){
  try{data=await rpc("file_read",{path:p.path});}
  catch(e){node.innerHTML=emptyState("file","打不开这个文件",e.message);return;}
  if(!Files[pid])return;
+ // Our own save coming back, or a change elsewhere in the file: keep the editor (and its undo) when its text is the same.
+ if(keep&&st.data&&!st.dirty&&!st.cellDrafts.size&&sameText(pid,data)){st.data=data;st.mtime=data.mtime;st.conflict=null;refreshTab(pid);noteFollow();return;}
  st.data=data;st.mtime=data.mtime;st.dirty=false;st.conflict=null;
  st.text=data.content??"";
- renderFile(pid);restoreView(node,view);refreshTab(pid);
+ renderFile(pid);restoreView(node,view);refreshTab(pid);noteFollow();
  if(st.pendingAt){gotoIn(pid,st.pendingAt);st.pendingAt=null;}
 }
+function sameText(pid,data){
+ const node=Dock.els[pid],old=Files[pid].data,val=f=>node?.querySelector('.cm-host[data-field="'+f+'"]')?.value;
+ if(Boolean(old.notebook)!==Boolean(data.notebook)||Boolean(old.doc)!==Boolean(data.doc)||Boolean(old.card)!==Boolean(data.card)||Files[pid].raw)return false;
+ if(data.notebook){
+  const cells=data.notebook.cells,shown=all(".cm-host[data-cell-editor]",node);
+  return cells.length===shown.length&&cells.every((c,i)=>shown[i].dataset.cellEditor===c.id&&shown[i].value===c.source&&c.kind===(old.notebook.cells[i]?.kind));
+ }
+ if(data.card)return val("body")===data.card.body&&val("mine")===data.card.mine&&data.card.title===old.card.title&&data.card.stage===old.card.stage;
+ if(data.topic)return val("notes")===data.topic.notes&&data.topic.title===old.topic.title&&JSON.stringify(data.topic.route)===JSON.stringify(old.topic.route);
+ if(data.doc)return val("body")===data.doc.body&&data.doc.title===old.doc.title;
+ return data.content!=null&&val("text")===data.content;
+}
 function captureView(node){
- const out={scroll:[...all("[data-keep-scroll]",node)].map(n=>n.scrollTop)},active=document.activeElement;
- if(active&&node.contains(active)&&active.dataset.field){out.field=active.dataset.field;out.sel=[active.selectionStart,active.selectionEnd];}
+ const out={scroll:[...all("[data-keep-scroll]",node)].map(n=>n.scrollTop)},active=document.activeElement,host=active?.closest?.(".cm-host");
+ if(host&&node.contains(host)&&host.cmView){const s=host.cmView.state.selection.main;out.field=host.dataset.field;out.sel=[s.anchor,s.head];out.cm=true;}
+ else if(active&&node.contains(active)&&active.dataset.field){out.field=active.dataset.field;out.sel=[active.selectionStart,active.selectionEnd];}
  return out;
 }
 function restoreView(node,v){
  if(!v)return;all("[data-keep-scroll]",node).forEach((n,i)=>{if(v.scroll[i]!=null)n.scrollTop=v.scroll[i];});
- if(v.field){const f=node.querySelector('[data-field="'+v.field+'"]');if(f){f.focus();try{f.setSelectionRange(v.sel[0],v.sel[1]);}catch(_){}}}
+ if(!v.field)return;
+ if(v.cm){const view=editorIn(node,v.field);if(view){const n=view.state.doc.length;view.focus();view.dispatch({selection:{anchor:Math.min(v.sel[0],n),head:Math.min(v.sel[1],n)}});}return;}
+ const f=node.querySelector('[data-field="'+v.field+'"]');if(f){f.focus();try{f.setSelectionRange(v.sel[0],v.sel[1]);}catch(_){}}
 }
 function renderFile(pid){
  const st=Files[pid],d=st.data,node=Dock.els[pid];if(!node)return;
@@ -61,9 +78,9 @@ function renderFile(pid){
  else if(d.topic)body=topicView(pid);
  else if(d.doc)body=docView(pid);
  else body=textView(pid);
+ destroyEditors(node);
  node.innerHTML='<div class="file">'+fileBar(pid)+(st.conflict?conflictBar(pid):"")+body+'</div>';
- fitAreas(node);
- if(d.notebook)all(".cell-md-preview",node).forEach(()=>{});
+ mountEditors(node);fitAreas(node);hydrateImages(node,d.path);
 }
 function fileBar(pid){
  const st=Files[pid],d=st.data,p=Dock.panels[pid];
@@ -82,13 +99,28 @@ function conflictBar(pid){
 function fitAreas(root){all("textarea.grow-area",root).forEach(t=>{t.style.height="auto";t.style.height=Math.max(60,Math.min(1400,t.scrollHeight+2))+"px";});}
 
 /* ---- plain text and code -------------------------------------------------------------------------- */
+// What every editor in a file panel does on typing, and how Markdown links, tags and images behave in it.
+function editorHooks(pid,extra={}){
+ return {onChange:host=>{fileInput(host);reportScreen();},onCursor:()=>noteCursor(pid),path:Dock.panels[pid]?.path,
+  resolve:resolveWiki,openWiki:name=>openWiki(name,pid),openHref:href=>openHref(href,pid),openTag:tag=>showTag(tag),onAttach:()=>sideChanged(["data/附件/x"]),...extra};
+}
+function mdEditor(pid,text,attrs,opts={}){
+ const st=Files[pid];
+ return editorHost(text,attrs,{markdown:true,live:st.mode!=="source"&&st.mode!=="split",...editorHooks(pid,{keys:[{key:"Mod-e",run:()=>{safe(()=>toggleReading(pid));return true;}}]}),...opts});
+}
+function mdBody(pid,text,attrs,opts={}){
+ const st=Files[pid];
+ return '<div class="md-split mode-'+st.mode+'"><div class="md-edit" data-keep-scroll>'+mdEditor(pid,text,'class="editor prose" '+attrs,opts)+'</div><div class="md-preview markdown" data-keep-scroll>'+markdown(text)+'</div></div>';
+}
 function textView(pid){
  const st=Files[pid],d=st.data,ext=(d.ext||"").toLowerCase(),isCsv=[".csv",".tsv"].includes(ext);
  const md=ext===".md";
  if(isCsv&&st.mode!=="raw")return '<div class="file-tools">'+button("编辑原文","file-mode",'data-pid="'+pid+'" data-mode="raw"',"ghost xs")+'</div><div class="table-view" data-keep-scroll>'+csvTable(st.text,ext===".tsv"?"\t":",")+'</div>';
- const editor='<textarea class="editor '+(md?"prose":"code")+'" data-field="text" data-file-text="'+pid+'" spellcheck="false"'+(d.readonly?" readonly":"")+'>'+esc(st.text)+'</textarea>';
+ const attrs='data-field="text" data-file-text="'+pid+'"';
+ if(md)return mdModes(pid)+mdBody(pid,st.text,attrs,{readonly:d.readonly});
+ const editor=editorHost(st.text,'class="editor code" '+attrs,{filename:d.name,readonly:d.readonly,wrap:[".txt",".log"].includes(ext),
+  ...editorHooks(pid,{keys:[{key:"Mod-Enter",run:()=>{if(!Files[pid]?.data?.runnable)return false;safe(()=>runFile(pid));return true;}}]})});
  const out=d.runnable?runOutput(pid):"";
- if(md)return mdModes(pid)+'<div class="md-split mode-'+st.mode+'"><div class="md-edit" data-keep-scroll>'+editor+'</div><div class="md-preview markdown" data-keep-scroll>'+markdown(st.text)+'</div></div>';
  return '<div class="code-wrap" data-keep-scroll>'+editor+'</div>'+out+(isCsv?'<div class="file-tools">'+button("表格视图","file-mode",'data-pid="'+pid+'" data-mode="split"',"ghost xs")+'</div>':"");
 }
 function csvTable(text,sep){
@@ -96,9 +128,11 @@ function csvTable(text,sep){
  if(!rows.length)return '<p class="muted">空表格</p>';
  return '<table><thead><tr>'+rows[0].map(c=>'<th>'+esc(c)+'</th>').join("")+'</tr></thead><tbody>'+rows.slice(1).map(r=>'<tr>'+r.map(c=>'<td>'+esc(c)+'</td>').join("")+'</tr>').join("")+'</tbody></table>';
 }
+// Live preview renders in place (the cursor's own line shows its marks); source shows the plain text; reading only renders.
+const MD_MODES=[["live","实时预览"],["source","源码"],["split","分屏"],["preview","阅读"]];
 function mdModes(pid){
  const st=Files[pid];
- return '<div class="file-tools"><div class="segmented">'+[["edit","编辑"],["split","分屏"],["preview","预览"]].map(([m,t])=>'<button data-action="file-mode" data-pid="'+pid+'" data-mode="'+m+'" class="'+(st.mode===m?"on":"")+'">'+t+'</button>').join("")+'</div>'+
+ return '<div class="file-tools"><div class="segmented" title="Ctrl + E 在编辑和阅读之间切换">'+MD_MODES.map(([m,t])=>'<button data-action="file-mode" data-pid="'+pid+'" data-mode="'+m+'" class="'+(st.mode===m?"on":"")+'">'+t+'</button>').join("")+'</div>'+
   (st.data.doc||st.data.card||st.data.topic?button(st.raw?"表单":"原文","file-raw",'data-pid="'+pid+'" title="直接编辑整个文件，包括开头的属性"',"ghost xs"):"")+'</div>';
 }
 function runOutput(pid){
@@ -147,11 +181,10 @@ function docView(pid){
   (kind==="note"?'<input class="doc-meta" data-field="tags" data-doc-field="tags" value="'+esc((a.tags||[]).join(", "))+'" placeholder="标签，用逗号分开"/>':"")+
   (kind==="lesson"?'<input class="doc-meta" data-field="objective" data-doc-field="objective" value="'+esc(a.objective||"")+'" placeholder="这一节想弄懂什么"/>':"")+
   (kind==="insight"?'<div class="doc-meta">'+(a.insight==="strength"?"做得好的地方":"薄弱点")+' · '+(a.state==="resolved"?"已克服":"主会话正在留意")+(a.state!=="resolved"?button("已克服","insight-resolve",'data-id="'+esc(d.doc.id)+'"',"ghost xs"):"")+'</div>':"");
- return '<div class="doc-head">'+fields+'</div>'+mdModes(pid)+'<div class="md-split mode-'+st.mode+'"><div class="md-edit" data-keep-scroll><textarea class="editor prose" data-field="body" data-doc-field="body" spellcheck="false">'+esc(d.doc.body)+'</textarea></div>'+
-  '<div class="md-preview markdown" data-keep-scroll>'+markdown(d.doc.body)+'</div></div>'+linksBlock(pid,d.links||[],d.doc.id);
+ return '<div class="doc-head">'+fields+'</div>'+mdModes(pid)+mdBody(pid,d.doc.body,'data-field="body" data-doc-field="body"',{placeholder:"开始写…  [[ 链接别的笔记，# 加标签，粘贴图片直接放进来"})+linksBlock(pid,d.links||[],d.doc.id);
 }
 function rawView(pid){
- return mdModes(pid)+'<div class="code-wrap" data-keep-scroll><textarea class="editor code" data-field="text" data-file-text="'+pid+'" spellcheck="false">'+esc(Files[pid].text)+'</textarea></div>';
+ return mdModes(pid)+'<div class="code-wrap" data-keep-scroll>'+editorHost(Files[pid].text,'class="editor code" data-field="text" data-file-text="'+pid+'"',{markdown:true,live:false,...editorHooks(pid)})+'</div>';
 }
 function linksBlock(pid,links,id){
  const docs=new Map((S.data.docs||[]).map(d=>[d.id,d]));
@@ -174,8 +207,8 @@ function cardView(pid){
  return '<div class="card-view" data-keep-scroll><div class="doc-head"><input class="doc-title" data-field="title" data-card-field="title" value="'+esc(c.title)+'"/>'+
   '<label class="stage-pick">我到了哪一步<select data-card-stage="'+pid+'">'+Object.entries(stageName).map(([v,t])=>'<option value="'+v+'"'+(c.stage===v?" selected":"")+'>'+t+'</option>').join("")+'</select></label></div>'+
   '<label class="field-label">自测题<input data-field="question" data-card-field="question" value="'+esc(c.question)+'" placeholder="一个要求预测、解释或判断的问题"/></label>'+
-  '<div class="mine-box"><div class="mine-title">'+svg("edit",13)+' 我的理解 <small>只有你能写，AI 读得到改不了</small></div><textarea class="grow-area prose" data-field="mine" data-card-mine="'+pid+'" placeholder="先理解，再用自己的话写下来。">'+esc(c.mine)+'</textarea></div>'+
-  '<div class="field-label">解释与例子</div>'+mdModes(pid)+'<div class="md-split mode-'+st.mode+'"><div class="md-edit"><textarea class="editor prose grow-area" data-field="body" data-card-field="body" spellcheck="false">'+esc(c.body)+'</textarea></div><div class="md-preview markdown">'+markdown(c.body)+'</div></div>'+
+  '<div class="mine-box"><div class="mine-title">'+svg("edit",13)+' 我的理解 <small>只有你能写，AI 读得到改不了</small></div>'+mdEditor(pid,c.mine,'class="mine-editor prose" data-field="mine" data-card-mine="'+pid+'"',{live:true,placeholder:"先理解，再用自己的话写下来。"})+'</div>'+
+  '<div class="field-label">解释与例子</div>'+mdModes(pid)+mdBody(pid,c.body,'data-field="body" data-card-field="body"')+
   '<label class="field-label">标签<input data-field="tags" data-card-field="tags" value="'+esc((c.tags||[]).join(", "))+'"/></label>'+
   '<div class="review-row">'+svg("history",14)+' 回顾 '+c.reviews+' 次'+(due?' · 下次 '+esc(fmtDate(c.due,true)):"")+'<span class="grow"></span>记得多少：'+
   button("忘了","card-rate",'data-rating="again" data-id="'+esc(c.id)+'"',"sm")+button("模糊","card-rate",'data-rating="hard" data-id="'+esc(c.id)+'"',"sm")+button("记得","card-rate",'data-rating="good" data-id="'+esc(c.id)+'"',"sm primary")+'</div>'+
@@ -200,7 +233,7 @@ function topicView(pid){
    '<span class="route-ops">'+iconButton("arrowup","route-move",'上移','data-pid="'+pid+'" data-i="'+i+'" data-d="-1"')+iconButton("close","route-drop","去掉这一站",'data-pid="'+pid+'" data-i="'+i+'"')+'</span></li>').join("")+'</ol>'+
    '<div class="route-add"><input data-route-add="'+pid+'" placeholder="加一站：写下标题，回车"/></div></section>'+
   '<div class="field-label">主题档案 <small>讲到了哪里、留下的疑问、接下来往哪走。主会话跨天续讲时读它</small></div>'+mdModes(pid)+
-  '<div class="md-split mode-'+st.mode+'"><div class="md-edit"><textarea class="editor prose grow-area" data-field="notes" data-topic-field="notes">'+esc(t.notes)+'</textarea></div><div class="md-preview markdown">'+markdown(t.notes)+'</div></div>'+
+  mdBody(pid,t.notes,'data-field="notes" data-topic-field="notes"')+
   '<section class="topic-lists">'+
   listBox("里面的内容",(d.inside||[]).map(x=>'<a data-action="open-file" data-path="'+esc(x.path)+'">'+svg(fileIcon(x.path),12)+' '+esc(x.title)+'</a>'))+
   listBox("分支",branches.map(b=>'<a data-action="open-doc" data-id="'+esc(b.id)+'">'+svg("map",12)+' '+esc(b.title)+'</a>'))+
@@ -230,8 +263,9 @@ function cellHtml(pid,c,i){
   iconButton("arrowup","nb-move","上移",'data-pid="'+pid+'" data-cell="'+esc(c.id)+'" data-d="-1"')+
   '<button class="icon" data-action="nb-move" data-pid="'+pid+'" data-cell="'+esc(c.id)+'" data-d="1" title="下移">↓</button>'+
   iconButton("trash","nb-delete","删除这一格",'data-pid="'+pid+'" data-cell="'+esc(c.id)+'"')+'</div>'+
-  '<textarea class="cell-editor grow-area '+(c.kind==="code"?"code":"prose")+'" data-field="cell-'+esc(c.id)+'" data-cell-editor="'+esc(c.id)+'" data-pid="'+pid+'" spellcheck="false">'+esc(src)+'</textarea>'+
-  (c.kind==="markdown"?'<div class="markdown cell-preview">'+markdown(src)+'</div>':"")+
+  editorHost(src,'class="cell-editor '+(c.kind==="code"?"code":"prose")+'" data-field="cell-'+esc(c.id)+'" data-cell-editor="'+esc(c.id)+'" data-pid="'+pid+'"',
+  {markdown:c.kind!=="code",live:true,language:"python",filename:"cell.py",gutters:false,placeholder:c.kind==="code"?"":"（空的文字格，在这里写）",
+   ...editorHooks(pid,{keys:[{key:"Shift-Enter",run:()=>{safe(()=>runCells(pid,[c.id]));return true;}}]})})+
   '<div class="cell-out" data-cell-out="'+esc(c.id)+'">'+outputHtml(c.outputs)+'</div>'+
   '<div class="cell-stale'+(stale?" on":"")+'" data-cell-stale="'+esc(c.id)+'">代码改过了：上面的输出属于之前那次运行</div></section>';
 }
@@ -312,14 +346,8 @@ function gotoIn(pid,at){
  const st=Files[pid],node=Dock.els[pid];
  if(!st?.data){if(st)st.pendingAt=at;return;}
  if(at.cell){const c=node.querySelector('[data-cell="'+at.cell+'"]');if(c){c.scrollIntoView({block:"center"});c.classList.add("flash");setTimeout(()=>c.classList.remove("flash"),1600);}return;}
- const area=node.querySelector("textarea.editor");if(!area)return;
- const text=area.value;let start=0,end=0;
- if(at.highlight&&text.includes(at.highlight)){start=text.indexOf(at.highlight);end=start+at.highlight.length;}
- else if(at.line){const lines=text.split("\n");start=lines.slice(0,Math.max(0,at.line-1)).join("\n").length+(at.line>1?1:0);end=start+(lines[at.line-1]||"").length;}
- if(st.mode==="preview"){st.mode="split";renderFile(pid);return gotoIn(pid,at);}
- const target=node.querySelector("textarea.editor");target.focus();target.setSelectionRange(start,end);
- const line=text.slice(0,start).split("\n").length,lh=parseFloat(getComputedStyle(target).lineHeight)||20;
- const box=target.closest("[data-keep-scroll]")||target;box.scrollTop=Math.max(0,(line-5)*lh);
+ if(st.mode==="preview"){st.mode="live";renderFile(pid);}
+ const view=node.querySelector(".cm-host.editor")?.cmView;if(view)editorGoto(view,at);
 }
 async function organize(path){
  await rpc("organize",{path});
@@ -346,14 +374,11 @@ function dirView(pid){
 function fileScreen(pid){
  const st=Files[pid],p=Dock.panels[pid],node=Dock.els[pid];if(!st?.data||!node)return {path:p.path};
  const out={path:p.path,kind:st.data.kind,dirty:!!(st.dirty||st.cellDrafts.size),typing:!!st.lastKey&&Date.now()-st.lastKey<5000};
- const area=node.querySelector("textarea.editor");
- if(area){
-  const lh=parseFloat(getComputedStyle(area).lineHeight)||20,box=area.closest("[data-keep-scroll]")||area,top=box.scrollTop,height=box.clientHeight||area.clientHeight;
-  const from=Math.floor(top/lh)+1,to=from+Math.ceil(height/lh),lines=area.value.split("\n");
-  out.viewport={from,to:Math.min(to,lines.length),lines:lines.length};
-  const head=lines.slice(0,from+2).reverse().find(l=>/^#{1,4}\s/.test(l));if(head)out.viewport.section=head.replace(/^#+\s*/,"");
-  if(document.activeElement===area){out.cursor_line=area.value.slice(0,area.selectionStart).split("\n").length;
-   if(area.selectionEnd>area.selectionStart)out.selection=area.value.slice(area.selectionStart,area.selectionEnd).slice(0,600);}
+ const view=node.querySelector(".cm-host.editor")?.cmView;
+ if(view&&view.dom.offsetParent){
+  out.viewport=editorViewport(view);
+  const lines=view.state.doc.toString().split("\n"),head=lines.slice(0,out.viewport.from+2).reverse().find(l=>/^#{1,4}\s/.test(l));if(head)out.viewport.section=head.replace(/^#+\s*/,"");
+  if(view.hasFocus){const s=view.state.selection.main;out.cursor_line=view.state.doc.lineAt(s.head).number;if(!s.empty)out.selection=view.state.sliceDoc(s.from,s.to).slice(0,600);}
  }
  if(st.data.notebook){
   const cells=all(".cell",node),scroller=node.querySelector(".cells"),r=scroller?.getBoundingClientRect();
@@ -372,7 +397,7 @@ function fileInput(t){
  if(t.dataset.fileText){st.text=t.value;markDirty(pid);previewSoon(pid,t.value);return true;}
  const field=t.dataset.docField||t.dataset.cardField||t.dataset.topicField;
  if(field){
-  const name=field==="notes"?"body":field,value=name==="tags"?t.value.split(/[,，]/).map(x=>x.trim()).filter(Boolean):t.value;
+  const name=field==="notes"?"body":field,value=name==="tags"?t.value.split(/[,，\s]+/).map(x=>x.trim().replace(/^#/,"")).filter(Boolean):t.value;
   st.fields={...(st.fields||{}),[name]:value};markDirty(pid);
   if(name==="body")previewSoon(pid,t.value);
   if(t.classList.contains("grow-area"))fitAreas(t.parentElement);
@@ -395,7 +420,15 @@ function fileInput(t){
 }
 function previewSoon(pid,text){
  const st=Files[pid];clearTimeout(st.timers.preview);
- st.timers.preview=setTimeout(()=>{const pv=Dock.els[pid]?.querySelector(".md-preview");if(pv)pv.innerHTML=markdown(text);},250);
+ st.timers.preview=setTimeout(()=>{const pv=Dock.els[pid]?.querySelector(".md-preview");if(pv&&pv.offsetParent){pv.innerHTML=markdown(text);hydrateImages(pv,Dock.panels[pid]?.path);}},250);
+}
+// Ctrl + E: between editing (live preview, or whichever editing view was last used) and reading.
+async function toggleReading(pid){
+ const st=Files[pid],p=Dock.panels[pid];if(!st)return;
+ await flushFile(pid);
+ if(st.mode==="preview")st.mode=st.lastEdit||"live";else{st.lastEdit=st.mode;st.mode="preview";}
+ p.mode=st.mode;saveLayout();renderFile(pid);
+ if(st.mode!=="preview")focusEditor(Dock.els[pid]);else Dock.els[pid]?.querySelector(".md-preview")?.focus?.();
 }
 async function fileChange(t){
  const pid=t.closest(".panel")?.dataset.pid,st=Files[pid];if(!st)return false;
@@ -409,6 +442,9 @@ function fileKey(e){
  if(e.key==="Tab"&&code&&!e.ctrlKey){e.preventDefault();t.setRangeText("    ",t.selectionStart,t.selectionEnd,"end");t.dispatchEvent(new Event("input",{bubbles:true}));return true;}
  if(t.dataset.cellEditor&&e.key==="Enter"&&e.shiftKey){e.preventDefault();safe(()=>runCells(pid,[t.dataset.cellEditor]));return true;}
  if(t.dataset.fileText&&e.key==="Enter"&&(e.ctrlKey||e.metaKey)&&st.data.runnable){e.preventDefault();safe(()=>runFile(pid));return true;}
+ // From the title, Enter moves into the text, as in Obsidian.
+ if((t.dataset.docField==="title"||t.dataset.cardField==="title"||t.dataset.topicField==="title")&&e.key==="Enter"){e.preventDefault();focusEditor(t.closest(".panel"));return true;}
+ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="e"&&(st.data.doc||st.data.card||st.data.topic||(st.data.ext||"").toLowerCase()===".md")){e.preventDefault();safe(()=>toggleReading(pid));return true;}
  if(t.dataset.routeAdd&&e.key==="Enter"&&t.value.trim()){e.preventDefault();const route=[...(st.data.topic.route||[]),{title:t.value.trim()}];safe(()=>saveRoute(pid,route));return true;}
  return false;
 }
@@ -425,7 +461,7 @@ async function fileAction(kind,a){
   st.run.missing=null;st.run.note="正在安装 "+a.dataset.package+"…";patchRun(pid);
   Files[pid].afterInstall=a.dataset.package;await rpc("env_install",{name:a.dataset.env,packages:[a.dataset.package]});return;
  }
- case "file-mode":await flushFile(pid);st.mode=a.dataset.mode;p.mode=st.mode;saveLayout();return renderFile(pid);
+ case "file-mode":await flushFile(pid);st.mode=a.dataset.mode;p.mode=st.mode;saveLayout();renderFile(pid);return st.mode!=="preview"&&focusEditor(Dock.els[pid]);
  case "file-raw":await flushFile(pid);st.raw=!st.raw;return loadFile(pid);
  case "file-external":return rpc("file_external",{path:p.path});
  case "file-delete":
@@ -442,7 +478,7 @@ async function fileAction(kind,a){
  case "nb-move":await saveCell(pid,a.dataset.cell);await rpc("cell_move",{path:p.path,id:a.dataset.cell,direction:Number(a.dataset.d)});return loadFile(pid,true);
  case "nb-delete":if(!confirm("删除这一格？"))return;st.cellDrafts.delete(a.dataset.cell);await rpc("cell_delete",{path:p.path,id:a.dataset.cell});return loadFile(pid,true);
  case "nb-add":{await flushFile(pid);const last=st.data.notebook.cells.at(-1)?.id;await rpc("cell_save",{path:p.path,source:"",kind:a.dataset.kind,after:last||null});await loadFile(pid,true);
-  const areas=all("textarea.cell-editor",Dock.els[pid]);areas.at(-1)?.focus();return;}
+  all(".cm-host[data-cell-editor]",Dock.els[pid]).at(-1)?.cmView?.focus();return;}
  case "kernel-mode":{
   const next=st.data.mode==="mine"?"sandbox":"mine";
   if(next==="mine"&&!confirm("把这本实验笔记的内核切到你自己的权限？它就能联网、能读你的文件，AI 也就不能在里面运行了。"))return;
