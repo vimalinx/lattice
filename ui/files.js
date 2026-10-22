@@ -11,7 +11,11 @@ function fileIcon(path){
  if([".csv",".tsv",".json",".jsonl"].includes(ext))return "layout";return ext?"code":"file";
 }
 panelType("file",{side:"mine",icon:p=>fileIcon(p.path),
- title(p,node){const st=Files[node?.dataset.pid];return st?.data?.doc?.title||st?.data?.card?.title||st?.data?.notebook?.title||baseName(p.path);},
+ title(p,node){
+  const st=Files[node?.dataset.pid],skill=/^skills\/([^/]+)\/SKILL\.md$/.exec(p.path||"");
+  if(skill)return "技能 · "+((typeof SkillBook!=="undefined"&&SkillBook.list?.find(s=>s.slug===skill[1])?.title)||skill[1]);
+  return st?.data?.doc?.title||st?.data?.card?.title||st?.data?.notebook?.title||baseName(p.path);
+ },
  dirty(p,node){const st=Files[node?.dataset.pid];return !!(st&&(st.dirty||[...(st.cellDrafts||new Map()).keys()].length));},
  mount(p,node,pid){Files[pid]={dirty:false,mode:[p.mode,S.ui.md_mode].find(m=>MD_MODES.some(x=>x[0]===m))||"live",cellDrafts:new Map(),timers:{},edited:false};node.innerHTML='<div class="loading">正在打开 '+esc(baseName(p.path))+'…</div>';loadFile(pid);},
  async beforeClose(p,node){

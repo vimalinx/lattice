@@ -12,6 +12,7 @@ const SIDE_SECTIONS={
  practice:{title:"练习与薄弱点",icon:"code",render:practiceSection},
  files:{title:"全部文件",icon:"folder",render:filesSection},
  search:{title:"搜索",icon:"search",render:searchSection},
+ skills:{title:"技能",icon:"store",render:()=>skillsSection()},
 };
 // Things that belong to a list live in its header (知识图 under 主题, 回顾 under 知识卡); only the rest sit at the bottom.
 const SIDE_LAUNCH=[["search","搜索 · Ctrl K","palette"],["history","学习轨迹","open-journal"],["home","开始","open-home"]];
@@ -119,6 +120,7 @@ function sideChanged(paths){
 function sideInput(t){
  if(t.dataset.sideInput==="cards"){Side.cardQuery=t.value;renderSide();return true;}
  if(t.dataset.sideInput==="notes"){Notes.query=t.value;renderSide();return true;}
+ if(t.dataset.sideInput==="skills"){SkillSide.query=t.value;renderSide();return true;}
  if(t.dataset.sideInput==="search"){Side.query=t.value;clearTimeout(Side.stimer);Side.stimer=setTimeout(async()=>{Side.hits=t.value.trim()?await safe(()=>rpc("search",{query:t.value})):null;renderSide();},300);return true;}
  return false;
 }

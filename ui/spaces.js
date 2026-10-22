@@ -16,6 +16,9 @@ const SPACES=[
   spec:{split:"h",sizes:[.64,.36],parts:[{tabs:[],keep:true},{tabs:[FLASH]}]}},
  {id:"map",name:"知识图",icon:"network",side:["topics"],
   spec:{split:"h",sizes:[.6,.4],parts:[{tabs:[{type:"map"}]},{split:"v",sizes:[.55,.45],parts:[{tabs:[],keep:true},{tabs:[TUTOR]}]}]}},
+ // Skills: the installed ones listed by kind, the store beside them, a skill's SKILL.md opening in the middle, the main conversation to try them in.
+ {id:"skills",name:"技能",icon:"store",side:["skills"],
+  spec:{split:"h",sizes:[.5,.5],parts:[{tabs:[{type:"skills"}]},{split:"v",sizes:[.58,.42],parts:[{tabs:[],keep:true},{tabs:[TUTOR]}]}]}},
  {id:"files",name:"文件",icon:"folder",side:["files"],
   spec:{split:"h",sizes:[.68,.32],parts:[{tabs:[],keep:true},{tabs:[FLASH]}]}},
 ];

@@ -843,3 +843,8 @@ select{appearance:none;padding-right:28px;background-image:linear-gradient(45deg
 .sk-files{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:12px}
 .sel-chip.skill{color:var(--ai);border-color:color-mix(in srgb,var(--ai) 45%,var(--line))}
 .msg-skill{font-size:11.5px;color:var(--ai);margin-bottom:4px;display:flex;align-items:center;gap:4px}
+/* a file's own attributes */
+.props,.cm-props .props{display:grid;grid-template-columns:max-content 1fr;gap:3px 14px;padding:10px 14px;margin:4px 0 14px;border:1px solid var(--line-soft);border-radius:10px;background:var(--surface);font-size:12.5px;line-height:1.55;white-space:normal}
+.prop{display:contents}.prop span{color:var(--subtle);font-family:var(--mono);font-size:11.5px}.prop b{font-weight:500;color:var(--text)}
+.cm-props{cursor:text;white-space:normal}
+.cm-line.cm-fm{font-family:var(--mono);font-size:.88em;color:var(--muted);background:var(--surface)}

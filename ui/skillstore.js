@@ -9,7 +9,23 @@ async function skillList(fresh=false){
  if(fresh||!SkillBook.list){SkillBook.loading=SkillBook.loading||rpc("skills").then(l=>{SkillBook.list=l;SkillBook.loading=null;return l;}).catch(e=>{SkillBook.loading=null;throw e;});await SkillBook.loading;}
  return SkillBook.list;
 }
-function skillsChanged(){SkillBook.list=null;all(".panel-skills").forEach(n=>{if(n.isConnected)safe(()=>renderStore(n.dataset.pid));});}
+function skillsChanged(){
+ SkillBook.list=null;all(".panel-skills").forEach(n=>{if(n.isConnected)safe(()=>renderStore(n.dataset.pid));});
+ if((currentSpace().side||[]).includes("skills"))renderSide();
+}
+/* ---- the sidebar's list: installed skills by kind ------------------------------------------------------------- */
+const SkillSide={query:""};
+async function skillsSection(){
+ const list=(await skillList()).filter(s=>s.state!=="absent"),q=SkillSide.query.trim().toLowerCase();
+ const shown=list.filter(s=>!q||(s.title+s.name+s.description).toLowerCase().includes(q));
+ const row=s=>sideRow(catIcon(s.category),s.title,'data-action="open-file" data-path="skills/'+esc(s.slug)+'/SKILL.md" title="'+esc(s.description)+'"',
+  s.enabled?(s.state==="update"?"有新版本":""):"已停用",'<button class="row-btn" data-action="skill-try" data-slug="'+esc(s.slug)+'" title="在主会话里用它">'+svg("bot",12)+'</button>'+
+  '<button class="row-btn" data-action="skill-toggle" data-slug="'+esc(s.slug)+'" title="'+(s.enabled?"停用":"启用")+'">'+svg(s.enabled?"eye":"check",12)+'</button>');
+ return {tools:iconButton("store","open-skills","技能商城")+iconButton("plus","skill-new","新建技能"),
+  body:'<input class="side-input" data-side-input="skills" placeholder="筛选技能…" value="'+esc(SkillSide.query)+'"/>'+
+   (list.length?SKILL_CATS.map(([c])=>sideGroup(c,shown.filter(s=>s.category===c).map(row))).join("")||'<p class="side-empty">没有符合的技能。</p>':
+    '<p class="side-empty">还没有装技能。点上面的商城图标，挑几个装上。</p>')};
+}
 
 /* ---- the store ------------------------------------------------------------------------------------------------------ */
 panelType("skills",{side:"mine",host:false,icon:"store",title:()=>"技能商城",

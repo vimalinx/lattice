@@ -118,6 +118,9 @@ function texHtml(tex,display){
  if(texCache.size>800)texCache.clear();texCache.set(key,out);return out;
 }
 function markdown(text){
+ // A file's own attributes at the top (--- … ---) show as a small table, not as Markdown.
+ const fm=/^---\n([\s\S]*?)\n(?:---|\.\.\.)\s*(?:\n|$)/.exec(String(text||""));
+ if(fm&&typeof propsHtml==="function")return propsHtml(fm[1])+markdown(String(text).slice(fm[0].length));
  const src=String(text||""),codes=[],maths=[];
  const masked=src.replace(/(`+)([\s\S]*?)\1/g,m=>{codes.push(m);return "\u0000"+(codes.length-1)+"\u0000";})
   .replace(MATH_RE,(m,a,b,c,d)=>{maths.push({tex:a??b??c??d,display:a!=null||b!=null});return "\uE000"+(maths.length-1)+"\uE001";});

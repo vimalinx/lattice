@@ -141,7 +141,7 @@ function livePreview(opts){
   const line=(pos,cls)=>out.push(CV.Decoration.line({class:cls}).range(doc.lineAt(pos).from));
   const lines=(from,to,cls)=>{for(let p=from;p<=to;){const l=doc.lineAt(p);out.push(CV.Decoration.line({class:cls}).range(l.from));p=l.to+1;}};
   const withSpace=e=>doc.sliceString(e,e+1)===" "?e+1:e;
-  const {from,to}=view.viewport,blocks=mathBlocks(st);
+  const {from,to}=view.viewport,fm=frontmatter(doc),blocks=fm?[...mathBlocks(st),{from:fm.from,to:fm.to}]:mathBlocks(st);
   CL.syntaxTree(st).iterate({from,to,enter:n=>{
    const name=n.name;let m;
    // Inside a formula nothing is Markdown: no bold, no hidden marks.
@@ -217,6 +217,36 @@ function livePreview(opts){
   constructor(view){this.decorations=build(view);}
   update(u){if(u.docChanged||u.viewportChanged||u.selectionSet||u.focusChanged||CL.syntaxTree(u.startState)!==CL.syntaxTree(u.state)||u.transactions.some(t=>t.effects.some(e=>e.is(Refresh))))this.decorations=build(u.view);}
  },{decorations:v=>v.decorations});
+}
+/* A file's own attributes (the YAML between --- lines at the top, as in SKILL.md): shown as a small table of
+   properties until the cursor goes in, and never read as Markdown (its --- would make the line above a heading). */
+function frontmatter(doc){
+ if(doc.lines<2||doc.line(1).text.trim()!=="---")return null;
+ for(let i=2;i<=Math.min(doc.lines,300);i++){const t=doc.line(i).text.trim();if(t==="---"||t==="...")return {from:0,to:doc.line(i).to,last:i};}
+ return null;
+}
+function propsHtml(yaml){
+ const rows=String(yaml).split("\n").map(l=>/^([\w.-]+):\s*(.*)$/.exec(l)).filter(Boolean);
+ return '<div class="props">'+rows.map(([,k,v])=>'<div class="prop"><span>'+esc(k)+'</span><b>'+esc(v.replace(/^\[|\]$/g,"").replace(/^["']|["']$/g,""))+'</b></div>').join("")+'</div>';
+}
+class Props extends CV.WidgetType{
+ constructor(yaml){super();this.yaml=yaml;}
+ eq(o){return o.yaml===this.yaml;}
+ toDOM(view){
+  const box=document.createElement("div");box.className="cm-props";box.innerHTML=propsHtml(this.yaml);
+  box.addEventListener("mousedown",e=>{if(e.button!==0)return;e.preventDefault();view.focus();view.dispatch({selection:{anchor:Math.min(4,view.state.doc.length)}});});
+  return box;
+ }
+ ignoreEvent(){return true;}
+}
+function propsPreview(){
+ const build=state=>{
+  const fm=frontmatter(state.doc);if(!fm)return CV.Decoration.none;
+  // The cursor a new editor starts with (at the very top) does not count as being inside.
+  if(state.selection.ranges.some(r=>r.from<=fm.to&&r.to>0))return CV.Decoration.set(Array.from({length:fm.last},(_,i)=>CV.Decoration.line({class:"cm-fm"}).range(state.doc.line(i+1).from)));
+  return CV.Decoration.set([CV.Decoration.replace({widget:new Props(state.doc.sliceString(state.doc.line(2).from,state.doc.line(fm.last-1).to)),block:true}).range(fm.from,fm.to)]);
+ };
+ return CS.StateField.define({create:build,update(deco,tr){return tr.docChanged||tr.selection?build(tr.state):deco;},provide:f=>CV.EditorView.decorations.from(f)});
 }
 /* Maths renders as maths until the cursor goes into it; a click puts the cursor in its source. */
 class Formula extends CV.WidgetType{
@@ -659,7 +689,7 @@ function createEditor(host,text,opts){
  if(md){
   ext.push(CV.EditorView.lineWrapping,CA.autocompletion({override:[wikiComplete,tagComplete],icons:false}),dropAndPaste(opts),linkClicks(opts),
    CV.EditorView.contentAttributes.of({spellcheck:"false"}));
-  if(opts.live)ext.push(livePreview(opts),tablePreview(opts),mathPreview());
+  if(opts.live)ext.push(livePreview(opts),tablePreview(opts),mathPreview(),propsPreview());
  }else{
   if(opts.gutters!==false)ext.push(CV.lineNumbers(),CL.foldGutter(),CV.highlightActiveLineGutter());
   ext.push(CV.highlightActiveLine(),CA.autocompletion({icons:false}),rainbowBrackets());
