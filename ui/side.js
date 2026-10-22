@@ -13,7 +13,8 @@ const SIDE_SECTIONS={
  files:{title:"全部文件",icon:"folder",render:filesSection},
  search:{title:"搜索",icon:"search",render:searchSection},
 };
-const SIDE_LAUNCH=[["map","知识图","open-map"],["history","学习轨迹","open-journal"],["card","回顾","open-review"],["home","开始","open-home"]];
+// Things that belong to a section live in its header (知识图 under 主题, 回顾 under 知识卡); only the rest sit at the bottom.
+const SIDE_LAUNCH=[["history","学习轨迹","open-journal"],["home","开始","open-home"]];
 const Side={entries:{},open:new Set(["code","notebooks","data"]),query:"",hits:null,stage:"",cardQuery:""};
 function sideOrder(){
  const order=(S.ui.side.order||[]).filter(k=>SIDE_SECTIONS[k]);
@@ -21,14 +22,13 @@ function sideOrder(){
 }
 function renderActivity(){
  const bar=el("#activity");if(!bar)return;
- const side=S.ui.side,busy=(S.data.busy||[]).length;
+ const side=S.ui.side;
  bar.innerHTML='<div class="act-logo" title="Lattice">'+logo()+'</div>'+
   '<button class="act" data-action="new-menu" title="打开 / 新建">'+svg("plus",19)+'</button>'+
   sideOrder().map(k=>'<button class="act'+(side.open&&side.section===k?" on":"")+'" data-action="side-section" data-section="'+k+'" title="'+esc(SIDE_SECTIONS[k].title)+'">'+svg(SIDE_SECTIONS[k].icon,19)+
    (k==="cards"&&S.data.due?'<i class="badge">'+S.data.due+'</i>':"")+'</button>').join("")+
   '<span class="grow"></span>'+
   SIDE_LAUNCH.map(([i,t,a])=>'<button class="act" data-action="'+a+'" title="'+esc(t)+'">'+svg(i,18)+'</button>').join("")+
-  '<button class="act'+(busy?" working":"")+'" data-action="palette" title="搜索或输入命令 · Ctrl K">'+svg("cmd",17)+'</button>'+
   '<button class="act" data-action="theme" title="切换明暗">'+svg(S.ui.theme==="dark"?"sun":"moon",17)+'</button>'+
   '<button class="act" data-action="open-settings" title="设置">'+svg("sliders",18)+'</button>';
 }
@@ -61,15 +61,15 @@ function topicsSection(){
   t.id===active?"":'<button class="row-btn" data-action="topic-focus" data-id="'+esc(t.id)+'" title="在这里接着学">'+svg("bot",12)+'</button>');
  const tree=(parent,depth,state)=>topics.filter(t=>(t.parent||null)===parent&&t.state===state).flatMap(t=>[row(t,depth),...tree(t.id,depth+1,state)]);
  const roots=state=>topics.filter(t=>t.state===state&&(!t.parent||!topics.some(x=>x.id===t.parent&&x.state===state))).flatMap(t=>[row(t,0),...tree(t.id,1,state)]);
- return {tools:"",body:sideRow("bot","默认对话（不属于任何主题）",'data-action="topic-focus" data-id=""',active?"":'<b class="dot-on">●</b>')+
+ return {tools:iconButton("network","open-map","知识图"),body:sideRow("bot","默认对话（不属于任何主题）",'data-action="topic-focus" data-id=""',active?"":'<b class="dot-on">●</b>')+
   sideGroup("进行中",roots("active"),"还没有主题。和主会话聊着聊着，它会把值得深入的内容建成主题。")+sideGroup("先放一放",roots("parked"))+sideGroup("学完了",roots("completed"))};
 }
 function cardsSection(){
  const q=Side.cardQuery.trim().toLowerCase(),cards=(S.data.cards||[]).filter(c=>(!Side.stage||c.stage===Side.stage)&&(!q||c.title.toLowerCase().includes(q)));
  // Whether a card is due is decided once, by the backend, for the UI and the agents alike.
  const due=new Set((S.data.cards||[]).filter(c=>c.due_now).map(c=>c.id));
- return {tools:iconButton("plus","new-card","新知识卡"),
-  body:(S.data.due?'<button class="side-banner" data-action="open-review">'+svg("history",13)+' '+S.data.due+' 张卡到期 · 开始回顾</button>':"")+
+ return {tools:iconButton("refresh","open-review","回顾")+iconButton("plus","new-card","新知识卡"),
+  body:(S.data.due?'<button class="side-banner" data-action="open-review">'+svg("refresh",13)+' '+S.data.due+' 张卡到期 · 开始回顾</button>':"")+
   '<input class="side-input" data-side-input="cards" placeholder="筛选卡片…" value="'+esc(Side.cardQuery)+'"/>'+
   '<div class="stage-chips">'+[["","全部"],...Object.entries(stageName)].map(([v,t])=>'<button class="'+(Side.stage===v?"on":"")+'" data-action="side-stage" data-stage="'+v+'">'+esc(t)+'</button>').join("")+'</div>'+
   cards.map(c=>sideRow("card",c.title,'data-action="open-file" data-path="'+esc(c.path)+'"','<i class="stage-dot" style="background:'+stageColor[c.stage]+'"></i>'+(due.has(c.id)?" 到期":""))).join("")+
@@ -99,7 +99,7 @@ async function filesSection(){
  return {tools:iconButton("link","project-add","挂载一个本地目录（AI 只读）")+iconButton("folder","open-vault","在系统里打开学习库"),body:await treeRows("",0)};
 }
 function searchSection(){
- return {tools:"",body:'<input class="side-input" data-side-input="search" placeholder="搜标题、正文、文件名和以往对话…" value="'+esc(Side.query)+'"/>'+
+ return {tools:iconButton("cmd","palette","命令 · Ctrl K"),body:'<input class="side-input" data-side-input="search" placeholder="搜标题、正文、文件名和以往对话…" value="'+esc(Side.query)+'"/>'+
   (Side.hits?Side.hits.map(x=>sideRow(x.kind==="message"?"bot":fileIcon(x.path),x.title,x.kind==="message"?'data-action="open-thread" data-thread="'+esc(x.thread)+'" data-agent="'+esc(x.agent||"tutor")+'"':'data-action="open-file" data-path="'+esc(x.path)+'"',esc(kindName[x.kind]||"对话"))+
    (x.excerpt?'<p class="side-excerpt">'+esc(x.excerpt)+'</p>':"")).join("")||'<p class="side-empty">没有找到。</p>':"")};
 }

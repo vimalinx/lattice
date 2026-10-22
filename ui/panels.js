@@ -2,7 +2,7 @@
 /* The learner's other panels: the start page, the knowledge map, the journal, reviews and settings. */
 /* ---- the knowledge map ---------------------------------------------------------------------------------- */
 const MapState={};
-panelType("map",{side:"mine",icon:"map",title:p=>p.topic?"知识图 · "+topicTitle(p.topic):"知识图",
+panelType("map",{side:"mine",icon:"network",title:p=>p.topic?"知识图 · "+topicTitle(p.topic):"知识图",
  mount(p,node,pid){
   node.innerHTML='<div class="map"><div class="map-bar"><select data-map-topic="'+pid+'"></select><span class="map-stats muted"></span><span class="grow"></span>'+
    iconButton("refresh","map-relayout","重新排布",'data-pid="'+pid+'"')+'</div><div class="map-body"><div class="map-canvas"></div><aside class="map-route"></aside></div></div>';
@@ -47,7 +47,7 @@ async function loadJournal(pid){
 function journalsChanged(){clearTimeout(MapState.jtimer);MapState.jtimer=setTimeout(()=>Object.keys(Dock.panels).filter(pid=>Dock.panels[pid].type==="journal").forEach(loadJournal),1500);}
 
 /* ---- reviewing due cards ------------------------------------------------------------------------------------ */
-panelType("review",{side:"mine",icon:"card",title:()=>"回顾",
+panelType("review",{side:"mine",icon:"refresh",title:()=>"回顾",
  mount(p,node){node.innerHTML='<div class="review"><div class="review-body"></div></div>';loadReview(node);},
  screen(){return {view:"回顾到期的卡"};}});
 async function loadReview(node){
@@ -72,7 +72,7 @@ async function renderHome(node){
    ((t.route||[]).length?'<ol class="home-route">'+t.route.slice(0,9).map(s=>'<li>'+(s.ref&&docs.get(s.ref)?'<a data-action="open-doc" data-id="'+esc(s.ref)+'">'+esc(s.title)+'</a>':esc(s.title))+'</li>').join("")+'</ol>':'<p class="muted">还没有主干路线。</p>')
    :'<div class="overline">默认对话</div><h2>想到什么，直接和主会话说。</h2><p class="muted">值得长期深入的内容，主会话会建成主题，并定一条主干路线；你在左栏「主题」里能看到它们。</p>')+'</section>'+
   '<div class="home-grid">'+
-  '<section class="home-box"><h4>'+svg("card",14)+' 回顾</h4>'+(S.data.due?'<p>'+S.data.due+' 张卡到期。</p>'+button("开始回顾","open-review","","primary sm"):'<p class="muted">现在没有到期的卡。</p>')+'</section>'+
+  '<section class="home-box"><h4>'+svg("refresh",14)+' 回顾</h4>'+(S.data.due?'<p>'+S.data.due+' 张卡到期。</p>'+button("开始回顾","open-review","","primary sm"):'<p class="muted">现在没有到期的卡。</p>')+'</section>'+
   '<section class="home-box"><h4>'+svg("code",14)+' 进行中的练习</h4>'+(active.map(x=>'<a data-action="open-practice" data-id="'+esc(x.id)+'">'+esc(x.title)+'</a>').join("")||'<p class="muted">没有。</p>')+'</section>'+
   '<section class="home-box"><h4>'+svg("file",14)+' 最近碰过的文件</h4>'+(files.map(f=>'<a data-action="open-file" data-path="'+esc(f)+'">'+svg(fileIcon(f),12)+' '+esc(baseName(f))+'</a>').join("")||'<p class="muted">还没有。</p>')+'</section>'+
   '<section class="home-box wide"><h4>'+svg("history",14)+' 刚才发生了什么</h4>'+(lately.map(journalRow).join("")||'<p class="muted">还没有记录。</p>')+button("打开学习轨迹","open-journal","","ghost xs")+'</section></div>';

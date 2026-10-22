@@ -33,8 +33,9 @@ function saveUi(now=false){
 }
 const NEW_ITEMS=[
  ["写记录","new-note","edit","随手写，关掉后 AI 帮你整理"],["写代码","new-code","code","任何语言，写完就能运行"],["新实验笔记","new-notebook","flask","Jupyter 格式，在沙箱内核里运行"],
- ["新知识卡","new-card","card","自己记下一个知识点"],["主会话","open-agent","bot","",'data-agent="tutor"'],["快答","open-agent","spark","",'data-agent="flash"'],
- ["开始","open-home","home",""],["知识图","open-map","map",""],["学习轨迹","open-journal","history",""],["回顾","open-review","card",""],["设置","open-settings","sliders",""]];
+ ["新知识卡","new-card","card","自己记下一个知识点"],["主会话","open-agent","bot","",'data-agent="tutor"'],["快答","open-agent","spark","",'data-agent="flash"']];
+// Panels that already have a button of their own; the palette still lists them as commands.
+const PANEL_ITEMS=[["开始","open-home","home",""],["知识图","open-map","network",""],["学习轨迹","open-journal","history",""],["回顾","open-review","refresh",""],["设置","open-settings","sliders",""]];
 function newMenu(anchor){
  const r=anchor.getBoundingClientRect();
  const menu=h('<div class="menu" style="left:'+(r.right+6)+'px;top:'+r.top+'px">'+NEW_ITEMS.map(([t,a,i,d,x],k)=>(k===4?'<hr/>':'')+'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+(d?'<small>'+esc(d)+'</small>':"")+'</span></button>').join("")+'</div>');
@@ -61,7 +62,7 @@ function palette(){
 let paletteSeq=0;
 async function paletteFilter(q){
  const term=q.trim().toLowerCase(),seq=++paletteSeq;
- const commands=NEW_ITEMS.filter(c=>!term||c[0].toLowerCase().includes(term)).map(([t,a,i,d,x])=>'<button class="pal-item" data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+'</span><em>命令</em></button>');
+ const commands=NEW_ITEMS.concat(PANEL_ITEMS).filter(c=>!term||c[0].toLowerCase().includes(term)).map(([t,a,i,d,x])=>'<button class="pal-item" data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+'</span><em>命令</em></button>');
  const docs=(S.data.docs||[]).filter(d=>!term||d.title.toLowerCase().includes(term)).slice(0,term?30:12)
   .map(d=>'<button class="pal-item" data-action="open-file" data-path="'+esc(d.path)+'">'+svg(fileIcon(d.path),14)+'<span>'+esc(d.title)+'</span><em>'+esc(kindName[d.kind]||d.kind)+'</em></button>');
  const box=el("#palette-list");if(!box)return;
