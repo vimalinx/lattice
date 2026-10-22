@@ -315,6 +315,28 @@ label.check input{margin:0}
 .sel-chip.file{background:var(--surface);color:var(--muted)}
 .sel-chip button{border:0;background:none;color:inherit;padding:0 4px}
 /* Nothing said yet: the input sits in the middle, with places to start under it. */
+.thinking-box{margin:0 0 10px;font-size:.92em;color:var(--muted)}
+.thinking-box summary{display:flex;align-items:center;gap:7px;cursor:pointer;list-style:none;width:fit-content;max-width:100%;padding:3px 9px 3px 0;border-radius:8px}
+.thinking-box summary::-webkit-details-marker{display:none}
+.thinking-box summary:hover{color:var(--text)}
+.thinking-box summary>svg:first-child{color:var(--amber);flex:0 0 auto}
+.thinking-box summary b{font-weight:600;flex:0 0 auto}
+.thinking-box summary span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0;color:var(--subtle)}
+.thinking-box summary>svg:last-child{flex:0 0 auto;transition:transform .15s}
+.thinking-box[open] summary>svg:last-child{transform:rotate(180deg)}
+.thinking-box.now summary b{animation:pulse 1.4s infinite}
+.thinking-text{margin:6px 0 4px;padding:2px 0 2px 14px;border-left:2px solid var(--line);color:var(--muted);max-height:28em;overflow:auto}
+.thinking-box.live .thinking-text{max-height:16em}
+.menu-wide{min-width:320px;max-width:440px}
+.menu-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:3px 9px;font-size:12.5px}
+.menu-row>span{color:var(--muted);white-space:nowrap}
+.ctl{display:flex;align-items:center;gap:4px}
+.ctl b{min-width:46px;text-align:center;font-size:12px;font-weight:600}
+.menu .step{width:30px;height:26px;padding:0;justify-content:center;border:1px solid var(--line);font-weight:600}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.menu .seg button{padding:3px 9px;border-radius:0;font-size:12px;gap:0}
+.menu .seg button+button{border-left:1px solid var(--line)}
+.menu .seg button.on{background:var(--accent-glow);color:var(--accent)}
 .chat-starters{display:none}
 .chat.blank .chat-scroll{flex:0 1 auto;margin-top:auto;overflow:hidden;padding-bottom:0}
 .chat.blank .composer:before{display:none}

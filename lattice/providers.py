@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import queue
 import threading
+import time
 from urllib.parse import urlsplit
 
 import httpx
@@ -64,7 +65,7 @@ DEFAULTS = {
     "commit_idle": 30,
     # Everything about the interface: appearance, the sidebar, saved layouts.
     # zoom: each kind of panel's default size ("chat:tutor", "file", ...); a window can still set its own.
-    "ui": {"theme": "dark", "font_size": 14.5, "code_font_size": 13, "line_height": 1.8, "read_width": "medium", "zoom": {"chat:tutor": 1.1},
+    "ui": {"theme": "dark", "thinking": "collapsed", "font_size": 14.5, "code_font_size": 13, "line_height": 1.8, "read_width": "medium", "zoom": {"chat:tutor": 1.1},
            "density": "comfortable", "send_key": "enter",
            "selection_popup": True, "side": {"open": True, "width": 270, "section": "topics", "order": [], "hidden": []},
            "presets": {}, "default_preset": None},
@@ -299,6 +300,8 @@ class ApiWorker(QThread):
         self.config, self.api_key, self.messages, self.test = conn, conn["api_key"], messages, test
         # Tool calls are executed on the GUI thread (it owns SQLite); results come back here.
         self.tools, self.tool_results, self.partial = tools or [], queue.Queue(), ""
+        # What the model thought before each answer or tool round, and for how long; shown folded to the learner.
+        self.thoughts, self.think_seconds = [], 0.0
         self.cancelled = threading.Event()
         self.response = None
         self.loop = None
@@ -338,7 +341,7 @@ class ApiWorker(QThread):
 
     async def _stream(self, client, headers, payload, separate):
         """One streamed completion. Returns content, reasoning, tool calls, finish and usage."""
-        content, reasoning, calls, finish, usage, thinking = "", "", {}, None, None, False
+        content, reasoning, calls, finish, usage, thinking, started = "", "", {}, None, None, False, None
         self.partial = ""
         async with client.stream("POST", endpoint(self.config["base_url"], "chat/completions"), headers=headers, json=payload) as response:
             self.response = response
@@ -375,12 +378,21 @@ class ApiWorker(QThread):
                     delta = choice.get("delta") or {}
                     thought = delta.get("reasoning_content") or delta.get("reasoning")
                     if isinstance(thought, str) and thought:
+                        if not reasoning:
+                            started = time.monotonic()
+                            if self.thoughts:
+                                self.emit("thinking", text="\n\n")
+                            self.thoughts.append("")
                         reasoning += thought
+                        self.thoughts[-1] = reasoning
+                        self.emit("thinking", text=thought)
                         if not thinking and not content:
-                            # Reasoning models think before answering; the text is only replayed to the model.
                             thinking = True
                             self.emit("status", state="thinking")
                     piece = delta.get("content")
+                    if (isinstance(piece, str) and piece or delta.get("tool_calls")) and reasoning and started:
+                        self.think_seconds += time.monotonic() - started
+                        started = None
                     if isinstance(piece, str) and piece:
                         if not content:
                             self.emit("status", state="responding")
@@ -399,6 +411,8 @@ class ApiWorker(QThread):
                         slot["function"]["arguments"] += fn.get("arguments") or ""
                     if choice.get("finish_reason"):
                         finish = choice["finish_reason"]
+        if reasoning and started:
+            self.think_seconds += time.monotonic() - started
         if finish is None:
             raise ValueError("API 数据流在完成标记前断开；已保留收到的部分回答")
         return content.lstrip("\n") if separate else content, reasoning, [calls[i] for i in sorted(calls)], finish, usage
@@ -478,4 +492,6 @@ class ApiWorker(QThread):
             self.response = None
             self.task, self.loop = None, None
             if not self.test:
-                self.emit("finished", text=body, stop_reason=stop_reason, usage=usage)
+                thinking = "\n\n".join(t.strip() for t in self.thoughts if t.strip())
+                self.emit("finished", text=body, stop_reason=stop_reason, usage=usage,
+                          **({"thinking": thinking[-200_000:], "think_seconds": round(self.think_seconds, 1)} if thinking else {}))

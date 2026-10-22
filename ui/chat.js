@@ -14,7 +14,7 @@ panelType("chat",{side:"ai",icon:p=>AGENT_ICON[p.agent]||"bot",
   const topic=head?.topic;return agentTitle(p.agent)+(topic?" · "+topicTitle(topic):"");
  },
  mount(p,node,pid){
-  Chat[pid]={input:"",stream:"",live:[],waiting:"",error:"",data:null,cache:{},attach:[],opened:new Set()};
+  Chat[pid]={input:"",stream:"",live:[],waiting:"",error:"",data:null,cache:{},attach:[],opened:new Set(),thoughts:{},...freshThinking()};
   node.innerHTML='<div class="chat"><div class="chat-head"></div><div class="chat-scroll"><div class="loading">正在打开对话…</div></div><div class="composer"></div><div class="chat-starters"></div></div>';
   loadChat(pid);
  },
@@ -44,8 +44,12 @@ function renderChat(pid,keepScroll=true){
  if(!scroll.__watched){
   scroll.__watched=true;
   scroll.addEventListener("scroll",()=>{if(!scroll.isConnected||!scroll.clientHeight)return;st.bottom=scroll.scrollHeight-scroll.scrollTop-scroll.clientHeight<140;toBottomButton(pid);});
-  // Which folded action lists are open survives re-rendering.
-  scroll.addEventListener("toggle",e=>{const mid=e.target.closest?.("[data-mid]")?.dataset.mid;if(mid&&e.target.matches("details.actions"))e.target.open?st.opened.add(mid):st.opened.delete(mid);},true);
+  // Which folded parts are open survives re-rendering.
+  scroll.addEventListener("toggle",e=>{
+   const box=e.target,mid=box.closest?.("[data-mid]")?.dataset.mid;
+   if(box.matches("details.actions")&&mid)box.open?st.opened.add(mid):st.opened.delete(mid);
+   if(box.matches("details.thinking-box")){if(box.classList.contains("live")){if(st.liveOpen!==box.open){st.liveOpen=box.open;patchLive(pid);}}else if(mid)st.thoughts[mid]=box.open;}
+  },true);
  }
  node.querySelector(".chat-head").innerHTML=chatHead(pid);
  const answers=answersOf(st.data.messages);
@@ -93,7 +97,8 @@ function chatHead(pid){
     button(svg("check",13)+" 结束并复盘","practice-end",'data-pid="'+pid+'"',"primary sm"):'<span class="chip">'+(pr.state==="reviewing"?"主会话复盘中":"已复盘")+'</span>')+'</div>';
  }
  const topic=d.head?.topic;
- const tools=(p.agent==="tutor"?iconButton("book","chat-task","提炼知识卡",'data-pid="'+pid+'" data-task="capture"'):"")+iconButton("edit","chat-new","开新会话",'data-pid="'+pid+'"');
+ const tools=(p.agent==="tutor"?iconButton("book","chat-task","提炼知识卡",'data-pid="'+pid+'" data-task="capture"'):"")+iconButton("edit","chat-new","开新会话",'data-pid="'+pid+'"')+
+  iconButton("dots","chat-more","显示和更多",'data-pid="'+pid+'"');
  return '<button class="topic-chip'+(topic?"":" quiet")+'" data-action="chat-topic-menu" data-pid="'+pid+'" title="这段对话属于哪个主题">'+svg(topic?"map":"bot",12)+'<span>'+esc(topic?topicTitle(topic):"默认对话")+'</span>'+svg("chevrondown",11)+'</button>'+
   '<div class="chat-tools">'+tools+'</div>';
 }
@@ -106,7 +111,7 @@ function topicMenu(pid,anchor){
 }
 function messageEl(pid,m,answers){
  const st=Chat[pid],p=Dock.panels[pid],meta=m.meta||{};
- const key=m.id+"|"+m.content.length+"|"+(st.data.undone||[]).length+"|"+JSON.stringify(st.data.decisions||{}).length+"|"+Object.keys(answers).length;
+ const key=m.id+"|"+m.content.length+"|"+(st.data.undone||[]).length+"|"+JSON.stringify(st.data.decisions||{}).length+"|"+Object.keys(answers).length+"|"+S.ui.thinking;
  let cached=st.cache[m.id];
  if(!cached||cached.key!==key){
   const mine=m.role==="user";
@@ -118,13 +123,14 @@ function messageEl(pid,m,answers){
     (meta.selection?'<div class="msg-quote">'+esc(shorten(meta.selection,180))+'</div>':"")+
     (meta.attach?.length?'<div class="msg-attach">'+meta.attach.map(x=>'<a data-action="open-file" data-path="'+esc(x)+'">'+svg(fileIcon(x),12)+' '+esc(x.split("/").pop())+'</a>').join("")+'</div>':"")+
     '<div class="markdown msg-body">'+r.html+'</div></div>'+foot+'</div>'
-   :'<div class="msg from-ai" data-mid="'+m.id+'"><div class="markdown msg-body">'+r.html+'</div>'+
+   :'<div class="msg from-ai" data-mid="'+m.id+'">'+thinkingHtml(meta.thinking,meta.think_seconds)+'<div class="markdown msg-body">'+r.html+'</div>'+
     (incomplete?'<div class="msg-note">'+esc(meta.stop_reason==="cancelled"?"已停止 · 保留了部分回答":meta.stop_reason==="max_tokens"?"达到回复长度上限":"没有正常结束 · 只保留了收到的部分")+'</div>':"")+
     actionChips(meta.actions||[],st.data.undone||[])+sourcesHtml(meta.sources)+suggestionsHtml(pid,m)+foot+'</div>';
   cached=st.cache[m.id]={key,html,blocks:r.blocks};
  }
  const node=h(cached.html);
  const fold=node.querySelector("details.actions");if(fold)fold.open=st.opened.has(String(m.id));
+ const thought=node.querySelector("details.thinking-box");if(thought)thought.open=st.thoughts[m.id]??S.ui.thinking==="open";
  if(cached.blocks.length)mountBlocks(node,cached.blocks,{thread:st.thread,message:m.id,answers,pid});
  return node;
 }
@@ -163,15 +169,32 @@ function suggestionsHtml(pid,m){
    button("应用","suggestion",'data-pid="'+pid+'" data-mid="'+m.id+'" data-sid="'+esc(s.id)+'" data-decision="applied"',"primary xs")+button("忽略","suggestion",'data-pid="'+pid+'" data-mid="'+m.id+'" data-sid="'+esc(s.id)+'" data-decision="dismissed"',"ghost xs"))+'</div></div>';
  }).join("");
 }
+/* What the model thought before answering: folded to how long and one line, the full text one click away. */
+function freshThinking(){return {think:"",thinkingNow:false,thinkMs:0,thinkFrom:0,liveOpen:null};}
+function thinkSummary(text){
+ const plain=String(text||"").replace(/[#*`>_|]/g," ").replace(/\s+/g," ").trim();
+ return shorten((plain.match(/^.*?(?:[。！？]|[.!?](?=\s|$))/)||[plain])[0],90);
+}
+function lastThought(text){const lines=String(text||"").split("\n").map(x=>x.trim()).filter(Boolean);return lines.length?"…"+lines[lines.length-1].slice(-80):"";}
+function seconds(s){return s<1?"不到 1 秒":s<60?Math.round(s)+" 秒":Math.floor(s/60)+" 分 "+Math.round(s%60)+" 秒";}
+function thinkingHtml(text,secs,live=null){
+ if(S.ui.thinking==="hidden"||!String(text||"").trim())return "";
+ const head=live?(live.now?"正在思考":"思考了 "+seconds(live.secs)):secs?"思考了 "+seconds(secs):"思考过程";
+ const open=live?live.open:false;
+ return '<details class="thinking-box'+(live?" live":"")+(live?.now?" now":"")+'"'+(open?" open":"")+'><summary>'+svg("bulb",13)+'<b>'+head+'</b><span>'+esc(live?.now?lastThought(text):thinkSummary(text))+'</span>'+svg("chevrondown",11)+'</summary>'+
+  (live&&!open?"":'<div class="thinking-text markdown">'+markdown(text)+'</div>')+'</details>';
+}
 /* Only the reply being written re-renders while it streams. */
 function renderLive(pid){
  const node=Dock.els[pid],st=Chat[pid];if(!node||!st)return;
  const slot=node.querySelector(".live-slot");if(!slot)return;
  const busy=st.data?.busy;
- if(!st.stream&&!st.live.length&&!busy&&!st.error){slot.innerHTML="";return;}
+ if(!st.stream&&!st.live.length&&!busy&&!st.error&&!st.think){slot.innerHTML="";return;}
  const r=replyHtml(st.stream,true);
- slot.innerHTML=(st.stream||st.live.length?'<div class="msg from-ai streaming"><div class="markdown msg-body">'+r.html+'</div>'+actionChips(st.live,[],true)+'</div>':"")+
-  (busy&&!st.stream?'<div class="thinking"><span></span><span></span><span></span><b>'+esc(st.waiting||"正在想…")+'</b></div>':"")+
+ const secs=(st.thinkMs+(st.thinkingNow?Date.now()-st.thinkFrom:0))/1000;
+ const thought=thinkingHtml(st.think,0,{now:st.thinkingNow,secs,open:st.liveOpen??S.ui.thinking==="open"});
+ slot.innerHTML=(st.stream||st.live.length||thought?'<div class="msg from-ai streaming">'+thought+'<div class="markdown msg-body">'+r.html+'</div>'+actionChips(st.live,[],true)+'</div>':"")+
+  (busy&&!st.stream&&!st.thinkingNow?'<div class="thinking"><span></span><span></span><span></span><b>'+esc(st.waiting||"正在想…")+'</b></div>':"")+
   (st.error?'<div class="chat-error">'+esc(st.error)+'</div>':"");
  if(r.blocks.length)mountBlocks(slot,r.blocks,{thread:st.thread,message:0,answers:{},pid,live:true});
 }
@@ -256,7 +279,7 @@ async function chatSend(pid,text,extra={}){
  if(typeof flushAll==="function")await flushAll();
  const selection=extra.selection??Sel.text,attach=text==null?st.attach.map(a=>a.path):[];
  if(text==null&&area){area.value="";fitComposer(pid);}st.input="";
- st.error="";st.stream="";st.live=[];st.waiting="";
+ st.error="";st.stream="";st.live=[];st.waiting="";Object.assign(st,freshThinking());
  try{
   const r=await rpc("send",{agent:p.agent,message,thread:st.thread,selection,task:extra.task||"",note:screenNote(),answer:extra.answer||null,attach,model:p.model||null});
   st.thread=r.thread;Sel.text="";if(text==null)st.attach=[];
@@ -268,13 +291,15 @@ function chatEvent(evt){
  if(evt.kind==="connection_test")return settingsTestResult(evt);
  for(const pid of chatPanels(evt.thread)){
   const st=Chat[pid];
+  if(evt.kind==="thinking"){if(!st.thinkingNow){st.thinkingNow=true;st.thinkFrom=Date.now();}st.think+=evt.text;patchLive(pid);continue;}
+  if(st.thinkingNow&&["chunk","tool","tool_wait","finished","error"].includes(evt.kind)){st.thinkingNow=false;st.thinkMs+=Date.now()-st.thinkFrom;}
   if(evt.kind==="chunk"){st.stream+=evt.text;st.waiting="";patchLive(pid);continue;}
   if(evt.kind==="status"){if(st.data){st.data.status=evt.state;st.data.busy=!["ready","offline","error","cancelled"].includes(evt.state)||st.data.busy;}const head=Dock.els[pid]?.querySelector(".chat-head");if(head)head.innerHTML=chatHead(pid);continue;}
   if(evt.kind==="tool_wait"){st.waiting={ui:"正在调整界面…",shell:"正在命令行里查看…",run:"正在运行代码…",web_search:"正在联网搜索…",web_fetch:"正在读网页…",install:"正在装包…"}[evt.name]||"";patchLive(pid);continue;}
   if(evt.kind==="tool"){st.waiting="";if(evt.actions?.length){st.live.push(...evt.actions);patchLive(pid);}continue;}
   if(evt.kind==="error"){st.error=evt.message||"请求失败";patchLive(pid);continue;}
   if(evt.kind==="finished"){
-   st.stream="";st.live=[];st.waiting="";
+   st.stream="";st.live=[];st.waiting="";Object.assign(st,freshThinking());
    if(evt.errors?.length)toast(evt.errors.join("；"),"error");
    if(evt.focus!==undefined){
     S.data.active_topic=evt.focus||null;
@@ -323,4 +348,33 @@ function escalate(pid,mid){
  if(!tutor)tutor=openPanel({type:"chat",agent:"tutor"});else activate(tutor);
  const send=()=>Chat[tutor]?.thread?chatSend(tutor,"我刚才和快答讨论了下面的内容。请检查它是否准确，再帮我深入理解，并接回主线：\n\n"+m.content):setTimeout(send,200);
  send();
+}
+/* The ⋯ menu: how this window shows the conversation, how all windows do, and the rest of what a conversation can do. */
+function chatMoreMenu(pid,anchor){
+ const p=Dock.panels[pid],st=Chat[pid],u=S.ui;if(!p||!st)return;
+ const lh=Number(viewOf(p,"line_height"))||1.8,rw=viewOf(p,"read_width")||"medium",own=p.zoom||p.line_height||p.read_width;
+ const row=(label,ctl)=>'<div class="menu-row"><span>'+esc(label)+'</span><div class="ctl">'+ctl+'</div></div>';
+ const step=(action,key,dir,label,title)=>'<button class="step" data-action="'+action+'" data-pid="'+pid+'" data-key="'+key+'" data-dir="'+dir+'" title="'+esc(title||"")+'">'+label+'</button>';
+ const seg=(action,key,cur,list)=>'<div class="seg">'+list.map(([v,t])=>'<button class="'+(String(cur)===String(v)?"on":"")+'" data-action="'+action+'" data-pid="'+pid+'" data-key="'+key+'" data-value="'+v+'">'+esc(t)+'</button>').join("")+'</div>';
+ const item=(icon,text,action,attrs="")=>'<button data-action="'+action+'" data-pid="'+pid+'" '+attrs+'>'+svg(icon,14)+'<span>'+esc(text)+'</span></button>';
+ popMenu(anchor,'<div class="menu-label">这个窗口</div>'+
+  row("大小",step("view-step","zoom",-1,"A−","Ctrl -")+'<b>'+Math.round(zoomOf(p)*100)+'%</b>'+step("view-step","zoom",1,"A+","Ctrl ="))+
+  row("行距",step("view-step","line_height",-1,"−")+'<b>'+lh.toFixed(2)+'</b>'+step("view-step","line_height",1,"+"))+
+  row("阅读宽度",seg("view-set","read_width",rw,[["narrow","窄"],["medium","中"],["wide","宽"],["none","不限"]]))+
+  (own?item("undo","这个窗口恢复成默认显示","view-reset"):"")+
+  '<hr/><div class="menu-label">所有窗口</div>'+
+  row("思考过程",seg("ui-set","thinking",u.thinking||"collapsed",[["collapsed","折叠"],["open","展开"],["hidden","不显示"]]))+
+  row("正文字号",step("ui-step","font_size",-1,"−")+'<b>'+(Number(u.font_size)||14.5)+'</b>'+step("ui-step","font_size",1,"+"))+
+  row("代码字号",step("ui-step","code_font_size",-1,"−")+'<b>'+(Number(u.code_font_size)||13)+'</b>'+step("ui-step","code_font_size",1,"+"))+
+  row("密度",seg("ui-set","density",u.density||"comfortable",[["comfortable","舒适"],["compact","紧凑"]]))+
+  row("明暗",seg("ui-set","theme",u.theme||"dark",[["dark","深色"],["light","浅色"]]))+
+  '<hr/>'+(p.agent==="coach"?"":item("edit","开新会话","chat-new"))+(p.agent==="tutor"?item("book","提炼知识卡","chat-task",'data-task="capture"'):"")+
+  item("bot","换这个窗口的模型…","chat-model")+item("copy","复制整段对话","chat-copy-all")+item("document","把这段对话存成笔记","chat-save-note")+
+  (st.data?.head?.topic?'<button data-action="open-doc" data-id="'+esc(st.data.head.topic)+'">'+svg("map",14)+'<span>打开主题页</span></button>':"")+
+  '<hr/>'+item("float","浮出","dock-float")+item("close","关闭","dock-close")+'<button data-action="open-settings" data-page="look">'+svg("sliders",14)+'<span>全部外观设置</span></button>',{cls:"menu-wide"});
+ Menus.reopen=()=>{const b=Dock.els[pid]?.querySelector('[data-action="chat-more"]');if(b&&b.isConnected)chatMoreMenu(pid,b);};
+}
+function conversationMarkdown(pid){
+ const st=Chat[pid],p=Dock.panels[pid];
+ return (st.data?.messages||[]).map(m=>"**"+(m.role==="user"?"我":agentTitle(m.meta?.agent||p.agent))+"**（"+fmtDate(m.at,true)+"）\n\n"+m.content.trim()).join("\n\n---\n\n");
 }

@@ -21,12 +21,13 @@ function renderTop(){renderStatus();renderActivity();}
 /* Interface preferences live in the machine's config; appearance applies at once. */
 // Reading width in characters of body text, so headings and paragraphs share one column and it widens with the text.
 const READ_WIDTH={narrow:34,medium:42,wide:54,none:0};
+function readWidth(name){const chars=READ_WIDTH[name]??READ_WIDTH.medium;return chars?Math.round(chars*(Number(S.ui.font_size)||14.5))+"px":"none";}
 function applyUi(){
  const u=S.ui,root=document.documentElement;
  root.dataset.theme=u.theme==="light"?"light":"dark";root.dataset.density=u.density||"comfortable";
  root.style.setProperty("--font-size",(Number(u.font_size)||14.5)+"px");root.style.setProperty("--code-size",(Number(u.code_font_size)||13)+"px");
- root.style.setProperty("--line-height",String(Number(u.line_height)||1.8));const chars=READ_WIDTH[u.read_width]??READ_WIDTH.medium;root.style.setProperty("--read-width",chars?Math.round(chars*(Number(u.font_size)||14.5))+"px":"none");
- Object.keys(Dock.panels).forEach(applyZoom);
+ root.style.setProperty("--line-height",String(Number(u.line_height)||1.8));root.style.setProperty("--read-width",readWidth(u.read_width));
+ Object.keys(Dock.panels).forEach(applyView);
  renderActivity();
 }
 let uiTimer=null;
@@ -47,10 +48,11 @@ function newMenu(anchor){
 }
 function closeMenus(){all(".menu").forEach(m=>m.remove());}
 /* A small menu next to what opened it (above it for things at the bottom), kept inside the window. */
+const Menus={reopen:null};
 function popMenu(anchor,html,opts={}){
- closeMenus();
+ closeMenus();Menus.reopen=null;
  const r=anchor.getBoundingClientRect?anchor.getBoundingClientRect():{left:anchor.x,right:anchor.x,top:anchor.y,bottom:anchor.y};
- const menu=h('<div class="menu">'+html+'</div>');document.body.appendChild(menu);
+ const menu=h('<div class="menu '+(opts.cls||"")+'">'+html+'</div>');document.body.appendChild(menu);
  const w=menu.offsetWidth,ht=menu.offsetHeight;
  const x=Math.max(8,Math.min(r.left,innerWidth-w-8)),y=opts.above?r.top-ht-6:r.bottom+6;
  menu.style.left=x+"px";menu.style.top=Math.max(8,Math.min(y<8?r.bottom+6:y,innerHeight-ht-8))+"px";
@@ -65,7 +67,7 @@ function tabMenu(pid,at){
   (p.zoom?'<button data-action="zoom-step" data-pid="'+pid+'" data-dir="0">'+svg("undo",14)+'<span>恢复成这种面板的默认（'+Math.round(zoomDefault(p)*100)+'%）</span></button>':"")+'<hr/>'+
   (floating?"":'<button data-action="dock-float" data-pid="'+pid+'">'+svg("float",14)+'<span>浮出</span></button>')+
   '<button data-action="dock-close" data-pid="'+pid+'">'+svg("close",14)+'<span>关闭</span></button>');
- Dock.tabMenuAt={pid,at};
+ Menus.reopen=()=>tabMenu(pid,at);
 }
 function panelHere(){const a=document.activeElement?.closest?.(".panel");return a?.dataset.pid||(Dock.panels[Dock.focus]?Dock.focus:null);}
 async function newScratch(kind){
@@ -203,11 +205,28 @@ async function onAction(a){
  case "chat-attach":return attachMenu(pid,a);
  case "chat-attach-add":{const st=Chat[pid];if(st&&!st.attach.some(x=>x.path===a.dataset.path))st.attach.push({path:a.dataset.path});updateComposer(pid);return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
  case "chat-attach-remove":Chat[pid]?.attach.splice(Number(a.dataset.index),1);return updateComposer(pid);
- case "chat-model":return modelMenu(pid,a);
+ case "chat-model":return modelMenu(pid,a.closest(".menu")?Dock.els[pid]?.querySelector(".model-tag")||a:a);
  case "chat-model-set":return setChatModel(pid,a.dataset.api,a.dataset.model);
  case "chat-model-other":{const m=chatModel(pid),name=prompt("模型名（用 "+((S.config?.apis||[]).find(x=>x.id===m.api)?.label||m.api)+" 这个连接）：",m.model);if(name&&name.trim())setChatModel(pid,m.api,name.trim());return;}
  case "msg-copy":{const m=Chat[pid]?.data?.messages.find(x=>String(x.id)===a.dataset.mid);if(m){await navigator.clipboard.writeText(m.content);toast("已复制");}return;}
- case "zoom-step":{const dir=Number(a.dataset.dir);stepZoom(pid,dir||0);if(dir&&Dock.tabMenuAt?.pid===pid)tabMenu(pid,Dock.tabMenuAt.at);return;}
+ case "zoom-step":{const dir=Number(a.dataset.dir),again=Menus.reopen;stepZoom(pid,dir||0);if(dir&&again)again();return;}
+ case "chat-more":return chatMoreMenu(pid,a);
+ case "view-step":case "view-set":case "view-reset":case "ui-set":case "ui-step":{
+  const again=Menus.reopen,key=a.dataset.key,p=Dock.panels[pid];
+  if(kind==="view-step"){if(key==="zoom")stepZoom(pid,Number(a.dataset.dir));else setView(pid,key,Math.round(Math.min(2.4,Math.max(1.3,(Number(viewOf(p,key))||1.8)+Number(a.dataset.dir)*.1))*100)/100);}
+  else if(kind==="view-set")setView(pid,key,a.dataset.value);
+  else if(kind==="view-reset"){setZoom(pid,null);VIEW_KEYS.forEach(k=>setView(pid,k,null));}
+  else{
+   const step={font_size:[.5,11,24],code_font_size:[.5,10,24]}[key];
+   S.ui[key]=kind==="ui-step"?Math.min(step[2],Math.max(step[1],(Number(S.ui[key])||14)+Number(a.dataset.dir)*step[0])):a.dataset.value;
+   applyUi();saveUi();if(key==="thinking")Object.keys(Chat).forEach(x=>{Chat[x].thoughts={};Chat[x].liveOpen=null;renderChat(x);});
+  }
+  if(again)again();return;
+ }
+ case "chat-copy-all":await navigator.clipboard.writeText(conversationMarkdown(pid));return toast("整段对话已复制（Markdown）");
+ case "chat-save-note":{const st=Chat[pid],topic=st.data?.head?.topic||null;
+  const r=await rpc("doc_create",{kind:"note",title:"对话 · "+(topic?topicTitle(topic):agentTitle(Dock.panels[pid].agent))+" · "+fmtDate(new Date().toISOString()),topic,body:conversationMarkdown(pid)});
+  await refreshState();return openFile(r.path);}
  case "zoom-reset-all":Object.keys(Dock.panels).forEach(x=>{if(Dock.panels[x].zoom)setZoom(x,null);});return toast("所有窗口都回到了各自面板的默认大小");
  case "chat-cancel":return rpc("cancel",{thread:Chat[pid].thread});
  case "chat-task":return chatSend(pid,"",{task:a.dataset.task});

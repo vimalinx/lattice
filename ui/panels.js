@@ -106,6 +106,7 @@ const SETTINGS_RENDER={
    '<h3>每种窗口的大小</h3><p class="muted">新开的窗口按这里的比例显示，文字、代码、间距和图标一起缩放。某一个窗口还可以单独调：鼠标放在它上面按 Ctrl + 滚轮，或者聚焦后按 Ctrl + = / Ctrl + - / Ctrl + 0，标签上右键也能调；单独调过的会在标签上显示百分比，存布局时一起存下。</p>'+
    '<div class="zoom-grid">'+ZOOM_KINDS.map(([k,t])=>'<label>'+esc(t)+'<span class="unit"><input type="number" step="5" min="60" max="250" data-zoom-kind="'+k+'" value="'+Math.round((Number(u.zoom?.[k])||1)*100)+'"/>%</span></label>').join("")+'</div>'+
    (Object.values(Dock.panels).some(p=>p.zoom)?'<div class="inline"><span class="muted">有 '+Object.values(Dock.panels).filter(p=>p.zoom).length+' 个窗口单独调过大小。</span>'+button("全部恢复成各自的默认","zoom-reset-all","","ghost sm")+'</div>':"")+
+   '<label>模型的思考过程<select data-ui="thinking">'+opt(u.thinking||"collapsed",[["collapsed","折叠，只显示用时和一句摘要"],["open","展开"],["hidden","不显示"]])+'</select></label>'+
    '<h3>交互</h3><label>发送消息<select data-ui="send_key">'+opt(u.send_key,[["enter","Enter 发送，Shift + Enter 换行"],["ctrl","Ctrl + Enter 发送，Enter 换行"]])+'</select></label>'+
    '<label class="check"><input type="checkbox" data-ui="selection_popup"'+(u.selection_popup?" checked":"")+'/> 选中文字时出现「问快答 / 问主会话」</label>'+
    '<label class="check"><input type="checkbox" data-cfg="agent_auto_organize"'+(c.agent_auto_organize?" checked":"")+'/> 关掉随手写的记录或代码后，自动交给 AI 整理</label>'+
@@ -252,7 +253,8 @@ async function settingsAction(kind,a){
 const ZOOM_KINDS=[["chat:tutor","主会话"],["chat:flash","快答"],["chat:coach","练习教练"],["file","文件"],["home","开始"],["map","知识图"],["journal","学习轨迹"],["review","回顾"],["settings","设置"]];
 function settingsChange(t){
  if(t.dataset.zoomKind){const v=Math.max(60,Math.min(250,Number(t.value)||100))/100;S.ui.zoom={...(S.ui.zoom||{}),[t.dataset.zoomKind]:v};applyUi();saveUi();return true;}
- if(t.dataset.ui){const k=t.dataset.ui;S.ui[k]=t.type==="checkbox"?t.checked:t.type==="number"?Number(t.value):t.value;applyUi();saveUi();return true;}
+ if(t.dataset.ui){const k=t.dataset.ui;S.ui[k]=t.type==="checkbox"?t.checked:t.type==="number"?Number(t.value):t.value;applyUi();saveUi();
+  if(k==="thinking")Object.keys(Chat).forEach(x=>{Chat[x].thoughts={};Chat[x].liveOpen=null;renderChat(x);});return true;}
  if(t.dataset.sideOpen!==undefined){S.ui.side.open=t.checked;saveUi();renderSide();return true;}
  if(t.dataset.sideWidth!==undefined){S.ui.side.width=Math.max(180,Math.min(560,Number(t.value)));saveUi();renderSide();return true;}
  if(t.dataset.sideShow){const k=t.dataset.sideShow,hidden=new Set(S.ui.side.hidden||[]);t.checked?hidden.delete(k):hidden.add(k);S.ui.side.hidden=[...hidden];if(!t.checked&&S.ui.side.section===k)S.ui.side.section=sideOrder()[0];saveUi();renderSide();return true;}

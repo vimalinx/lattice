@@ -943,7 +943,8 @@ class Bridge(QObject):
         sources = list({s["url"]: s for s in turn.sources if s.get("url")}.values())[:12]
         if body.strip() or turn.actions or turn.suggestions:
             evt["message"] = l.append_message(thread, "assistant", body, {"agent": agent, "stop_reason": reason, "usage": evt.get("usage"),
-                                                                          "actions": turn.actions, "sources": sources, "suggestions": turn.suggestions})
+                                                                          "actions": turn.actions, "sources": sources, "suggestions": turn.suggestions,
+                                                                          **({"thinking": evt["thinking"], "think_seconds": evt.get("think_seconds")} if evt.get("thinking") else {})})
         evt.update(actions=turn.actions, sources=sources, suggestions=turn.suggestions)
         errors = []
         for ident, review_thread in list(self.reviews.items()):

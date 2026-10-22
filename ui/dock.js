@@ -22,7 +22,7 @@ async function applyLayout(saved){
  const next=JSON.parse(JSON.stringify(saved));
  for(const pid of Object.keys(Dock.panels)){
   const keep=next.panels[pid]&&panelKey(next.panels[pid])===panelKey(Dock.panels[pid]);
-  if(keep){Dock.panels[pid]=next.panels[pid];applyZoom(pid);}
+  if(keep){Dock.panels[pid]=next.panels[pid];applyView(pid);}
   else{const t=Dock.types[Dock.panels[pid].type];const node=Dock.els[pid];delete Dock.panels[pid];delete Dock.els[pid];if(t?.unmount)safe(()=>t.unmount({},node));node?.remove();}
  }
  Dock.layout=next.layout;Dock.layout.floats=Dock.layout.floats||[];
@@ -115,7 +115,7 @@ async function closePanel(pid){
 function mountPanel(pid){
  const p=Dock.panels[pid],type=Dock.types[p.type];
  const node=document.createElement("div");node.className="panel panel-"+p.type;node.dataset.pid=pid;
- Dock.els[pid]=node;applyZoom(pid);
+ Dock.els[pid]=node;applyView(pid);
  if(type)safe(()=>type.mount(p,node,pid));else node.innerHTML=emptyState("info","这个面板打不开","面板类型 "+p.type+" 不存在。");
 }
 function float(pid){
@@ -124,16 +124,31 @@ function float(pid){
  Dock.layout.floats.push({id:newId("f"),x:Math.round(rect.width*.25),y:70,w:Math.round(Math.max(480,Math.min(760,rect.width*.5))),h:Math.round(rect.height*.7),stack:stackNode([pid])});
  tidy();renderDock();saveLayout();
 }
-/* Size: each kind of panel has a default in the settings; a window can set its own, kept in the layout. */
+/* Size: each kind of panel has a default in the settings; a window can set its own, kept in the layout.
+   Line height and reading width likewise fall back to the settings unless the window sets its own. */
+const VIEW_KEYS=["line_height","read_width"];
 function zoomKind(p){return p.type==="chat"?"chat:"+(p.agent||"tutor"):p.type;}
 function zoomDefault(p){return Number(S.ui.zoom?.[zoomKind(p)])||1;}
 function zoomOf(p){return Number(p.zoom)||zoomDefault(p);}
-function applyZoom(pid){const node=Dock.els[pid],p=Dock.panels[pid];if(node&&p)node.style.zoom=zoomOf(p);}
+function applyView(pid){
+ const node=Dock.els[pid],p=Dock.panels[pid];if(!node||!p)return;
+ node.style.zoom=zoomOf(p);
+ if(p.line_height)node.style.setProperty("--line-height",String(p.line_height));else node.style.removeProperty("--line-height");
+ if(p.read_width)node.style.setProperty("--read-width",readWidth(p.read_width));else node.style.removeProperty("--read-width");
+}
+function viewOf(p,key){return key==="zoom"?zoomOf(p):p[key]??S.ui[key];}
+function setView(pid,key,value){
+ if(key==="zoom")return setZoom(pid,value);
+ const p=Dock.panels[pid];if(!p||!VIEW_KEYS.includes(key))return;
+ if(value==null||value===""||value===S.ui[key])delete p[key];else p[key]=value;
+ applyView(pid);const t=Dock.types[p.type],node=Dock.els[pid];if(t?.shown&&node?.isConnected)t.shown(p,node);
+ saveLayout();
+}
 function setZoom(pid,value){
  const p=Dock.panels[pid];if(!p)return;
  const z=value==null?null:Math.round(Math.min(2.5,Math.max(.6,Number(value)))*20)/20;
  if(z==null||Math.abs(z-zoomDefault(p))<.001)delete p.zoom;else p.zoom=z;
- applyZoom(pid);refreshTab(pid);
+ applyView(pid);refreshTab(pid);
  const t=Dock.types[p.type],node=Dock.els[pid];if(t?.shown&&node?.isConnected)t.shown(p,node);
  saveLayout();
 }
@@ -358,10 +373,10 @@ async function runUiOps(ops){
    }else if(op.do==="sidebar"){
     if(op.section&&!SIDE_SECTIONS[op.section])throw new Error("左栏没有这个分区："+op.section);
     showSection(op.section,op.open!==false);results.push({ok:true});
-   }else if(op.do==="set"&&op.key==="zoom"){
-    const pid=resolvePanel(op.panel);if(!pid)throw new Error("zoom 要给 panel：面板 id 或标题");
-    if(op.value!=null&&!(Number(op.value)>0))throw new Error("zoom 的 value 是倍数，比如 1.2");
-    setZoom(pid,op.value==null?null:Number(op.value));results.push({ok:true,panel:pid,zoom:zoomOf(Dock.panels[pid])});
+   }else if(op.do==="set"&&(op.key==="zoom"||op.panel&&VIEW_KEYS.includes(op.key))){
+    const pid=resolvePanel(op.panel);if(!pid)throw new Error(op.key+" 要给 panel：面板 id 或标题");
+    if(op.key==="zoom"&&op.value!=null&&!(Number(op.value)>0))throw new Error("zoom 的 value 是倍数，比如 1.2");
+    setView(pid,op.key,op.value==null?null:op.key==="read_width"?String(op.value):Number(op.value));results.push({ok:true,panel:pid,[op.key]:viewOf(Dock.panels[pid],op.key)});
    }else if(op.do==="set"){
     const keys=["theme","font_size","code_font_size","line_height","read_width","density"];
     if(!keys.includes(op.key))throw new Error("只能改 "+keys.join("、")+"，或者给 panel 改 zoom");
