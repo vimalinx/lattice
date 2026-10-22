@@ -66,7 +66,7 @@ DEFAULTS = {
     # Everything about the interface: appearance, the sidebar, workspaces.
     # zoom: each kind of panel's default size ("chat:tutor", "file", ...); a window can still set its own.
     # spaces: the learner's changes to the built-in workspaces and their own ones; side.closed: workspaces whose sidebar is folded.
-    "ui": {"theme": "dark", "thinking": "collapsed", "font_size": 14.5, "code_font_size": 13, "line_height": 1.8, "read_width": 42, "zoom": {"chat:tutor": 1.1},
+    "ui": {"theme": "dark", "thinking": "collapsed", "md_mode": "live", "font_size": 14.5, "code_font_size": 13, "line_height": 1.8, "read_width": 42, "zoom": {"chat:tutor": 1.1},
            "density": "comfortable", "send_key": "enter",
            "selection_popup": True, "side": {"width": 270, "closed": []}, "spaces": []},
 }

@@ -8,6 +8,8 @@
 }
 :root{--select-bg:rgba(123,214,188,.22);--active-line:rgba(255,255,255,.025);
  --tk-kw:#c3a6ff;--tk-str:#a8d8a0;--tk-num:#f0b77e;--tk-com:#6f7d8c;--tk-fn:#84c9f2;--tk-type:#ecc994;--tk-prop:#9fd3e6;--tk-op:#b6c2cf;--tk-tag:#f3a09b}
+:root{--rb0:#e6c35c;--rb1:#d38ad6;--rb2:#5fb3f0}
+:root[data-theme="light"]{--rb0:#a87e00;--rb1:#9b3fa0;--rb2:#1f6fc0}
 :root[data-theme="light"]{--select-bg:rgba(27,120,104,.16);--active-line:rgba(0,0,0,.03);
  --tk-kw:#6d43c0;--tk-str:#2f7a32;--tk-num:#a35a10;--tk-com:#7b8a87;--tk-fn:#1c62a6;--tk-type:#8a6a35;--tk-prop:#22708a;--tk-op:#55636a;--tk-tag:#b05855}
 :root[data-theme="light"]{
@@ -710,3 +712,5 @@ details.api summary span{font-size:11.5px}
 .panel-file .file>.doc-head{max-width:calc(var(--read-width,42em) + 48px);width:100%;margin:0 auto;padding-left:24px;padding-right:24px}
 .panel-file .file>.doc-head+.file-tools{max-width:calc(var(--read-width,42em) + 48px);width:100%;margin:0 auto;padding-left:24px}
 .card-view .cm-host.editor .cm-content,.topic-view .cm-host.editor .cm-content{max-width:none;margin:0;padding:10px 14px 24px!important}
+.cm-rb0,.cm-rb0 *{color:var(--rb0)!important}.cm-rb1,.cm-rb1 *{color:var(--rb1)!important}.cm-rb2,.cm-rb2 *{color:var(--rb2)!important}
+.cm-rb-bad,.cm-rb-bad *{color:var(--red)!important;text-decoration:underline wavy var(--red)}

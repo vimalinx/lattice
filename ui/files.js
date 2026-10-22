@@ -13,7 +13,7 @@ function fileIcon(path){
 panelType("file",{side:"mine",icon:p=>fileIcon(p.path),
  title(p,node){const st=Files[node?.dataset.pid];return st?.data?.doc?.title||st?.data?.card?.title||st?.data?.notebook?.title||baseName(p.path);},
  dirty(p,node){const st=Files[node?.dataset.pid];return !!(st&&(st.dirty||[...(st.cellDrafts||new Map()).keys()].length));},
- mount(p,node,pid){Files[pid]={dirty:false,mode:MD_MODES.some(m=>m[0]===p.mode)?p.mode:"live",cellDrafts:new Map(),timers:{},edited:false};node.innerHTML='<div class="loading">正在打开 '+esc(baseName(p.path))+'…</div>';loadFile(pid);},
+ mount(p,node,pid){Files[pid]={dirty:false,mode:[p.mode,S.ui.md_mode].find(m=>MD_MODES.some(x=>x[0]===m))||"live",cellDrafts:new Map(),timers:{},edited:false};node.innerHTML='<div class="loading">正在打开 '+esc(baseName(p.path))+'…</div>';loadFile(pid);},
  async beforeClose(p,node){
   const pid=node.dataset.pid,st=Files[pid];
   await flushFile(pid);
@@ -89,6 +89,7 @@ function fileBar(pid){
  const run=d.runnable&&!d.notebook?button(svg("play",13)+" 运行","file-run",'data-pid="'+pid+'" title="以你的权限运行（Ctrl + Enter）"',"primary sm")+(d.env?'<span class="chip" title="Python 环境">'+esc(d.env)+'</span>':""):"";
  return '<div class="file-bar"><span class="crumbs" title="'+esc(d.path)+'">'+(d.external?svg("folder",12)+" ":"")+crumbs+'</span>'+state+'<span class="grow"></span>'+run+
   (d.readonly?'<span class="chip">只读</span>':"")+
+  (d.doc||d.card||d.topic||(d.ext||"").toLowerCase()===".md"?iconButton("dots","file-menu","显示方式和原文",'data-pid="'+pid+'"'):"")+
   (d.external?"":iconButton("history","file-history","历史版本",'data-pid="'+pid+'"'))+
   iconButton("external","file-external","用系统程序打开",'data-pid="'+pid+'"')+
   (!d.readonly&&!d.external&&d.path!=="AGENTS.md"?iconButton("trash","file-delete","删除这个文件",'data-pid="'+pid+'"'):"")+'</div>';
@@ -117,7 +118,7 @@ function textView(pid){
  const md=ext===".md";
  if(isCsv&&st.mode!=="raw")return '<div class="file-tools">'+button("编辑原文","file-mode",'data-pid="'+pid+'" data-mode="raw"',"ghost xs")+'</div><div class="table-view" data-keep-scroll>'+csvTable(st.text,ext===".tsv"?"\t":",")+'</div>';
  const attrs='data-field="text" data-file-text="'+pid+'"';
- if(md)return mdModes(pid)+mdBody(pid,st.text,attrs,{readonly:d.readonly});
+ if(md)return mdBody(pid,st.text,attrs,{readonly:d.readonly});
  const editor=editorHost(st.text,'class="editor code" '+attrs,{filename:d.name,readonly:d.readonly,wrap:[".txt",".log"].includes(ext),
   ...editorHooks(pid,{keys:[{key:"Mod-Enter",run:()=>{if(!Files[pid]?.data?.runnable)return false;safe(()=>runFile(pid));return true;}}]})});
  const out=d.runnable?runOutput(pid):"";
@@ -130,10 +131,13 @@ function csvTable(text,sep){
 }
 // Live preview renders in place (the cursor's own line shows its marks); source shows the plain text; reading only renders.
 const MD_MODES=[["live","实时预览"],["source","源码"],["split","分屏"],["preview","阅读"]];
-function mdModes(pid){
- const st=Files[pid];
- return '<div class="file-tools"><div class="segmented" title="Ctrl + E 在编辑和阅读之间切换">'+MD_MODES.map(([m,t])=>'<button data-action="file-mode" data-pid="'+pid+'" data-mode="'+m+'" class="'+(st.mode===m?"on":"")+'">'+t+'</button>').join("")+'</div>'+
-  (st.data.doc||st.data.card||st.data.topic?button(st.raw?"表单":"原文","file-raw",'data-pid="'+pid+'" title="直接编辑整个文件，包括开头的属性"',"ghost xs"):"")+'</div>';
+// How a Markdown file shows, and the raw file behind a form: in the file's ⋯ menu, not on the page.
+function fileMenu(pid,anchor){
+ const st=Files[pid],d=st.data,form=d.doc||d.card||d.topic,mode=st.raw?"":st.mode;
+ popMenu(anchor,'<div class="menu-label">显示方式 <small>Ctrl + E 在编辑和阅读之间切换</small></div>'+
+  MD_MODES.map(([m,t])=>'<button data-action="file-mode" data-pid="'+pid+'" data-mode="'+m+'"'+(st.raw?" disabled":"")+'>'+svg(mode===m?"check":"document",14)+'<span>'+t+'</span></button>').join("")+
+  (form?'<hr/><button data-action="file-raw" data-pid="'+pid+'">'+svg(st.raw?"layout":"code",14)+'<span>'+(st.raw?"回到表单":"编辑原文（包括开头的属性）")+'</span></button>':"")+
+  '<hr/><button data-action="open-settings" data-page="look">'+svg("sliders",14)+'<span>笔记默认的显示方式…</span></button>',{cls:"menu-wide"});
 }
 function runOutput(pid){
  const r=Files[pid].run;
@@ -181,10 +185,10 @@ function docView(pid){
   (kind==="note"?'<input class="doc-meta" data-field="tags" data-doc-field="tags" value="'+esc((a.tags||[]).join(", "))+'" placeholder="标签，用逗号分开"/>':"")+
   (kind==="lesson"?'<input class="doc-meta" data-field="objective" data-doc-field="objective" value="'+esc(a.objective||"")+'" placeholder="这一节想弄懂什么"/>':"")+
   (kind==="insight"?'<div class="doc-meta">'+(a.insight==="strength"?"做得好的地方":"薄弱点")+' · '+(a.state==="resolved"?"已克服":"主会话正在留意")+(a.state!=="resolved"?button("已克服","insight-resolve",'data-id="'+esc(d.doc.id)+'"',"ghost xs"):"")+'</div>':"");
- return '<div class="doc-head">'+fields+'</div>'+mdModes(pid)+mdBody(pid,d.doc.body,'data-field="body" data-doc-field="body"',{placeholder:"开始写…  [[ 链接别的笔记，# 加标签，粘贴图片直接放进来"})+linksBlock(pid,d.links||[],d.doc.id);
+ return '<div class="doc-head">'+fields+'</div>'+mdBody(pid,d.doc.body,'data-field="body" data-doc-field="body"',{placeholder:"开始写…  [[ 链接别的笔记，# 加标签，粘贴图片直接放进来"})+linksBlock(pid,d.links||[],d.doc.id);
 }
 function rawView(pid){
- return mdModes(pid)+'<div class="code-wrap" data-keep-scroll>'+editorHost(Files[pid].text,'class="editor code" data-field="text" data-file-text="'+pid+'"',{markdown:true,live:false,...editorHooks(pid)})+'</div>';
+ return '<div class="code-wrap" data-keep-scroll>'+editorHost(Files[pid].text,'class="editor code" data-field="text" data-file-text="'+pid+'"',{markdown:true,live:false,...editorHooks(pid)})+'</div>';
 }
 function linksBlock(pid,links,id){
  const docs=new Map((S.data.docs||[]).map(d=>[d.id,d]));
@@ -208,7 +212,7 @@ function cardView(pid){
   '<label class="stage-pick">我到了哪一步<select data-card-stage="'+pid+'">'+Object.entries(stageName).map(([v,t])=>'<option value="'+v+'"'+(c.stage===v?" selected":"")+'>'+t+'</option>').join("")+'</select></label></div>'+
   '<label class="field-label">自测题<input data-field="question" data-card-field="question" value="'+esc(c.question)+'" placeholder="一个要求预测、解释或判断的问题"/></label>'+
   '<div class="mine-box"><div class="mine-title">'+svg("edit",13)+' 我的理解 <small>只有你能写，AI 读得到改不了</small></div>'+mdEditor(pid,c.mine,'class="mine-editor prose" data-field="mine" data-card-mine="'+pid+'"',{live:true,placeholder:"先理解，再用自己的话写下来。"})+'</div>'+
-  '<div class="field-label">解释与例子</div>'+mdModes(pid)+mdBody(pid,c.body,'data-field="body" data-card-field="body"')+
+  '<div class="field-label">解释与例子</div>'+mdBody(pid,c.body,'data-field="body" data-card-field="body"')+
   '<label class="field-label">标签<input data-field="tags" data-card-field="tags" value="'+esc((c.tags||[]).join(", "))+'"/></label>'+
   '<div class="review-row">'+svg("history",14)+' 回顾 '+c.reviews+' 次'+(due?' · 下次 '+esc(fmtDate(c.due,true)):"")+'<span class="grow"></span>记得多少：'+
   button("忘了","card-rate",'data-rating="again" data-id="'+esc(c.id)+'"',"sm")+button("模糊","card-rate",'data-rating="hard" data-id="'+esc(c.id)+'"',"sm")+button("记得","card-rate",'data-rating="good" data-id="'+esc(c.id)+'"',"sm primary")+'</div>'+
@@ -232,7 +236,7 @@ function topicView(pid){
    (s.ref&&docs.get(s.ref)?'<a data-action="open-doc" data-id="'+esc(s.ref)+'">'+esc(s.title)+'</a>':esc(s.title))+'</span>'+(s.why?'<small>'+esc(s.why)+'</small>':"")+
    '<span class="route-ops">'+iconButton("arrowup","route-move",'上移','data-pid="'+pid+'" data-i="'+i+'" data-d="-1"')+iconButton("close","route-drop","去掉这一站",'data-pid="'+pid+'" data-i="'+i+'"')+'</span></li>').join("")+'</ol>'+
    '<div class="route-add"><input data-route-add="'+pid+'" placeholder="加一站：写下标题，回车"/></div></section>'+
-  '<div class="field-label">主题档案 <small>讲到了哪里、留下的疑问、接下来往哪走。主会话跨天续讲时读它</small></div>'+mdModes(pid)+
+  '<div class="field-label">主题档案 <small>讲到了哪里、留下的疑问、接下来往哪走。主会话跨天续讲时读它</small></div>'+
   mdBody(pid,t.notes,'data-field="notes" data-topic-field="notes"')+
   '<section class="topic-lists">'+
   listBox("里面的内容",(d.inside||[]).map(x=>'<a data-action="open-file" data-path="'+esc(x.path)+'">'+svg(fileIcon(x.path),12)+' '+esc(x.title)+'</a>'))+
@@ -461,6 +465,7 @@ async function fileAction(kind,a){
   st.run.missing=null;st.run.note="正在安装 "+a.dataset.package+"…";patchRun(pid);
   Files[pid].afterInstall=a.dataset.package;await rpc("env_install",{name:a.dataset.env,packages:[a.dataset.package]});return;
  }
+ case "file-menu":return fileMenu(pid,a);
  case "file-mode":await flushFile(pid);st.mode=a.dataset.mode;p.mode=st.mode;saveLayout();renderFile(pid);return st.mode!=="preview"&&focusEditor(Dock.els[pid]);
  case "file-raw":await flushFile(pid);st.raw=!st.raw;return loadFile(pid);
  case "file-external":return rpc("file_external",{path:p.path});

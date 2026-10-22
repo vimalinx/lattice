@@ -194,6 +194,32 @@ function linkClicks(opts){
  }});
 }
 
+/* ---- rainbow brackets: each nesting level its own colour, an unmatched closing bracket in red ------------------------- */
+const RAINBOW=[0,1,2].map(i=>CV.Decoration.mark({class:"cm-rb"+i})),RB_BAD=CV.Decoration.mark({class:"cm-rb-bad"});
+function rainbowBrackets(){
+ const build=view=>{
+  const st=view.state,{from:vf,to:vt}=view.viewport,start=vt>300000?vf:0,skip=[];
+  // Brackets inside strings and comments do not count; the depth is counted from the top of the file.
+  CL.syntaxTree(st).iterate({from:start,to:vt,enter:n=>{if(/string|comment|char|regex/i.test(n.type.name)){skip.push([n.from,n.to]);return false;}}});
+  const text=st.doc.sliceString(start,vt),out=[],stack=[];
+  for(let i=0,k=0;i<text.length;i++){
+   const pos=start+i;
+   while(k<skip.length&&skip[k][1]<=pos)k++;
+   if(k<skip.length&&skip[k][0]<=pos){i=skip[k][1]-start-1;continue;}
+   const open="([{".indexOf(text[i]);
+   if(open>=0){if(pos>=vf)out.push(RAINBOW[stack.length%3].range(pos,pos+1));stack.push(open);continue;}
+   const close=")]}".indexOf(text[i]);if(close<0)continue;
+   if(stack.length&&stack[stack.length-1]===close){stack.pop();if(pos>=vf)out.push(RAINBOW[stack.length%3].range(pos,pos+1));}
+   else if(pos>=vf)out.push(RB_BAD.range(pos,pos+1));
+  }
+  return CV.Decoration.set(out,true);
+ };
+ return CV.ViewPlugin.fromClass(class{
+  constructor(view){this.decorations=build(view);}
+  update(u){if(u.docChanged||u.viewportChanged||CL.syntaxTree(u.startState)!==CL.syntaxTree(u.state))this.decorations=build(u.view);}
+ },{decorations:v=>v.decorations});
+}
+
 /* ---- typing help --------------------------------------------------------------------------------------------------- */
 // Tab steps over a closing bracket or quote right after the cursor; otherwise it indents.
 function tabOut(view){
@@ -322,7 +348,7 @@ function createEditor(host,text,opts){
   if(opts.live)ext.push(livePreview(opts));
  }else{
   if(opts.gutters!==false)ext.push(CV.lineNumbers(),CL.foldGutter(),CV.highlightActiveLineGutter());
-  ext.push(CV.highlightActiveLine(),CA.autocompletion({icons:false}));
+  ext.push(CV.highlightActiveLine(),CA.autocompletion({icons:false}),rainbowBrackets());
   if(opts.wrap)ext.push(CV.EditorView.lineWrapping);
  }
  // Words already in the file, for languages that do not complete anything themselves.
