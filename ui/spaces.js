@@ -152,9 +152,9 @@ async function spaceAction(kind,a){
   case "space-icon":all(".icon-pick button").forEach(b=>b.classList.toggle("on",b===a));return;
   case "space-save":return spaceSave(a.closest("[data-space-form]"));
   case "space-keep":changeSpace(id,{spec:layoutSpec()});return toast("以后「恢复默认的样子」就回到现在这样");
-  case "space-reset":if(!confirm("把「"+spaceOf(id).name+"」恢复成默认的样子？里面开着的东西会按默认重新摆（内容都已保存）。"))return;return resetSpace(id);
+  case "space-reset":if(!await ask("里面开着的东西会按默认重新摆，内容都已保存。",{title:"把「"+spaceOf(id).name+"」恢复成默认的样子？",ok:"恢复"}))return;return resetSpace(id);
   case "space-move":return moveSpace(id,Number(a.dataset.dir));
-  case "space-remove":{const sp=spaceOf(id);if(!sp.builtin&&!confirm("删除工作区「"+sp.name+"」？里面的文件和对话都还在。"))return;return removeSpace(id);}
+  case "space-remove":{const sp=spaceOf(id);if(!sp.builtin&&!await ask("里面的文件和对话都还在。",{title:"删除工作区「"+sp.name+"」？",...{danger:true,ok:"删除"}}))return;return removeSpace(id);}
   case "space-show":return changeSpace(id,{hidden:false});
   case "stack-unkeep":{const s=findStack(a.dataset.stack);if(s){s.keep=false;tidy();renderDock();saveLayout();}return;}
  }

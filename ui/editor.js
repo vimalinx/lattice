@@ -183,6 +183,48 @@ function livePreview(opts){
   update(u){if(u.docChanged||u.viewportChanged||u.selectionSet||u.focusChanged||CL.syntaxTree(u.startState)!==CL.syntaxTree(u.state)||u.transactions.some(t=>t.effects.some(e=>e.is(Refresh))))this.decorations=build(u.view);}
  },{decorations:v=>v.decorations});
 }
+/* Tables render as tables until the cursor goes into them; a click on a cell puts the cursor in that cell's text.
+   They span lines, so they come from a state field (a view plugin may not replace line breaks). */
+function cellStart(line,col){
+ const t=line.text;let i=(/^\s*\|?/.exec(t)||[""])[0].length,n=0;
+ while(n<col&&i<t.length){if(t[i]==="\\"){i+=2;continue;}if(t[i]==="|")n++;i++;}
+ while(i<t.length&&t[i]===" ")i++;
+ return line.from+Math.min(i,t.length);
+}
+class Grid extends CV.WidgetType{
+ constructor(src,from,base){super();this.src=src;this.from=from;this.base=base;}
+ eq(o){return o.src===this.src&&o.from===this.from;}
+ toDOM(view){
+  const box=document.createElement("div");box.className="cm-grid markdown";box.innerHTML=markdown(this.src);hydrateImages(box,this.base);
+  box.addEventListener("mousedown",e=>{
+   if(e.button!==0||e.target.closest("a"))return;
+   e.preventDefault();
+   const cell=e.target.closest("td,th"),rows=[...box.querySelectorAll("tr")],r=cell?rows.indexOf(cell.parentElement):-1;
+   let pos=this.from;
+   if(cell&&r>=0){const doc=view.state.doc,first=doc.lineAt(this.from).number,line=doc.line(Math.min(first+(r===0?0:r+1),doc.lines));pos=cellStart(line,[...cell.parentElement.children].indexOf(cell));}
+   view.focus();view.dispatch({selection:{anchor:pos}});
+  });
+  return box;
+ }
+ ignoreEvent(){return true;}
+}
+function tablePreview(opts){
+ const build=state=>{
+  const out=[],sel=state.selection.ranges,doc=state.doc;
+  CL.syntaxTree(state).iterate({enter:n=>{
+   if(n.name!=="Table")return;
+   const from=doc.lineAt(n.from).from,to=doc.lineAt(Math.max(n.from,n.to-1)).to;
+   if(!sel.some(r=>r.from<=to&&r.to>=from))out.push(CV.Decoration.replace({widget:new Grid(doc.sliceString(from,to),from,opts.path),block:true}).range(from,to));
+   return false;
+  }});
+  return CV.Decoration.set(out);
+ };
+ return CS.StateField.define({
+  create:build,
+  update(deco,tr){return tr.docChanged||tr.selection||CL.syntaxTree(tr.startState)!==CL.syntaxTree(tr.state)?build(tr.state):deco;},
+  provide:f=>CV.EditorView.decorations.from(f),
+ });
+}
 // A click on a rendered link follows it; with the cursor inside, Ctrl + click still does.
 function linkClicks(opts){
  return CV.EditorView.domEventHandlers({mousedown(e){
@@ -345,7 +387,7 @@ function createEditor(host,text,opts){
  if(md){
   ext.push(CV.EditorView.lineWrapping,CA.autocompletion({override:[wikiComplete,tagComplete],icons:false}),dropAndPaste(opts),linkClicks(opts),
    CV.EditorView.contentAttributes.of({spellcheck:"false"}));
-  if(opts.live)ext.push(livePreview(opts));
+  if(opts.live)ext.push(livePreview(opts),tablePreview(opts));
  }else{
   if(opts.gutters!==false)ext.push(CV.lineNumbers(),CL.foldGutter(),CV.highlightActiveLineGutter());
   ext.push(CV.highlightActiveLine(),CA.autocompletion({icons:false}),rainbowBrackets());

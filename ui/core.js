@@ -115,7 +115,9 @@ function markdown(text){
    return '<a class="wikilink" data-wiki="'+esc(target)+'">'+esc(shown)+'</a>';})
   .replace(/(^|[\s(（])#([^\s#.,;:!?，。；：！？、()（）\[\]{}<>"'`*]+)/gm,(m,pre,tag)=>/^\d+$/.test(tag)?m:pre+'<a class="tag" data-tag="'+esc(tag)+'">#'+esc(tag)+'</a>')
   .replace(/\u0000(\d+)\u0000/g,(_,i)=>codes[+i]);
- try{const out=DOMPurify.sanitize(marked.parse(linked,{breaks:true,gfm:true}),{ADD_ATTR:["data-wiki","data-tag","data-vault-src"]});if(out.includes('class="mermaid"'))scheduleMermaid();return out;}
+ try{
+  // A table scrolls inside its own frame when it is wider than the text.
+  const out=DOMPurify.sanitize(marked.parse(linked,{breaks:true,gfm:true}),{ADD_ATTR:["data-wiki","data-tag","data-vault-src"]}).replace(/<table>/g,'<div class="table-wrap"><table>').replace(/<\/table>/g,"</table></div>");if(out.includes('class="mermaid"'))scheduleMermaid();return out;}
  catch(_){return '<pre>'+esc(text)+'</pre>';}
 }
 /* Images in rendered Markdown that name a vault file: load them through the backend (the page cannot read the vault). */
@@ -151,6 +153,29 @@ function modal(content,size=""){
  return el("#overlays .modal");
 }
 function closeModal(){el("#overlays").innerHTML="";}
+/* The program's own question box instead of the system's confirm() and prompt(): same look as the rest, Enter to agree,
+   Esc or a click outside to cancel. It sits above any open window, so a question asked from one does not close it. */
+function dialog({title,message="",ok="确定",cancel="取消",danger=false,input=null}){
+ return new Promise(done=>{
+  const box=h('<div class="dialog-backdrop"><div class="dialog'+(danger?" danger":"")+'" role="alertdialog" aria-modal="true">'+
+   (title?'<h3>'+esc(title)+'</h3>':"")+(message?'<p>'+esc(message)+'</p>':"")+
+   (input?'<input class="dialog-input" value="'+esc(input.value||"")+'" placeholder="'+esc(input.placeholder||"")+'" spellcheck="false"/>'+(input.hint?'<small>'+esc(input.hint)+'</small>':""):"")+
+   '<div class="dialog-actions"><button class="btn ghost" data-answer="no">'+esc(cancel)+'</button><button class="btn '+(danger?"danger":"primary")+'" data-answer="yes">'+esc(ok)+'</button></div></div></div>');
+  const field=box.querySelector(".dialog-input");
+  const finish=yes=>{document.removeEventListener("keydown",keys,true);box.classList.add("leaving");setTimeout(()=>box.remove(),120);
+   done(input?(yes?field.value.trim()||null:null):yes);};
+  const keys=e=>{
+   if(e.key==="Escape"){e.preventDefault();e.stopPropagation();finish(false);}
+   else if(e.key==="Enter"&&!e.isComposing&&e.keyCode!==229){e.preventDefault();e.stopPropagation();finish(true);}
+  };
+  box.addEventListener("mousedown",e=>{if(e.target===box)finish(false);});
+  box.addEventListener("click",e=>{const b=e.target.closest("[data-answer]");if(b)finish(b.dataset.answer==="yes");});
+  document.addEventListener("keydown",keys,true);document.body.appendChild(box);
+  requestAnimationFrame(()=>{if(field){field.focus();const dot=field.value.lastIndexOf(".");field.setSelectionRange(0,input.selectStem&&dot>0?dot:field.value.length);}else box.querySelector('[data-answer="yes"]').focus();});
+ });
+}
+function ask(message,opts={}){return dialog({message,...opts});}
+function askText(title,value="",opts={}){return dialog({title,input:{value,...opts},ok:opts.ok||"好"});}
 function modalHead(title){return '<div class="modal-top"><h2>'+esc(title)+'</h2>'+iconButton("close","modal-close","关闭")+'</div>';}
 function emptyState(icon,title,desc){return '<div class="empty"><div class="empty-icon">'+svg(icon,30)+'</div><h3>'+esc(title)+'</h3><p>'+esc(desc)+'</p></div>';}
 function stripAnsi(t){return String(t||"").replace(/\x1b\[[0-9;]*m/g,"");}

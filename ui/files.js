@@ -470,7 +470,7 @@ async function fileAction(kind,a){
  case "file-raw":await flushFile(pid);st.raw=!st.raw;return loadFile(pid);
  case "file-external":return rpc("file_external",{path:p.path});
  case "file-delete":
-  if(!confirm("删除「"+baseName(p.path)+"」？它会留在学习库的历史里。"))return;
+  if(!await ask("它会留在学习库的历史里，可以恢复。",{title:"删除「"+baseName(p.path)+"」？",...{danger:true,ok:"删除"}}))return;
   await rpc("file_delete",{path:p.path});st.dirty=false;st.cellDrafts.clear();await closePanel(pid);return refreshState();
  case "file-conflict":
   if(a.dataset.keep==="disk"){st.dirty=false;st.cellDrafts.clear();st.conflict=null;return loadFile(pid);}
@@ -479,14 +479,14 @@ async function fileAction(kind,a){
  case "nb-run-all":return runCells(pid,null);
  case "nb-run":return runCells(pid,[a.dataset.cell]);
  case "nb-interrupt":return rpc("kernel_interrupt",{path:p.path});
- case "nb-restart":if(!confirm("重启内核？变量会清空，笔记和输出都会保留。"))return;return rpc("kernel_restart",{path:p.path});
+ case "nb-restart":if(!await ask("变量会清空，笔记和输出都会保留。",{title:"重启内核？",ok:"重启"}))return;return rpc("kernel_restart",{path:p.path});
  case "nb-move":await saveCell(pid,a.dataset.cell);await rpc("cell_move",{path:p.path,id:a.dataset.cell,direction:Number(a.dataset.d)});return loadFile(pid,true);
- case "nb-delete":if(!confirm("删除这一格？"))return;st.cellDrafts.delete(a.dataset.cell);await rpc("cell_delete",{path:p.path,id:a.dataset.cell});return loadFile(pid,true);
+ case "nb-delete":if(!await ask("",{title:"删除这一格？",...{danger:true,ok:"删除"}}))return;st.cellDrafts.delete(a.dataset.cell);await rpc("cell_delete",{path:p.path,id:a.dataset.cell});return loadFile(pid,true);
  case "nb-add":{await flushFile(pid);const last=st.data.notebook.cells.at(-1)?.id;await rpc("cell_save",{path:p.path,source:"",kind:a.dataset.kind,after:last||null});await loadFile(pid,true);
   all(".cm-host[data-cell-editor]",Dock.els[pid]).at(-1)?.cmView?.focus();return;}
  case "kernel-mode":{
   const next=st.data.mode==="mine"?"sandbox":"mine";
-  if(next==="mine"&&!confirm("把这本实验笔记的内核切到你自己的权限？它就能联网、能读你的文件，AI 也就不能在里面运行了。"))return;
+  if(next==="mine"&&!await ask("它就能联网、能读你的文件，AI 也就不能在里面运行了。",{title:"把内核切到你自己的权限？",ok:"切过去"}))return;
   await rpc("kernel_mode",{path:p.path,mode:next});return loadFile(pid,true);
  }
  case "card-rate":{const id=a.dataset.id;const c=await rpc("card_review",{id,rating:a.dataset.rating});toast("下次回顾："+fmtDate(c.due,true));
@@ -512,6 +512,6 @@ async function showHistory(pid){
 async function versionAction(kind,a){
  const pid=a.dataset.pid,p=Dock.panels[pid],v=await rpc("file_version",{path:p.path,commit:a.dataset.commit});
  if(kind==="version-view")return modal(modalHead("版本预览")+'<pre class="version-text">'+esc(v.content||"（这个版本里文件不存在）")+'</pre>'+'<div class="modal-actions">'+button("返回","file-history",'data-pid="'+pid+'"',"ghost")+button("恢复这个版本","version-restore",'data-pid="'+pid+'" data-commit="'+esc(a.dataset.commit)+'"',"primary")+'</div>',"large");
- if(!confirm("把这个文件恢复成这个版本？现在的内容会留在历史里。"))return;
+ if(!await ask("现在的内容会留在历史里。",{title:"把这个文件恢复成这个版本？",ok:"恢复"}))return;
  await rpc("file_write",{path:p.path,content:v.content||""});closeModal();await loadFile(pid);toast("已恢复");
 }

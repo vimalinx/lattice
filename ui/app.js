@@ -84,9 +84,9 @@ async function newScratch(kind){
  const stamp=new Date().toLocaleString("zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}).replace(/[\/: ]/g,"");
  let path;
  if(kind==="note")path=(await rpc("doc_create",{kind:"note",title:"随手记 "+stamp,topic:S.data.active_topic}))?.path;
- else if(kind==="notebook"){const name=prompt("实验笔记的名字：","实验 "+stamp);if(!name)return;path=(await rpc("doc_create",{kind:"notebook",title:name,topic:S.data.active_topic})).path;}
+ else if(kind==="notebook"){const name=await askText("实验笔记的名字","实验 "+stamp,{ok:"新建"});if(!name)return;path=(await rpc("doc_create",{kind:"notebook",title:name,topic:S.data.active_topic})).path;}
  else{
-  const name=prompt("文件名（扩展名决定语言：.py .c .rs .go .js .sh …）：","草稿-"+stamp+".py");if(!name)return;
+  const name=await askText("文件名","草稿-"+stamp+".py",{hint:"扩展名决定语言：.py .c .rs .go .js .sh …",selectStem:true,ok:"新建"});if(!name)return;
   path=(await rpc("file_create",{folder:"code",name})).path;
  }
  await refreshState();
@@ -190,7 +190,7 @@ async function onAction(a){
  case "new-note":return newScratch("note");
  case "new-code":return newScratch("code");
  case "new-notebook":return newScratch("notebook");
- case "new-card":{const title=prompt("知识卡的标题：");if(!title)return;const r=await rpc("doc_create",{kind:"card",title,topic:S.data.active_topic});await refreshState();return openFile(r.path);}
+ case "new-card":{const title=await askText("知识卡的标题","",{ok:"新建"});if(!title)return;const r=await rpc("doc_create",{kind:"card",title,topic:S.data.active_topic});await refreshState();return openFile(r.path);}
  case "open-agent":return openPanel({type:"chat",agent:a.dataset.agent});
  case "open-map":return openPanel({type:"map",topic:S.data.active_topic||null});
  case "open-journal":return openPanel({type:"journal"});
@@ -210,7 +210,7 @@ async function onAction(a){
  case "open-vault":return rpc("open_folder",{});
  case "tree-toggle":{const p=a.dataset.path;Side.open.has(p)?Side.open.delete(p):Side.open.add(p);return renderSide();}
  case "project-add":{const r=await rpc("project_add",{},0);if(r){delete Side.entries[""];await refreshState();renderSide();toast("已挂载 "+r.name+"：你能读写，AI 只读");}return;}
- case "project-remove":if(!confirm("取消挂载这个目录？目录本身不会被改动。"))return;await rpc("project_remove",{id:a.dataset.id});delete Side.entries[""];await refreshState();return renderSide();
+ case "project-remove":if(!await ask("目录本身不会被改动。",{title:"取消挂载这个目录？",ok:"取消挂载",cancel:"留着"}))return;await rpc("project_remove",{id:a.dataset.id});delete Side.entries[""];await refreshState();return renderSide();
  case "import-md":{const r=await rpc("import_markdown",{},0);if(r){toast("导入了 "+r.count+" 篇");sideChanged(["notes/x"]);refreshState();}return;}
  case "export":{const r=await rpc("export",{},0);if(r)toast("已导出到 "+r);return;}
  case "chat-send":return chatSend(pid);
@@ -225,7 +225,7 @@ async function onAction(a){
  case "chat-attach-remove":Chat[pid]?.attach.splice(Number(a.dataset.index),1);return updateComposer(pid);
  case "chat-model":return modelMenu(pid,a.closest(".menu")?Dock.els[pid]?.querySelector(".model-tag")||a:a);
  case "chat-model-set":return setChatModel(pid,a.dataset.api,a.dataset.model);
- case "chat-model-other":{const m=chatModel(pid),name=prompt("模型名（用 "+((S.config?.apis||[]).find(x=>x.id===m.api)?.label||m.api)+" 这个连接）：",m.model);if(name&&name.trim())setChatModel(pid,m.api,name.trim());return;}
+ case "chat-model-other":{const m=chatModel(pid),name=await askText("模型名",m.model,{hint:"用「"+((S.config?.apis||[]).find(x=>x.id===m.api)?.label||m.api)+"」这个连接",ok:"换上"});if(name&&name.trim())setChatModel(pid,m.api,name.trim());return;}
  case "msg-copy":{const m=Chat[pid]?.data?.messages.find(x=>String(x.id)===a.dataset.mid);if(m){await navigator.clipboard.writeText(m.content);toast("已复制");}return;}
  case "zoom-step":{const dir=Number(a.dataset.dir),again=Menus.reopen;stepZoom(pid,dir||0);if(dir&&again)again();return;}
  case "chat-more":return chatMoreMenu(pid,a);
@@ -252,7 +252,7 @@ async function onAction(a){
  case "zoom-reset-all":Object.keys(Dock.panels).forEach(x=>{if(Dock.panels[x].zoom)setZoom(x,null);});return toast("所有窗口都回到了各自面板的默认大小");
  case "chat-cancel":return rpc("cancel",{thread:Chat[pid].thread});
  case "chat-task":return chatSend(pid,"",{task:a.dataset.task});
- case "chat-new":{if(!confirm("开一段新会话？之前的对话还在，可以在学习库的 threads/ 里找到，也能被搜索到。"))return;await rpc("thread_new",{agent:Dock.panels[pid].agent,topic:S.data.active_topic||""});return loadChat(pid,false);}
+ case "chat-new":{if(!await ask("之前的对话还在，可以在学习库的 threads/ 里找到，也能被搜索到。",{title:"开一段新会话？",ok:"开新会话"}))return;await rpc("thread_new",{agent:Dock.panels[pid].agent,topic:S.data.active_topic||""});return loadChat(pid,false);}
  case "practice-start":return startPractice(pid,a.dataset.mid);
  case "practice-end":return endPractice(pid);
  case "message-card":return messageToCard(pid,a.dataset.mid);
@@ -272,7 +272,7 @@ async function onAction(a){
  case "code-run":{const n=el("#"+a.dataset.target);if(!n)return;const r=await rpc("run",{code:n.textContent,lang:a.dataset.lang});snippetRuns[a.dataset.target]={run:r.run,outputs:[]};
   const box=el('[data-snippet="'+a.dataset.target+'"]');if(box)box.innerHTML='<div class="run-head"><span class="run-state s-running">运行中…</span></div>';return;}
  case "code-take":{const n=el("#"+a.dataset.target);if(!n)return;const ext=CODE_EXT[(a.dataset.lang||"").toLowerCase()]||".txt";
-  const name=prompt("存成哪个文件（放在 code/ 里）：","片段-"+new Date().toLocaleTimeString("zh-CN",{hour12:false}).replace(/:/g,"")+ext);if(!name)return;
+  const name=await askText("存成哪个文件","片段-"+new Date().toLocaleTimeString("zh-CN",{hour12:false}).replace(/:/g,"")+ext,{hint:"放在 code/ 里",selectStem:true,ok:"存下"});if(!name)return;
   const r=await rpc("file_create",{folder:"code",name,content:n.textContent});await refreshState();return openFile(r.path);}
  case "quote-clear":if(Chat[pid])Chat[pid].quote="";return updateComposer(pid);
  case "ask-flash":case "ask-tutor":{
@@ -286,7 +286,7 @@ async function onAction(a){
  case "organizer-dismiss":Organizer.text="";return renderOrganizer();
  case "topic-focus":{await rpc("focus",{topic:a.dataset.id});await refreshState();followingPanels().forEach(x=>loadChat(x));
   let tutor=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="tutor"&&!Dock.panels[x].thread);if(!tutor)openPanel({type:"chat",agent:"tutor"});else activate(tutor);return;}
- case "topic-delete":{if(!confirm("删除这个主题？里面的卡片、笔记和对话都会留下，只是不再属于它。主题文件会留在学习库的历史里。"))return;
+ case "topic-delete":{if(!await ask("里面的卡片、笔记和对话都会留下，只是不再属于它。主题文件会留在学习库的历史里。",{title:"删除这个主题？",...{danger:true,ok:"删除"}}))return;
   await rpc("topic_delete",{id:a.dataset.id});const p=a.closest(".panel")?.dataset.pid;if(p)await closePanel(p);await refreshState();return followingPanels().forEach(x=>loadChat(x));}
  case "version-view":case "version-restore":return versionAction(kind,a);
  case "file-history":return showHistory(pid);

@@ -328,7 +328,7 @@ async function openPractice(id){
 }
 async function endPractice(pid){
  const st=Chat[pid];
- if(!confirm("结束这次练习，交给主会话复盘？结束后这个练习就不能再继续对话了。"))return;
+ if(!await ask("结束后这个练习就不能再继续对话了。",{title:"结束这次练习，交给主会话复盘？",ok:"结束练习"}))return;
  if(typeof flushAll==="function")await flushAll();
  const r=await rpc("practice_end",{id:st.thread});
  let tutor=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="tutor");
@@ -340,7 +340,7 @@ async function messageToCard(pid,mid){
  const st=Chat[pid],m=st.data.messages.find(x=>String(x.id)===String(mid));if(!m)return;
  const body=m.content.replace(BLOCK_RE,"").trim();
  const guess=(body.match(/^#+\s*(.+)$/m)||body.match(/\*\*(.+?)\*\*/)||[])[1]||"";
- const title=prompt("这张知识卡的标题：",guess.replace(/[#*]/g,"").trim().slice(0,60));if(!title)return;
+ const title=await askText("这张知识卡的标题",guess.replace(/[#*]/g,"").trim().slice(0,60),{ok:"存成卡片"});if(!title)return;
  const r=await rpc("doc_create",{kind:"card",title,topic:st.data.head?.topic||null,body});
  await refreshState();openFile(r.path);
 }

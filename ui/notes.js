@@ -292,7 +292,7 @@ async function notesAction(kind,a){
   case "note-delete":{
    const folder=a.dataset.kind==="folder";
    const inside=folder?(S.data.docs||[]).filter(d=>d.path.startsWith(path+"/")).length:0;
-   if(!confirm(folder?"删除文件夹「"+baseName(path)+"」"+(inside?"和里面的 "+inside+" 篇笔记":"")+"？它们会留在学习库的历史里。":"删除「"+baseName(path)+"」？它会留在学习库的历史里。"))return;
+   if(!await ask(folder?"它们会留在学习库的历史里，可以恢复。":"它会留在学习库的历史里，可以恢复。",{title:folder?"删除文件夹「"+baseName(path)+"」"+(inside?"和里面的 "+inside+" 篇笔记":"")+"？":"删除「"+baseName(path)+"」？",...{danger:true,ok:"删除"}}))return;
    await flushAll();await rpc("file_delete",{path});
    for(const pid of Object.keys(Dock.panels)){const p=Dock.panels[pid];if(p.path===path||p.path?.startsWith(path+"/")){if(Files[pid]){Files[pid].dirty=false;Files[pid].cellDrafts.clear();}await closePanel(pid);}}
    Side.entries={};await refreshState();return renderSide();

@@ -343,21 +343,21 @@ async function settingsAction(kind,a){
  case "settings-page":return renderSettings(node,a.dataset.page);
  case "cfg-save":return saveSettings(node);
  case "cfg-test":await saveSettings(node);el("#cfg-test-result").textContent="正在读取模型列表…";return rpc("test_api",{agent:a.dataset.agent});
- case "cfg-clear-key":if(!confirm("清除本机保存的这个 Key？环境变量里的不受影响。"))return;await rpc("settings_save",{config:{apis:{[a.dataset.api]:{clear_key:true}}}});return again();
+ case "cfg-clear-key":if(!await ask("环境变量里的不受影响。",{title:"清除本机保存的这个 Key？",danger:true,ok:"清除"}))return;await rpc("settings_save",{config:{apis:{[a.dataset.api]:{clear_key:true}}}});return again();
  case "agent-save":{
   const n=a.dataset.name,q=s=>node.querySelector(s);
   await rpc("agent_save",{name:n,history:Number(q('[data-agent-history="'+n+'"]').value),blocks:q('[data-agent-blocks="'+n+'"]').checked,
    tools:all('[data-agent-tool="'+n+'"]',node).filter(i=>i.checked).map(i=>i.value),policy:q('[data-agent-policy="'+n+'"]').value});
   await saveSettings(node);return toast("已存进学习库的 agents/"+n+".md");
  }
- case "agent-reset":if(!confirm("删掉你改写的规则，恢复成默认的？改写过的版本留在学习库的历史里。"))return;await rpc("agent_reset",{name:a.dataset.name});return again();
+ case "agent-reset":if(!await ask("改写过的版本留在学习库的历史里。",{title:"删掉你改写的规则，恢复成默认的？",ok:"恢复默认"}))return;await rpc("agent_reset",{name:a.dataset.name});return again();
  case "runner-add":{const ext=node.querySelector("[data-runner-new]").value.trim(),cmd=node.querySelector("[data-runner-new-cmd]").value.trim();if(!ext||!cmd)return;
   S.config=await rpc("settings_save",{config:{runners:{...S.config.runners,[ext.startsWith(".")?ext:"."+ext]:cmd}}});return again();}
  case "env-create":{const n=node.querySelector("[data-env-new]").value.trim();if(!n)return;await rpc("env_save",{name:n,text:"ipykernel\nnumpy\nmatplotlib\n"});Settings.env=n;return again();}
  case "env-save":await rpc("env_save",{name:Settings.env,text:node.querySelector("[data-env-text]").value});toast("环境定义已保存，下次运行时环境会跟着改");return again();
  case "env-install":{const input=node.querySelector("[data-env-install]"),pkgs=input.value.split(/\s+/).filter(Boolean);if(!pkgs.length)return;await rpc("env_install",{name:Settings.env,packages:pkgs});input.value="";return toast("正在安装 "+pkgs.join("、")+"…");}
  case "rules-save":await rpc("rules_save",{text:node.querySelector("[data-rules]").value});return toast("规矩已保存，所有 AI 下一轮起照这个来");
- case "rules-reset":{if(!confirm("把 AGENTS.md 恢复成默认的？现在的版本留在学习库的历史里。"))return;const r=await rpc("rules");await rpc("rules_save",{text:r.shipped});return again();}
+ case "rules-reset":{if(!await ask("现在的版本留在学习库的历史里。",{title:"把 AGENTS.md 恢复成默认的？",ok:"恢复默认"}))return;const r=await rpc("rules");await rpc("rules_save",{text:r.shipped});return again();}
  }
  return null;
 }
