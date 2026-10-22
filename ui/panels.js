@@ -170,7 +170,9 @@ panelType("settings",{side:"mine",icon:"sliders",title:()=>"设置",
  screen(p){return {view:"设置",page:p.page||"look"};}});
 async function renderSettings(node,page){
  const p=Dock.panels[node.dataset.pid];if(p)p.page=page;
- node.querySelector(".settings-nav").innerHTML=SETTINGS_PAGES.map(([k,t,i])=>'<button class="'+(k===page?"on":"")+'" data-action="settings-page" data-page="'+k+'" title="'+esc(t)+'">'+svg(i,14)+'<span>'+esc(t)+'</span></button>').join("");
+ node.querySelector(".settings-nav").innerHTML=SETTINGS_PAGES.map(([k,t,i])=>'<button class="'+(k===page?"on":"")+'" data-action="settings-page" data-page="'+k+'" title="'+esc(t)+'">'+svg(i,14)+'<span>'+esc(t)+'</span></button>').join("")+
+  // Settings save as they change; the state of the last save sits under the page list, out of the way.
+  '<span class="save-state nav-save">'+svg("check",13)+' 改了就自动保存</span>';
  const box=node.querySelector(".settings");box.dataset.page=page;
  box.innerHTML='<div class="loading">…</div>';
  S.config=await rpc("settings");
@@ -197,8 +199,7 @@ const SETTINGS_RENDER={
    '<h3>交互</h3><label>发送消息<select data-ui="send_key">'+opt(u.send_key,[["enter","Enter 发送，Shift + Enter 换行"],["ctrl","Ctrl + Enter 发送，Enter 换行"]])+'</select></label>'+
    '<label class="check"><input type="checkbox" data-ui="selection_popup"'+(u.selection_popup?" checked":"")+'/> 选中文字时出现「问快答 / 问主会话」</label>'+
    '<label class="check"><input type="checkbox" data-cfg="agent_auto_organize"'+(c.agent_auto_organize?" checked":"")+'/> 关掉随手写的记录或代码后，自动交给 AI 整理</label>'+
-   '<label>停下多少秒后提交我的编辑<input type="number" min="5" max="3600" data-cfg="commit_idle" value="'+esc(c.commit_idle)+'"/></label>'+
-   saveBar();
+   '<label>停下多少秒后提交我的编辑<input type="number" min="5" max="3600" data-cfg="commit_idle" value="'+esc(c.commit_idle)+'"/></label>';
  },
  layout(){
   const list=spaceList(),b=(t,a,id,extra="")=>button(t,a,'data-space="'+esc(id)+'" '+extra,"ghost xs");
@@ -230,7 +231,7 @@ const SETTINGS_RENDER={
     '<div class="inline">'+(d.overridden?button("恢复默认规则","agent-reset",'data-name="'+name+'"',"ghost sm"):"")+button("测试连接","cfg-test",'data-agent="'+name+'"',"ghost sm")+'</div></details>');
   }
   return '<h3>四个 AI</h3><p class="muted">工具、历史条数和规则改了会存进学习库的 agents/；所有 AI 都还会先读学习库的规矩（AGENTS.md）。连接在「模型连接」里加和改。</p>'+cards.join("")+'<div class="test-result" id="cfg-test-result"></div>'+
-   c.apis.map(x=>'<datalist id="models-'+esc(x.id)+'">'+(x.models||[]).map(m=>'<option value="'+esc(m)+'">').join("")+'</datalist>').join("")+saveBar();
+   c.apis.map(x=>'<datalist id="models-'+esc(x.id)+'">'+(x.models||[]).map(m=>'<option value="'+esc(m)+'">').join("")+'</datalist>').join("");
  },
  apis(c){
   /* Two columns: every provider on the left, the chosen one on the right with its key first. */
@@ -244,13 +245,13 @@ const SETTINGS_RENDER={
    '<button class="prov-row prov-add" data-action="api-new">'+svg("plus",13)+'<span>自定义连接</span></button></div>';
   return '<h3>模型连接</h3><p class="muted">左边选一个供应商，右边贴上 API Key 就能用；Key 只保存在本机，界面拿不到它。都走 OpenAI 兼容的 Chat Completions，其余设置一般不用动。</p>'+
    '<div class="prov">'+left+'<div class="prov-detail">'+(pick?apiDetail(pick,c):"")+'</div></div>'+
-   '<h3>全局</h3><div class="two"><label>超时（秒）<input type="number" data-cfg="timeout" value="'+esc(c.timeout)+'"/></label><label>全局 Temperature<input type="number" step="0.05" data-cfg="temperature" value="'+esc(c.temperature)+'"/></label></div>'+saveBar();
+   '<h3>全局</h3><div class="two"><label>超时（秒）<input type="number" data-cfg="timeout" value="'+esc(c.timeout)+'"/></label><label>全局 Temperature<input type="number" step="0.05" data-cfg="temperature" value="'+esc(c.temperature)+'"/></label></div>';
  },
  web(c){
   return '<h3>联网</h3><p class="muted">AI 有两个联网接口：搜索和读网页。什么时候查由它判断；来源列在回复下面，并记进轨迹。读网页不会访问本机和局域网地址。</p>'+
    '<label>搜索服务<select data-cfg-web="search">'+opt(c.web.search,Object.entries(c.web_backends))+'</select></label>'+
    '<label>SearXNG 地址<input data-cfg-web="searxng_url" value="'+esc(c.web.searxng_url)+'" placeholder="https://searx.example"/></label>'+
-   '<div class="two"><label>Brave Key <small>'+(c.web.brave_key?"已保存":"未填")+'</small><input type="password" data-cfg-web="brave_key"/></label><label>Tavily Key <small>'+(c.web.tavily_key?"已保存":"未填")+'</small><input type="password" data-cfg-web="tavily_key"/></label></div>'+saveBar();
+   '<div class="two"><label>Brave Key <small>'+(c.web.brave_key?"已保存":"未填")+'</small><input type="password" data-cfg-web="brave_key"/></label><label>Tavily Key <small>'+(c.web.tavily_key?"已保存":"未填")+'</small><input type="password" data-cfg-web="tavily_key"/></label></div>';
  },
  async run(c){
   const env=await rpc("env_info",{name:Settings.env||"default"}).catch(()=>null);
@@ -266,7 +267,7 @@ const SETTINGS_RENDER={
    '<div class="inline"><input data-env-install placeholder="现在就装：包名，空格分开"/>'+button("安装","env-install","","ghost sm")+'</div>'+
    (env.installed.length?'<details><summary class="muted">已经装了 '+env.installed.length+' 个包</summary><p class="small muted">'+env.installed.map(x=>esc(x.name+" "+x.version)).join("、")+'</p></details>':""):"")+
    '<h3>沙箱</h3><p class="'+(S.data.sandbox?.ok?"muted":"warn")+'">'+(S.data.sandbox?.ok?svg("shield",13)+" 沙箱可用（bubblewrap）。AI 的命令和运行都在里面：学习库可写，挂载的目录只读，看不到家目录的其余部分，不联网。":esc(S.data.sandbox?.why||""))+'</p>'+
-   '<label>沙箱里额外可见的只读路径 <small>一行一个，比如装在家目录里的工具链</small><textarea rows="2" data-cfg="sandbox_paths">'+esc((c.sandbox_paths||[]).join("\n"))+'</textarea></label>'+saveBar();
+   '<label>沙箱里额外可见的只读路径 <small>一行一个，比如装在家目录里的工具链</small><textarea rows="2" data-cfg="sandbox_paths">'+esc((c.sandbox_paths||[]).join("\n"))+'</textarea></label>';
  },
  vault(c){
   const projects=S.data.projects||[];
@@ -274,12 +275,12 @@ const SETTINGS_RENDER={
    '<label>学习库的位置 <small>'+(c.env_vault?"现在由环境变量 LATTICE_VAULT 决定，这里的设置不生效":"重启 Lattice 后生效；留空就是 ~/Lattice")+'</small><input data-cfg="vault" value="'+esc(c.vault)+'" placeholder="~/Lattice"/></label>'+
    '<div class="inline">'+button(svg("folder",13)+" 在系统里打开","open-vault","","ghost sm")+button(svg("download",13)+" 导出整个学习库","export","","ghost sm")+button(svg("upload",13)+" 导入 Markdown 笔记","import-md","","ghost sm")+'</div>'+
    '<h3>挂载的目录</h3><p class="muted">你能读写，AI 只读。</p>'+projects.map(x=>'<div class="preset">'+svg("link",13)+' <b>'+esc(x.name)+'</b><span class="muted small">'+esc(x.path)+'</span><span class="grow"></span>'+button("取消挂载","project-remove",'data-id="'+esc(x.id)+'"',"ghost xs")+'</div>').join("")+
-   button(svg("plus",13)+" 挂载一个目录","project-add","","ghost sm")+saveBar();
+   button(svg("plus",13)+" 挂载一个目录","project-add","","ghost sm");
  },
  async rules(){
   const r=await rpc("rules");
   return '<h3>学习库的规矩</h3><p class="muted">学习库根目录的 AGENTS.md：目录约定、属性格式、谁能改什么。每个 AI 每一轮都先读它。</p><textarea rows="26" data-rules>'+esc(r.text)+'</textarea>'+
-   '<div class="inline">'+button("恢复成默认的规矩","rules-reset","","ghost sm")+button("在编辑器里打开","open-file",'data-path="AGENTS.md"',"ghost sm")+'</div>'+saveBar();
+   '<div class="inline">'+button("恢复成默认的规矩","rules-reset","","ghost sm")+button("在编辑器里打开","open-file",'data-path="AGENTS.md"',"ghost sm")+'</div>';
  },
  keys(){
   const send=S.ui.send_key==="ctrl"?"Ctrl + Enter 发送，Enter 换行":"Enter 发送，Shift + Enter 换行";
@@ -288,7 +289,6 @@ const SETTINGS_RENDER={
  },
 };
 const Settings={env:"default",tests:{}};
-function saveBar(){return '<div class="settings-save"><span class="save-state">'+svg("check",13)+' 改了就自动保存</span></div>';}
 /* Every setting saves itself shortly after it changes; text fields wait until typing pauses. */
 const Autosave={timers:{}};
 function saveState(node,text,bad=false){const s=node?.querySelector(".save-state");if(s){s.innerHTML=svg(bad?"info":"check",13)+" "+esc(text);s.classList.toggle("bad",bad);}else if(bad)toast(text,"error");}
