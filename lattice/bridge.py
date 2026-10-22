@@ -16,6 +16,7 @@ import re
 import threading
 import time
 import zipfile
+from datetime import datetime, timedelta
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QGuiApplication
@@ -35,6 +36,7 @@ DATA_HOME = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
 # Machine-local state that is not learning data: logs, web profile, the pre-vault database.
 APP_HOME = DATA_HOME / "lattice"
 LEGACY_DB = APP_HOME / "lattice.db"
+USAGE_LOG = APP_HOME / "usage.jsonl"
 TEXT_EXT = {".md", ".txt", ".py", ".js", ".mjs", ".ts", ".c", ".h", ".cpp", ".cc", ".hpp", ".rs", ".go", ".sh", ".json", ".yaml", ".yml",
             ".toml", ".csv", ".tsv", ".html", ".css", ".rb", ".lua", ".jl", ".r", ".R", ".java", ".pl", ".php", ".ini", ".cfg", ".tex", ".sql", ".jsonl"}
 IMAGE_EXT = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp"}
@@ -88,6 +90,8 @@ class Bridge(QObject):
         self.workers, self.turns, self.contexts, self.busy, self.status = {}, {}, {}, set(), {}
         # Conversations whose next reply answers their last question again (see rpc_retry).
         self.retrying = set()
+        # Quick-answer turns checking an answer to the tutor's question: their thread -> the tutor's conversation.
+        self.checking = {}
         self.reviews = {}
         self.runs, self.kernels, self.kernel_states, self.batches = {}, {}, {}, {}
         self.screen, self.edits, self.last_write = {}, {}, 0.0
@@ -984,8 +988,11 @@ class Bridge(QObject):
             thread = l.thread_for(agent, topic)
         head = l.thread_head(thread)
         decisions = {e["data"].get("suggestion"): e["data"].get("decision") for e in l.journal("wrote", ref=thread, limit=200) if e["data"].get("suggestion")}
+        # Questions of this conversation answered in another one (the quick-answer side checks them, not the tutor).
+        answers = {f"{d['message']}:{d['block']}": d["text"] for d in (e["data"] for e in l.journal("answered", ref=thread, limit=300))
+                   if d.get("source") == thread and "message" in d}
         return {"thread": thread, "head": head, "messages": l.messages(thread), "busy": thread in self.busy, "status": self.status.get(thread),
-                "undone": sorted(l.undone()), "decisions": decisions,
+                "undone": sorted(l.undone()), "decisions": decisions, "answers": answers,
                 "practice": l.practice(thread) if head.get("practice") else None}
 
     def rpc_thread_new(self, agent, topic=None):
@@ -1028,9 +1035,19 @@ class Bridge(QObject):
         picked = skills.find(self.root, skill) if skill else None
         meta = {"agent": agent, **({"selection": selection} if selection else {}), **({"task": task} if task else {}), **({"answer": answer} if answer else {}),
                 **({"attach": attach} if attach else {}), **({"skill": picked["slug"], "skill_title": picked["title"]} if picked else {})}
+        source = str(answer.get("thread") or "") if answer else ""
+        source = source if source and source != thread else ""
+        self.checking.pop(thread, None)
+        if source:
+            self.checking[thread] = (source, str(answer.get("question") or "")[:400])
+            # The learner answers a small question the tutor asked; the quick-answer agent checks it so the tutor's
+            # explanation goes on undisturbed. The answer is noted against the tutor's conversation too.
+            extra += ("\n\n（这是学习者在回答主会话讲解里出的一个小问题：" + str(answer.get("question") or "")[:1500] +
+                      "\n请判断回答对不对、哪里对哪里偏，点出关键的一两句；简短。不要接着往下讲主会话的主线，主会话会接着讲。）")
         l.append_message(thread, "user", message, meta)
         l.record("answered" if answer else "asked", {"text": message[:600], "agent": agent, **({"question": answer.get("question", "")[:400]} if answer else {}),
-                                                    **({"screen": note[:300]} if note else {})}, "me", [thread, *([topic] if topic else [])])
+                                                    **({"source": source, "message": answer.get("message"), "block": answer.get("block")} if source else {}),
+                                                    **({"screen": note[:300]} if note else {})}, "me", [thread, *([source] if source else []), *([topic] if topic else [])])
         user, system = self._compose(definition, thread, topic, practice, message, task, selection, attach, note, extra, picked)
         self._turn(agent, thread, topic, thread if practice else None, conn, system, history, user, definition["tools"])
         return {"thread": thread, "state": "queued"}
@@ -1116,6 +1133,50 @@ class Bridge(QObject):
         self.status[thread] = "connecting"
         worker.start()
 
+    @staticmethod
+    def _record_usage(agent, thread, usage):
+        """Every finished turn's token counts, on this computer (not in the vault, which would get a commit each time)."""
+        if not usage:
+            return
+        row = {"at": datetime.now().astimezone().isoformat(timespec="seconds"), "agent": agent, "thread": thread, **usage}
+        try:
+            USAGE_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with USAGE_LOG.open("a", encoding="utf-8") as log:
+                log.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except OSError as exc:
+            LOG.warning("could not record token usage: %s", exc)
+
+    def rpc_usage(self):
+        """Token counts added up: today, the last 7 and 30 days, everything; by model, by agent, and day by day."""
+        keys = ("input", "output", "cached", "reasoning", "requests", "estimated")
+        blank = lambda: dict.fromkeys(keys, 0)
+        today = datetime.now().astimezone().date()
+        periods = {"today": blank(), "week": blank(), "month": blank(), "all": blank()}
+        models, agents, days = {}, {}, {(today - timedelta(days=i)).isoformat(): blank() for i in range(13, -1, -1)}
+        try:
+            lines = USAGE_LOG.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+        first = None
+        for line in lines:
+            try:
+                row = json.loads(line)
+                day = datetime.fromisoformat(row["at"]).date()
+            except (ValueError, KeyError, TypeError):
+                continue
+            first = first or row["at"]
+            age = (today - day).days
+            model = f"{row.get('model') or '未知模型'}" + (f" · {row['api']}" if row.get("api") else "")
+            targets = [periods["all"], models.setdefault(model, blank()), agents.setdefault(row.get("agent") or "?", blank())]
+            targets += [periods[k] for k, n in (("today", 0), ("week", 6), ("month", 29)) if age <= n]
+            if day.isoformat() in days:
+                targets.append(days[day.isoformat()])
+            for target in targets:
+                for key in keys:
+                    target[key] += int(row.get(key) or 0)
+        rank = lambda table: sorted(({"name": k, **v} for k, v in table.items()), key=lambda r: -(r["input"] + r["output"]))
+        return {"periods": periods, "models": rank(models), "agents": rank(agents), "days": [{"day": k, **v} for k, v in days.items()], "since": first}
+
     def rpc_cancel(self, thread):
         worker = self.workers.get(thread)
         if worker:
@@ -1183,6 +1244,10 @@ class Bridge(QObject):
         reason = evt.get("stop_reason", "end_turn")
         self.status[thread] = "ready" if reason == "end_turn" else reason
         body = evt.get("text", "")
+        self._record_usage(agent, thread, evt.get("usage"))
+        checked = self.checking.pop(thread, None)
+        if checked and body.strip():
+            l.record("judged", {"text": body[:800], "agent": agent, "question": checked[1], "source": checked[0]}, agent, [checked[0], thread])
         sources = list({s["url"]: s for s in turn.sources if s.get("url")}.values())[:12]
         if body.strip() or turn.actions or turn.suggestions:
             evt["message"] = l.append_message(thread, "assistant", body, {"agent": agent, "stop_reason": reason, "usage": evt.get("usage"),

@@ -164,7 +164,7 @@ function homesChanged(){clearTimeout(MapState.htimer);MapState.htimer=setTimeout
 
 /* ---- settings: everything is changeable here ------------------------------------------------------------- */
 const SETTINGS_PAGES=[["look","外观与交互","sun"],["layout","工作区与左栏","layout"],["agents","四个 AI","bot"],["apis","模型连接","link"],["web","联网","search"],
- ["run","运行与环境","terminal"],["vault","学习库","folder"],["rules","学习库的规矩","shield"],["keys","快捷键","cmd"]];
+ ["usage","用量","bars"],["run","运行与环境","terminal"],["vault","学习库","folder"],["rules","学习库的规矩","shield"],["keys","快捷键","cmd"]];
 panelType("settings",{side:"mine",icon:"sliders",title:()=>"设置",
  mount(p,node,pid){node.innerHTML='<div class="settings-shell"><nav class="settings-nav"></nav><div class="settings" data-keep-scroll></div></div>';renderSettings(node,p.page||"look");},
  screen(p){return {view:"设置",page:p.page||"look"};}});
@@ -180,6 +180,21 @@ async function renderSettings(node,page){
 }
 const opt=(value,list)=>list.map(([v,t])=>'<option value="'+esc(v)+'"'+(String(value)===String(v)?" selected":"")+'>'+esc(t)+'</option>').join("");
 const SETTINGS_RENDER={
+ async usage(){
+  const u=await rpc("usage"),P=u.periods,n=x=>Number(x||0).toLocaleString();
+  const card=(k,t)=>{const x=P[k];return '<div class="use-card"><small>'+t+'</small><b>'+tokenNum(x.input+x.output)+'</b><span>'+tokenNum(x.input)+' 入 · '+tokenNum(x.output)+' 出 · '+x.requests+' 次请求</span></div>';};
+  const top=Math.max(1,...u.days.map(d=>d.input+d.output));
+  const bars=u.days.map(d=>{const t=d.input+d.output;return '<div class="use-day" data-tip="'+esc(d.day+"："+n(t)+" tokens\n输入 "+n(d.input)+"，输出 "+n(d.output)+"，"+d.requests+" 次请求")+'">'+
+   '<div class="use-col"><i style="height:'+(t?Math.max(3,t/top*100):0)+'%"></i></div><small>'+Number(d.day.slice(8))+'</small></div>';}).join("");
+  const table=(rows,name)=>rows.length?'<div class="use-wrap"><table class="use-table"><thead><tr><th>'+name+'</th><th>输入</th><th>缓存命中</th><th>输出</th><th>其中思考</th><th>请求</th></tr></thead><tbody>'+
+   rows.map(r=>'<tr><td>'+esc(r.name)+(r.estimated?' <small data-tip="有 '+r.estimated+' 次请求服务没报用量，按字数估算">含估算</small>':"")+'</td><td>'+n(r.input)+'</td><td>'+n(r.cached)+'</td><td>'+n(r.output)+'</td><td>'+n(r.reasoning)+'</td><td>'+n(r.requests)+'</td></tr>').join("")+
+   '</tbody></table></div>':'<p class="muted">还没有记录。</p>';
+  return '<h3>用量</h3><p class="muted">每次 AI 回答用掉的 token 都记在这台电脑上（不进学习库）：一次回答里的每一轮请求（包括调用工具的那几轮）都算上，输入里有多少是缓存命中、输出里有多少是思考也分开记。'+
+   '服务没报用量时按字数估算，并标出「估算」。'+(u.since?"从 "+esc(fmtDate(u.since,true))+" 开始记录。":"")+'</p>'+
+   '<div class="use-cards">'+card("today","今天")+card("week","近 7 天")+card("month","近 30 天")+card("all","全部")+'</div>'+
+   '<div class="field-label">近 14 天</div><div class="use-days">'+bars+'</div>'+
+   '<h3>按模型</h3>'+table(u.models,"模型")+'<h3>按 AI</h3>'+table(u.agents.map(r=>({...r,name:who(r.name)})),"AI");
+ },
  look(c){
   const u=S.ui;
   return themeSettings()+'<h3>外观</h3><div class="three"><label>深色还是浅色<select data-ui="theme">'+opt(u.theme,[["dark","深色"],["light","浅色"]])+'</select></label>'+

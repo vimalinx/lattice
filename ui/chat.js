@@ -22,7 +22,7 @@ panelType("chat",{side:"ai",icon:p=>AGENT_ICON[p.agent]||"bot",
  shown(p,node){const pid=node.dataset.pid,st=Chat[pid],box=node.querySelector(".chat-scroll");if(st&&box&&st.bottom!==false)box.scrollTop=box.scrollHeight;fitComposer(pid);},
  screen(p,node){
   const st=Chat[node.dataset.pid];if(!st?.data)return {agent:p.agent};
-  const answers=answersOf(st.data.messages),open=[];
+  const answers=answersOf(st.data),open=[];
   st.data.messages.forEach(m=>{if(m.role!=="assistant")return;let i=0;String(m.content).replace(BLOCK_RE,(x,type)=>{if(type==="quiz"&&!answers[m.id+":"+i])open.push(m.id+":"+i);i++;return x;});});
   return {agent:p.agent,thread:st.thread,title:panelTitle(node.dataset.pid),messages:st.data.messages.length,unanswered_quizzes:open.slice(-5),busy:st.data.busy,draft:st.input?shorten(st.input,200):"",
    ...(st.attach.length?{attached:st.attach.map(a=>a.path)}:{}),...(p.model?{model:p.model.model}:{})};
@@ -31,19 +31,34 @@ async function loadChat(pid,keepScroll=true){
  const p=Dock.panels[pid],st=Chat[pid];if(!p||!st)return;
  const data=await safe(()=>rpc("chat",p.thread?{agent:p.agent,thread:p.thread}:{agent:p.agent,topic:S.data.active_topic||""}));
  if(!data||!Chat[pid])return;
- if(st.thread&&st.thread!==data.thread){st.cache={};st.stream="";st.live=[];st.error="";}
+ if(st.thread&&st.thread!==data.thread){st.cache={};st.stream="";st.live=[];st.error="";st.anchored=false;st.bottom=undefined;}
  st.thread=data.thread;st.data=data;
  renderChat(pid,keepScroll);refreshTab(pid);
 }
 function chatPanels(thread){return Object.keys(Chat).filter(pid=>Chat[pid].thread===thread);}
 function followingPanels(){return Object.keys(Chat).filter(pid=>Dock.panels[pid]&&!Dock.panels[pid].thread);}
-function answersOf(messages){const out={};(messages||[]).forEach(m=>{const a=m.meta?.answer;if(a)out[a.message+":"+a.block]=m.content.replace(/^我的回答：/,"");});return out;}
+/* Answers to this conversation's questions: given here, or (for the tutor's) checked over in the quick-answer side. */
+function answersOf(data){
+ const out={};
+ for(const [k,v] of Object.entries(data?.answers||{}))out[k]=String(v).replace(/^我的回答：/,"");
+ (data?.messages||[]).forEach(m=>{const a=m.meta?.answer;if(a&&!a.thread)out[a.message+":"+a.block]=m.content.replace(/^我的回答：/,"");});
+ return out;
+}
 function renderChat(pid,keepScroll=true){
  const node=Dock.els[pid],st=Chat[pid],p=Dock.panels[pid];if(!node||!st?.data)return;
- const scroll=node.querySelector(".chat-scroll"),stick=!keepScroll||st.bottom!==false;
+ const scroll=node.querySelector(".chat-scroll"),stick=!keepScroll||st.bottom!==false,was=scroll.scrollTop;
  if(!scroll.__watched){
   scroll.__watched=true;
-  scroll.addEventListener("scroll",()=>{if(!scroll.isConnected||!scroll.clientHeight)return;st.bottom=scroll.scrollHeight-scroll.scrollTop-scroll.clientHeight<140;toBottomButton(pid);});
+  // Only the learner's own scrolling (wheel, touch, keys, the scrollbar) decides whether the view follows the reply:
+  // reaching the end starts following, leaving it stops; scrolling done by the program changes nothing.
+  const mine=()=>{st.userAt=Date.now();};
+  for(const ev of ["wheel","touchmove","keydown"])scroll.addEventListener(ev,mine,{passive:true});
+  scroll.addEventListener("mousedown",e=>{if(e.target===scroll){st.dragBar=true;addEventListener("mouseup",()=>{st.dragBar=false;},{once:true});}});
+  scroll.addEventListener("scroll",()=>{
+   if(!scroll.isConnected||!scroll.clientHeight)return;
+   if(st.dragBar||Date.now()-(st.userAt||0)<700)st.bottom=toEnd(scroll)<60;
+   toBottomButton(pid);
+  });
   // Which folded parts are open survives re-rendering.
   scroll.addEventListener("toggle",e=>{
    const box=e.target,mid=box.closest?.("[data-mid]")?.dataset.mid;
@@ -52,23 +67,51 @@ function renderChat(pid,keepScroll=true){
   },true);
  }
  node.querySelector(".chat-head").innerHTML=chatHead(pid);
- const answers=answersOf(st.data.messages);
+ const answers=answersOf(st.data);
  scroll.innerHTML="";
  const msgs=st.data.messages,empty=!msgs.length&&!st.data.busy;
  node.querySelector(".chat").classList.toggle("blank",empty);
  if(empty)scroll.appendChild(h('<div class="chat-welcome">'+chatWelcome(p.agent)+'</div>'));
  msgs.forEach(m=>scroll.appendChild(messageEl(pid,m,answers)));
- scroll.appendChild(h('<div class="live-slot"></div>'));
+ scroll.appendChild(h('<div class="live-slot"></div>'));scroll.appendChild(h('<div class="chat-spacer"></div>'));
  renderLive(pid);
  node.querySelector(".chat-starters").innerHTML=empty?chatStarters(pid):"";
  if(!node.querySelector(".composer textarea"))node.querySelector(".composer").innerHTML=composerHtml(pid);
  updateComposer(pid);
- if(stick)scroll.scrollTop=scroll.scrollHeight;
+ fitSpacer(pid);
+ scroll.scrollTop=stick?scroll.scrollHeight:was;
+ // Code, formulas and diagrams finish drawing a moment later: while following, the view keeps to the end.
+ st.sizes?.disconnect();
+ st.sizes=new ResizeObserver(()=>{if(st.bottom!==false&&scroll.isConnected&&scroll.clientHeight)scroll.scrollTop=scroll.scrollHeight;toBottomButton(pid);});
+ all(".msg,.live-slot",scroll).forEach(n=>st.sizes.observe(n));
  toBottomButton(pid);
 }
+/* How far the end of the conversation (not the room kept below the last question) is under the visible part. */
+function toEnd(scroll){return scroll.scrollHeight-(scroll.querySelector(".chat-spacer")?.offsetHeight||0)-scroll.scrollTop-scroll.clientHeight;}
 function toBottomButton(pid){
- const node=Dock.els[pid],b=node?.querySelector(".to-bottom");if(!b)return;
- b.hidden=Chat[pid]?.bottom!==false||node.querySelector(".chat")?.classList.contains("blank");
+ const node=Dock.els[pid],b=node?.querySelector(".to-bottom"),scroll=node?.querySelector(".chat-scroll");if(!b||!scroll)return;
+ b.hidden=Chat[pid]?.bottom!==false||node.querySelector(".chat")?.classList.contains("blank")||toEnd(scroll)<60;
+}
+/* After a question is sent it moves up to about a fifth of the way down (a long one shows its end), and the reply
+   grows under it without moving the view: room kept below the question holds it there and shrinks as the reply
+   fills the window. */
+function questionTop(height,size){return size>height*.4?Math.max(8,height*.6-size):height*.2;}
+function lastQuestion(scroll){return [...scroll.querySelectorAll(".msg.from-me")].at(-1)||null;}
+// Screen positions are scaled by the window's own zoom, scroll positions are not.
+function offsetIn(scroll,node){const k=scroll.getBoundingClientRect().height/(scroll.offsetHeight||1)||1;return (node.getBoundingClientRect().top-scroll.getBoundingClientRect().top)/k+scroll.scrollTop;}
+function fitSpacer(pid){
+ const st=Chat[pid],scroll=Dock.els[pid]?.querySelector(".chat-scroll"),gap=scroll?.querySelector(".chat-spacer");if(!gap)return;
+ const q=st.anchored&&lastQuestion(scroll);
+ if(!q){gap.style.height="0px";return;}
+ const H=scroll.clientHeight,content=scroll.scrollHeight-gap.offsetHeight;
+ gap.style.height=Math.max(0,Math.round(offsetIn(scroll,q)-questionTop(H,q.offsetHeight)+H-content))+"px";
+}
+function anchorQuestion(pid){
+ const st=Chat[pid],scroll=Dock.els[pid]?.querySelector(".chat-scroll");if(!st||!scroll)return;
+ st.anchored=true;st.bottom=false;fitSpacer(pid);
+ const q=lastQuestion(scroll);
+ if(q)scroll.scrollTo({top:Math.max(0,offsetIn(scroll,q)-questionTop(scroll.clientHeight,q.offsetHeight)),behavior:"smooth"});
+ toBottomButton(pid);
 }
 function chatWelcome(agent){
  if(agent==="coach")return '<h3>练习开始了</h3><p>教练会一步步带你写。</p>';
@@ -119,7 +162,7 @@ function messageEl(pid,m,answers){
   const mine=m.role==="user";
   const r=mine?{html:markdown(m.content),blocks:[]}:replyHtml(m.content);
   const incomplete=!mine&&meta.stop_reason&&meta.stop_reason!=="end_turn";
-  const foot='<div class="msg-foot">'+(mine?"":'<span>'+esc(agentTitle(meta.agent||p.agent))+'</span>')+'<time>'+esc(fmtDate(m.at,true))+'</time>'+
+  const foot='<div class="msg-foot">'+(mine?"":'<span>'+esc(agentTitle(meta.agent||p.agent))+'</span>')+'<time>'+esc(fmtDate(m.at,true))+'</time>'+(mine?"":usageLabel(meta.usage))+
    (m.content.trim()?iconButton("copy","msg-copy","复制",'data-pid="'+pid+'" data-mid="'+m.id+'"'):"")+(!mine&&m.content.trim()?messageTools(pid,m):"")+'</div>';
   const html=mine?'<div class="msg from-me" data-mid="'+m.id+'"><div class="bubble">'+
     (meta.skill_title?'<div class="msg-skill">'+svg("store",11)+' 按技能「'+esc(meta.skill_title)+'」</div>':"")+
@@ -212,7 +255,7 @@ function patchLive(pid){
   delete liveFrames[pid];
   const scroll=Dock.els[pid]?.querySelector(".chat-scroll");if(!scroll)return;
   const stick=Chat[pid]?.bottom!==false;
-  renderLive(pid);if(stick)scroll.scrollTop=scroll.scrollHeight;
+  renderLive(pid);fitSpacer(pid);if(stick)scroll.scrollTop=scroll.scrollHeight;toBottomButton(pid);
  }),90);
 }
 /* The input: a capsule while it holds one line, a rounded box once it needs more. */
@@ -295,7 +338,7 @@ async function chatSend(pid,text,extra={}){
   const r=await rpc("send",{agent:p.agent,message,thread:st.thread,selection,task:extra.task||"",note:screenNote(),answer:extra.answer||null,attach,model:p.model||null,skill:skill?.slug||null});
   st.thread=r.thread;if(extra.selection==null)st.quote="";if(text==null){st.attach=[];st.skill=null;}
   st.data.messages.push({id:"pending",role:"user",content:message||({check:"我写好了，帮我看看我的代码和运行结果。",hint:"我卡住了，给我一点提示，先别直接给答案。",capture:"把我们讨论过的内容整理成知识卡。"})[extra.task]||"",meta:{selection,answer:extra.answer,attach,skill_title:skill?.title},at:new Date().toISOString()});
-  st.data.busy=true;renderChat(pid,false);
+  st.data.busy=true;st.anchored=false;renderChat(pid);anchorQuestion(pid);
  }catch(e){if(text==null&&area){area.value=message;fitComposer(pid);}st.error=e.message;renderLive(pid);throw e;}
 }
 // Answer the last question again, after a stop, a cut-off or a failure.
@@ -303,7 +346,7 @@ async function chatRetry(pid){
  const st=Chat[pid],p=Dock.panels[pid];if(!st?.data)return;
  if(st.data.busy)return toast("这段对话正在回答；可以先停止");
  st.error="";st.stream="";st.live=[];st.waiting="";Object.assign(st,freshThinking());
- try{await rpc("retry",{thread:st.thread,note:screenNote(),model:p.model||null});st.data.busy=true;renderChat(pid,false);}
+ try{await rpc("retry",{thread:st.thread,note:screenNote(),model:p.model||null});st.data.busy=true;st.anchored=false;renderChat(pid);anchorQuestion(pid);}
  catch(e){st.error=e.message;renderLive(pid);}
 }
 function chatEvent(evt){
@@ -369,6 +412,26 @@ function escalate(pid,mid){
  send();
 }
 /* The ⋯ menu: how this window shows the conversation, how all windows do, and the rest of what a conversation can do. */
+/* Token counts: compact numbers, a short label under each reply, the full breakdown when the mouse rests on it. */
+function tokenNum(n){n=Number(n)||0;const cut=(x,d)=>x.toFixed(d).replace(/\.0+$/,"");return n<1000?String(n):n<10000?cut(n/1000,1)+"k":n<1e8?cut(n/1e4,n<1e5?1:0)+"万":cut(n/1e8,2)+"亿";}
+function normUsage(u){
+ if(!u)return null;
+ // Replies saved before the counts were unified carry the service's own field names.
+ if(u.input==null)u={input:u.prompt_tokens||u.input_tokens||0,output:u.completion_tokens||u.output_tokens||0,cached:u.prompt_tokens_details?.cached_tokens||u.prompt_cache_hit_tokens||0,
+  reasoning:u.completion_tokens_details?.reasoning_tokens||0,requests:1,estimated:0};
+ return u.input||u.output?u:null;
+}
+function usageTip(u){
+ const n=x=>Number(x||0).toLocaleString();
+ return ["输入 "+n(u.input)+(u.cached?"（缓存命中 "+n(u.cached)+"）":""),"输出 "+n(u.output)+(u.reasoning?"（其中思考 "+n(u.reasoning)+"）":""),
+  (u.requests||1)+" 次请求"+(u.model?" · "+u.model:""),u.estimated?(u.estimated>=(u.requests||1)?"服务没有报用量，这是按字数估算的":u.estimated+" 次请求没报用量，按字数估算"):""].filter(Boolean).join("\n");
+}
+function usageLabel(raw){const u=normUsage(raw);return u?'<span class="msg-tokens" data-tip="'+esc(usageTip(u))+'">'+(u.estimated?"≈":"")+tokenNum(u.input)+" 入 · "+tokenNum(u.output)+" 出</span>":"";}
+function threadUsage(st){
+ const t={input:0,output:0,cached:0,reasoning:0,requests:0,estimated:0};
+ for(const m of st.data?.messages||[]){const u=m.role==="assistant"&&normUsage(m.meta?.usage);if(u)for(const k in t)t[k]+=Number(u[k]||0);}
+ return t.input||t.output?t:null;
+}
 function chatMoreMenu(pid,anchor){
  const p=Dock.panels[pid],st=Chat[pid],u=S.ui;if(!p||!st)return;
  const lh=Number(viewOf(p,"line_height"))||1.8,rw=readChars(viewOf(p,"read_width")),own=p.zoom||p.line_height||p.read_width||p.composer;
@@ -390,7 +453,8 @@ function chatMoreMenu(pid,anchor){
   row("密度",seg("ui-set","density",u.density||"comfortable",[["comfortable","舒适"],["compact","紧凑"]]))+
   row("明暗",seg("ui-set","theme",u.theme||"dark",[["dark","深色"],["light","浅色"]]))+
   '<hr/>'+(p.agent==="coach"?"":item("edit","开新会话","chat-new"))+(p.agent==="tutor"?item("book","提炼知识卡","chat-task",'data-task="capture"'):"")+
-  item("bot","换这个窗口的模型…","chat-model")+item("copy","复制整段对话","chat-copy-all")+item("document","把这段对话存成笔记","chat-save-note")+
+  item("bot","换这个窗口的模型…","chat-model")+item("copy","复制整段对话","chat-copy-all")+
+  (()=>{const u=threadUsage(st);return '<button data-action="open-settings" data-page="usage" data-tip="'+esc(u?usageTip(u):"这段对话还没有用量记录")+'">'+svg("bars",14)+'<span>这段对话用了 '+(u?(u.estimated?"≈":"")+tokenNum(u.input+u.output)+" tokens<small>"+tokenNum(u.input)+" 入 · "+tokenNum(u.output)+" 出 · 点开看全部用量</small>":"0 tokens")+'</span></button>';})()+item("document","把这段对话存成笔记","chat-save-note")+
   (st.data?.head?.topic?'<button data-action="open-doc" data-id="'+esc(st.data.head.topic)+'">'+svg("map",14)+'<span>打开主题页</span></button>':"")+
   '<hr/>'+item("float","浮出","dock-float")+item("close","关闭","dock-close")+'<button data-action="open-settings" data-page="look">'+svg("sliders",14)+'<span>全部外观设置</span></button>',{cls:"menu-wide"});
  Menus.reopen=()=>{const b=Dock.els[pid]?.querySelector('[data-action="chat-more"]');if(b&&b.isConnected)chatMoreMenu(pid,b);};

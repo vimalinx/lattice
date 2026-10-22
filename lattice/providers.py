@@ -471,6 +471,36 @@ def endpoint(base, suffix):
     return base + "/" + suffix
 
 
+def usage_of(raw):
+    """One request's token counts in one shape, whatever the service calls them (OpenAI, DeepSeek, Anthropic-style)."""
+    if not isinstance(raw, dict):
+        return None
+    num = lambda v: int(v) if isinstance(v, (int, float)) else 0
+    used = {"input": num(raw.get("prompt_tokens", raw.get("input_tokens"))), "output": num(raw.get("completion_tokens", raw.get("output_tokens"))),
+            "cached": num((raw.get("prompt_tokens_details") or {}).get("cached_tokens")) or num(raw.get("prompt_cache_hit_tokens")) or num(raw.get("cache_read_input_tokens")),
+            "reasoning": num((raw.get("completion_tokens_details") or {}).get("reasoning_tokens"))}
+    return used if used["input"] or used["output"] else None
+
+
+CJK = re.compile(r"[\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]")
+
+
+def estimate_tokens(text):
+    """A rough count for a service that reports none: about 0.6 per CJK character, 0.3 per other character."""
+    text = str(text or "")
+    cjk = len(CJK.findall(text))
+    return round(cjk * 0.6 + (len(text) - cjk) * 0.3)
+
+
+def add_usage(total, used, estimated=False):
+    total = total or {"input": 0, "output": 0, "cached": 0, "reasoning": 0, "requests": 0, "estimated": 0}
+    for key in ("input", "output", "cached", "reasoning"):
+        total[key] += used.get(key, 0)
+    total["requests"] += 1
+    total["estimated"] += 1 if estimated else 0
+    return total
+
+
 def clean_error(message, key=""):
     if isinstance(message, BaseException):
         # httpx transport errors often stringify to nothing; never show a blank error.
@@ -535,6 +565,17 @@ class ApiWorker(QThread):
                 continue
             if ident == call["id"]:
                 return content
+
+    @staticmethod
+    def _estimate(payload, answer):
+        return {"input": estimate_tokens(json.dumps([payload["messages"], payload.get("tools")], ensure_ascii=False)), "output": estimate_tokens(answer)}
+
+    def _cut_short(self, usage):
+        """A request stopped or broken mid-stream reported nothing; what it had sent and received is estimated."""
+        if self.asked and self.partial:
+            usage = add_usage(usage, self._estimate(self.asked, self.partial), True)
+        self.asked = None
+        return usage
 
     async def _stream(self, client, headers, payload, separate):
         """One streamed completion. Returns content, reasoning, tool calls, finish and usage."""
@@ -617,6 +658,7 @@ class ApiWorker(QThread):
     async def _run(self):
         self.loop, self.task = asyncio.get_running_loop(), asyncio.current_task()
         body, stop_reason, usage = "", "end_turn", None
+        self.asked = None
         try:
             if self.cancelled.is_set():
                 raise asyncio.CancelledError()
@@ -665,12 +707,17 @@ class ApiWorker(QThread):
                     messages, body, stop_reason, thought, rounds = list(self.messages), "", "end_turn", False, 0
                     self.emit("status", state="connecting")
                     while True:
-                        payload = {**config["extra_body"], "model": config["model"], "messages": messages, "stream": True,
-                                   "max_tokens": config["max_tokens"], "temperature": config["temperature"],
+                        # include_usage makes a stream end with the request's token counts; extra_body can turn it off.
+                        payload = {"stream_options": {"include_usage": True}, **config["extra_body"], "model": config["model"], "messages": messages,
+                                   "stream": True, "max_tokens": config["max_tokens"], "temperature": config["temperature"],
                                    **({"tools": self.tools} if self.tools else {})}
+                        self.asked = payload
                         content, reasoning, calls, finish, part_usage = await self._stream(client, headers, payload, bool(body))
+                        self.asked = None
                         self.partial = ""
-                        usage = part_usage or usage
+                        # Every request of the turn counts (each tool round is one); a service that reports nothing is estimated.
+                        used = usage_of(part_usage)
+                        usage = add_usage(usage, used or self._estimate(payload, content + reasoning + json.dumps(calls, ensure_ascii=False)), not used)
                         thought = thought or bool(reasoning)
                         body += ("\n\n" if body and content else "") + content
                         if finish == "cancelled" or self.cancelled.is_set():
@@ -700,9 +747,11 @@ class ApiWorker(QThread):
         except asyncio.CancelledError:
             body += self.partial
             stop_reason = "cancelled"
+            usage = self._cut_short(usage)
         except Exception as exc:
             # A stream that breaks mid-answer keeps what already reached the learner.
             body += self.partial
+            usage = self._cut_short(usage)
             if self.cancelled.is_set():
                 stop_reason = "cancelled"
             else:
@@ -713,5 +762,7 @@ class ApiWorker(QThread):
             self.task, self.loop = None, None
             if not self.test:
                 thinking = "\n\n".join(t.strip() for t in self.thoughts if t.strip())
+                if usage:
+                    usage.update(api=self.config.get("api"), model=self.config.get("model"))
                 self.emit("finished", text=body, stop_reason=stop_reason, usage=usage,
                           **({"thinking": thinking[-200_000:], "think_seconds": round(self.think_seconds, 1)} if thinking else {}))

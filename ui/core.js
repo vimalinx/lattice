@@ -15,6 +15,7 @@ function baseName(p){return String(p||"").split("/").pop();}
 function svg(name,size=18){
  const paths={
   home:'<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-6v-7H10v7H4a1 1 0 0 1-1-1z"/>',
+  bars:'<path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/>',
   cut:'<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/>',
   paste:'<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>',
   selectall:'<path d="M5 3a2 2 0 0 0-2 2m16-2a2 2 0 0 1 2 2m0 14a2 2 0 0 1-2 2M5 21a2 2 0 0 1-2-2M9 3h1m-1 18h1m4-18h1m-1 18h1M3 9v1m18-1v1M3 14v1m18-1v1"/><path d="M8 9h8M8 12h8M8 15h5"/>',

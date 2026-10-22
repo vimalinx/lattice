@@ -241,7 +241,7 @@ async function onAction(a){
  case "chat-send":return chatSend(pid);
  case "chat-starter":return chatSend(pid,a.dataset.say);
  case "chat-retry":return chatRetry(pid);
- case "chat-bottom":{const s=Dock.els[pid]?.querySelector(".chat-scroll");if(s)s.scrollTo({top:s.scrollHeight,behavior:"smooth"});return;}
+ case "chat-bottom":{const s=Dock.els[pid]?.querySelector(".chat-scroll");if(Chat[pid])Chat[pid].bottom=true;if(s)s.scrollTo({top:s.scrollHeight,behavior:"smooth"});return toBottomButton(pid);}
  case "chat-topic-menu":return topicMenu(pid,a);
  case "chat-attach":return attachMenu(pid,a);
  case "chat-attach-add":{const st=Chat[pid];if(st&&!st.attach.some(x=>x.path===a.dataset.path))st.attach.push({path:a.dataset.path});updateComposer(pid);return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
@@ -290,8 +290,17 @@ async function onAction(a){
  case "quiz-answer":{
   const block=a.closest(".lblock"),choice=block.querySelector("input[type=radio]:checked"),free=block.querySelector("textarea");
   const answer=(choice?.value||free?.value||"").trim();if(!answer)return toast("先写下你的回答");
-  const [message,index]=a.dataset.key.split(":");const chatPid=a.closest(".panel").dataset.pid;
-  return chatSend(chatPid,"我的回答："+answer,{answer:{message:Number(message),block:Number(index),question:block.dataset.question||""},selection:""});
+  const [message,index]=a.dataset.key.split(":");const chatPid=a.closest(".panel").dataset.pid,src=Chat[chatPid],question=block.dataset.question||"";
+  const sent={message:Number(message),block:Number(index),question};
+  if(Dock.panels[chatPid]?.agent!=="tutor")return chatSend(chatPid,"我的回答："+answer,{answer:sent,selection:""});
+  // The tutor's small questions are checked by the quick-answer side, so the explanation is not interrupted.
+  let side=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="flash"&&!Dock.panels[x].thread);
+  if(!side)side=openPanel({type:"chat",agent:"flash"});else if(!Dock.els[side]?.offsetParent)activate(side);
+  for(let i=0;i<60&&!Chat[side]?.data;i++)await new Promise(r=>setTimeout(r,100));
+  if(!Chat[side]?.data)return toast("快答还没打开，等一下再交","error");
+  await chatSend(side,"我的回答："+answer,{answer:{...sent,thread:src.thread},selection:"主会话的小问题："+shorten(question.replace(/[#*`]/g,""),400)});
+  src.data.answers={...(src.data.answers||{}),[a.dataset.key]:answer};renderChat(chatPid);
+  return toast("交给快答看了，主会话接着讲");
  }
  case "card-reveal":{const card=a.closest(".mini-card");card.querySelector(".mini-answer").hidden=false;a.parentElement.remove();return;}
  case "code-copy":{const n=el("#"+a.dataset.target);if(n){await navigator.clipboard.writeText(n.textContent);toast("已复制");}return;}

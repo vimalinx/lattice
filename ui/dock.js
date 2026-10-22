@@ -193,6 +193,35 @@ function refreshTab(pid){
 }
 
 /* ---- rendering ----------------------------------------------------------------------------------- */
+/* Changing the layout takes windows out of the page and puts them back, which loses where everything inside them was
+   scrolled to. Each scroll is noted as it happens, and put back once the window shows again.
+   A window that comes back at another width has reflowed, so the item that was at the top is found again and kept at
+   the same distance from the top, rather than the same number of pixels. */
+const topOf=(box,node,k)=>(node.getBoundingClientRect().top-box.getBoundingClientRect().top)/k+box.scrollTop;
+function noteScroll(t){
+ const k=t.getBoundingClientRect().height/(t.offsetHeight||1)||1,kids=t.children;let anchor=null;
+ // The first child reaching below the top edge (children are in order, so a binary search finds it).
+ if(kids.length>1){
+  let lo=0,hi=kids.length-1;
+  while(lo<hi){const mid=(lo+hi)>>1,c=kids[mid];if(topOf(t,c,k)+c.offsetHeight<=t.scrollTop)lo=mid+1;else hi=mid;}
+  anchor=kids[lo];
+ }
+ t.__at={top:t.scrollTop,left:t.scrollLeft,anchor,gap:anchor?t.scrollTop-topOf(t,anchor,k):0};
+}
+document.addEventListener("scroll",e=>{
+ const t=e.target;if(t.nodeType!==1||!t.isConnected||!t.clientHeight)return;
+ const panel=t.closest(".panel");if(!panel)return;
+ (panel.__scrolled||=new Set()).add(t);
+ if(!t.__noting){t.__noting=true;requestAnimationFrame(()=>{t.__noting=false;if(t.isConnected&&t.clientHeight)noteScroll(t);});}
+},true);
+function restoreScroll(node){
+ for(const t of node?.__scrolled||[]){
+  if(!node.contains(t)){node.__scrolled.delete(t);continue;}
+  const at=t.__at;if(!at)continue;
+  const k=t.getBoundingClientRect().height/(t.offsetHeight||1)||1;
+  t.scrollTop=at.anchor&&t.contains(at.anchor)?topOf(t,at.anchor,k)+at.gap:at.top;t.scrollLeft=at.left;
+ }
+}
 function renderDock(){
  const host=el("#dock");if(!host)return;
  Object.values(Dock.els).forEach(n=>n.parentElement&&n.remove());
@@ -226,8 +255,9 @@ function stackEl(s,floating=null){
  bar.appendChild(h('<div class="tabs-fill" data-stack="'+s.id+'"'+(floating?' data-float-move="'+floating.id+'"':"")+'></div>'));
  if(s.active&&Dock.els[s.active]){
   node.lastElementChild.appendChild(Dock.els[s.active]);
-  // Sizes measured while a panel was detached are wrong; let it fit itself once it is visible.
-  const p=Dock.panels[s.active],t=Dock.types[p?.type];if(t?.shown)requestAnimationFrame(()=>t.shown(p,Dock.els[s.active]));
+  // Sizes measured while a panel was detached are wrong; let it fit itself once it is visible, scrolled where it was.
+  const p=Dock.panels[s.active],t=Dock.types[p?.type],panel=Dock.els[s.active];
+  requestAnimationFrame(()=>{restoreScroll(panel);if(t?.shown)t.shown(p,panel);});
  }
  else if(!s.tabs.length)node.lastElementChild.appendChild(h('<div class="stack-empty">'+emptyState("layout","这里是空的",s.keep?"从左栏打开的东西放在这里，也可以把标签拖进来。":"把标签拖到这里，或者从上面的「＋」打开。")+
   (s.keep?'<button class="ghost xs" data-action="stack-unkeep" data-stack="'+s.id+'">不要这一块</button>':"")+'</div>'));

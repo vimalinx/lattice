@@ -970,3 +970,24 @@ select:hover:not(:disabled){border-color:color-mix(in srgb,var(--muted) 45%,var(
 #organizer{border-radius:12px;background:var(--pop-bg);box-shadow:var(--pop-shadow)}
 .float{border-radius:12px;box-shadow:var(--pop-shadow)}
 input[type=checkbox],input[type=radio],input[type=range]{accent-color:var(--accent)}
+.chat-spacer{pointer-events:none}
+.msg-tokens{font-size:11px;color:var(--subtle);font-variant-numeric:tabular-nums;cursor:default}
+.use-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:6px 0 16px}
+.use-card{display:grid;gap:3px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.use-card small{color:var(--muted);font-size:12px}
+.use-card b{font-size:22px;font-weight:650;letter-spacing:-.3px;font-variant-numeric:tabular-nums}
+.use-card span{color:var(--subtle);font-size:11.5px}
+.use-days{display:grid;grid-template-columns:repeat(14,1fr);gap:5px;height:130px;margin:6px 0 18px}
+.use-day{display:grid;grid-template-rows:1fr auto;gap:4px;min-width:0}
+.use-col{display:flex;align-items:flex-end;border-radius:6px;background:color-mix(in srgb,var(--surface) 60%,transparent)}
+.use-col i{display:block;width:100%;border-radius:6px;background:var(--accent);opacity:.85}
+.use-day:hover .use-col i{opacity:1}
+.use-day small{text-align:center;font-size:10.5px;color:var(--subtle)}
+.use-wrap{overflow:auto;border:1px solid var(--line);border-radius:10px;margin-bottom:14px}
+.use-table{border-collapse:collapse;width:100%;font-size:12.5px;font-variant-numeric:tabular-nums}
+.use-table th,.use-table td{padding:7px 11px;text-align:right;border-bottom:1px solid var(--line-soft);white-space:nowrap}
+.use-table th{background:var(--surface);color:var(--muted);font-weight:600}
+.use-table th:first-child,.use-table td:first-child{text-align:left;white-space:normal}
+.use-table tr:last-child td{border-bottom:0}
+.use-table small{color:var(--amber);font-size:10.5px}
+@container chat (max-width: 300px){.chat-scroll{padding-left:8px;padding-right:8px}.bubble{max-width:100%;padding:8px 11px;border-radius:14px}}
