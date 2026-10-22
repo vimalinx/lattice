@@ -110,8 +110,10 @@ function topicMenu(pid,anchor){
   (!topic&&!topics.length?'<p class="menu-empty">还没有主题。聊着聊着，主会话会把值得深入的内容建成主题。</p>':""));
 }
 function messageEl(pid,m,answers){
- const st=Chat[pid],p=Dock.panels[pid],meta=m.meta||{};
- const key=m.id+"|"+m.content.length+"|"+(st.data.undone||[]).length+"|"+JSON.stringify(st.data.decisions||{}).length+"|"+Object.keys(answers).length+"|"+S.ui.thinking;
+ const st=Chat[pid],p=Dock.panels[pid],meta=m.meta||{},list=st.data.messages,at=list.indexOf(m),next=list[at+1];
+ // A reply that broke off: the last one can be answered again; one already answered again says so.
+ const redone=m.role==="assistant"&&next?.role==="assistant"&&next.meta?.retry,canRetry=!next&&!st.data.busy;
+ const key=m.id+"|"+m.content.length+"|"+redone+"|"+canRetry+"|"+(st.data.undone||[]).length+"|"+JSON.stringify(st.data.decisions||{}).length+"|"+Object.keys(answers).length+"|"+S.ui.thinking;
  let cached=st.cache[m.id];
  if(!cached||cached.key!==key){
   const mine=m.role==="user";
@@ -124,7 +126,8 @@ function messageEl(pid,m,answers){
     (meta.attach?.length?'<div class="msg-attach">'+meta.attach.map(x=>'<a data-action="open-file" data-path="'+esc(x)+'">'+svg(fileIcon(x),12)+' '+esc(x.split("/").pop())+'</a>').join("")+'</div>':"")+
     '<div class="markdown msg-body">'+r.html+'</div></div>'+foot+'</div>'
    :'<div class="msg from-ai" data-mid="'+m.id+'">'+thinkingHtml(meta.thinking,meta.think_seconds)+'<div class="markdown msg-body">'+r.html+'</div>'+
-    (incomplete?'<div class="msg-note">'+esc(meta.stop_reason==="cancelled"?"已停止 · 保留了部分回答":meta.stop_reason==="max_tokens"?"达到回复长度上限":"没有正常结束 · 只保留了收到的部分")+'</div>':"")+
+    (redone?'<div class="msg-note">这次没有答完，下面是重新回答的</div>':incomplete?'<div class="msg-note">'+esc(meta.stop_reason==="cancelled"?"已停止 · 保留了部分回答":meta.stop_reason==="max_tokens"?"达到回复长度上限":"没有正常结束 · 只保留了收到的部分")+
+     (canRetry?button(svg("refresh",12)+" 重新回答","chat-retry",'data-pid="'+pid+'"',"ghost xs"):"")+'</div>':"")+
     actionChips(meta.actions||[],st.data.undone||[])+sourcesHtml(meta.sources)+suggestionsHtml(pid,m)+foot+'</div>';
   cached=st.cache[m.id]={key,html,blocks:r.blocks};
  }
@@ -189,13 +192,16 @@ function renderLive(pid){
  const node=Dock.els[pid],st=Chat[pid];if(!node||!st)return;
  const slot=node.querySelector(".live-slot");if(!slot)return;
  const busy=st.data?.busy;
- if(!st.stream&&!st.live.length&&!busy&&!st.error&&!st.think){slot.innerHTML="";return;}
+ const unanswered=!busy&&st.data?.messages?.at(-1)?.role==="user"&&st.data.messages.at(-1).id!=="pending";
+ if(!st.stream&&!st.live.length&&!busy&&!st.error&&!st.think&&!unanswered){slot.innerHTML="";return;}
  const r=replyHtml(st.stream,true);
  const secs=(st.thinkMs+(st.thinkingNow?Date.now()-st.thinkFrom:0))/1000;
  const thought=thinkingHtml(st.think,0,{now:st.thinkingNow,secs,open:st.liveOpen??S.ui.thinking==="open"});
  slot.innerHTML=(st.stream||st.live.length||thought?'<div class="msg from-ai streaming">'+thought+'<div class="markdown msg-body">'+r.html+'</div>'+actionChips(st.live,[],true)+'</div>':"")+
   (busy&&!st.stream&&!st.thinkingNow?'<div class="thinking"><span></span><span></span><span></span><b>'+esc(st.waiting||"正在想…")+'</b></div>':"")+
-  (st.error?'<div class="chat-error">'+esc(st.error)+'</div>':"");
+  (st.error?'<div class="chat-error">'+esc(st.error)+(busy?"":button(svg("refresh",12)+" 重试","chat-retry",'data-pid="'+pid+'"',"ghost xs"))+'</div>':
+   // A question left without any answer (the reply failed before a word came back, or the program was closed meanwhile).
+   !busy&&st.data?.messages?.at(-1)?.role==="user"&&st.data.messages.at(-1).id!=="pending"?'<div class="chat-error quiet">这一问还没有得到回答'+button(svg("refresh",12)+" 重新回答","chat-retry",'data-pid="'+pid+'"',"ghost xs")+'</div>':"");
  if(r.blocks.length)mountBlocks(slot,r.blocks,{thread:st.thread,message:0,answers:{},pid,live:true});
 }
 const liveFrames={};
@@ -288,6 +294,14 @@ async function chatSend(pid,text,extra={}){
   st.data.messages.push({id:"pending",role:"user",content:message||({check:"我写好了，帮我看看我的代码和运行结果。",hint:"我卡住了，给我一点提示，先别直接给答案。",capture:"把我们讨论过的内容整理成知识卡。"})[extra.task]||"",meta:{selection,answer:extra.answer,attach},at:new Date().toISOString()});
   st.data.busy=true;renderChat(pid,false);
  }catch(e){if(text==null&&area){area.value=message;fitComposer(pid);}st.error=e.message;renderLive(pid);throw e;}
+}
+// Answer the last question again, after a stop, a cut-off or a failure.
+async function chatRetry(pid){
+ const st=Chat[pid],p=Dock.panels[pid];if(!st?.data)return;
+ if(st.data.busy)return toast("这段对话正在回答；可以先停止");
+ st.error="";st.stream="";st.live=[];st.waiting="";Object.assign(st,freshThinking());
+ try{await rpc("retry",{thread:st.thread,note:screenNote(),model:p.model||null});st.data.busy=true;renderChat(pid,false);}
+ catch(e){st.error=e.message;renderLive(pid);}
 }
 function chatEvent(evt){
  if(evt.kind==="connection_test")return settingsTestResult(evt);

@@ -67,6 +67,8 @@ class Bridge(QObject):
             self.lattice.vault.commit("建立默认的 Python 环境定义", "lattice")
         self.sandbox = Sandbox(self.root, self.lattice.projects, lambda: self.config.read()["sandbox_paths"])
         self.workers, self.turns, self.contexts, self.busy, self.status = {}, {}, {}, set(), {}
+        # Conversations whose next reply answers their last question again (see rpc_retry).
+        self.retrying = set()
         self.reviews = {}
         self.runs, self.kernels, self.kernel_states, self.batches = {}, {}, {}, {}
         self.screen, self.edits, self.last_write = {}, {}, 0.0
@@ -928,13 +930,20 @@ class Bridge(QObject):
         conn = self.config.agent(agent, use=model)
         if not conn["api_key"]:
             raise ValueError(f"请先在设置里给{AGENT_NAMES[agent]}填写 {conn['label']} 的 API Key")
-        history = l.messages(thread)[-definition["history"]:] if definition["history"] else []
+        history = self._history(thread, definition["history"])
         attach = [str(x)[:500] for x in (attach or []) if str(x).strip()][:12]
         meta = {"agent": agent, **({"selection": selection} if selection else {}), **({"task": task} if task else {}), **({"answer": answer} if answer else {}),
                 **({"attach": attach} if attach else {})}
         l.append_message(thread, "user", message, meta)
         l.record("answered" if answer else "asked", {"text": message[:600], "agent": agent, **({"question": answer.get("question", "")[:400]} if answer else {}),
                                                     **({"screen": note[:300]} if note else {})}, "me", [thread, *([topic] if topic else [])])
+        user, system = self._compose(definition, thread, topic, practice, message, task, selection, attach, note, extra)
+        self._turn(agent, thread, topic, thread if practice else None, conn, system, history, user, definition["tools"])
+        return {"thread": thread, "state": "queued"}
+
+    def _compose(self, definition, thread, topic, practice, message, task, selection, attach, note, extra=""):
+        """The learner's turn as the model gets it, and the system prompt around it."""
+        l = self.lattice
         user = agents.task_prompt(message, task) + extra
         notes = "；".join(x for x in (note.strip(), ("附上了这些文件，需要时用 read 读：" + "、".join(attach)) if attach else "",
                                       ("选中了这段内容：\n" + selection.strip()[:5000]) if selection.strip() else "") if x)
@@ -945,8 +954,44 @@ class Bridge(QObject):
         if practice:
             context += (f"\n\n这次练习：practice:{thread}「{practice['title']}」，练习文件：{practice['file']}。"
                         + (f"\n目标：{practice['goal']}" if practice.get("goal") else "") + "\n\n练习依据的讲解：\n" + practice["seed"])
-        system = agents.system_prompt(self.root, definition, context)
-        self._turn(agent, thread, topic, thread if practice else None, conn, system, history, user, definition["tools"])
+        return user, agents.system_prompt(self.root, definition, context)
+
+    def _history(self, thread, limit, before=None):
+        """What the model sees of a conversation. A reply that broke off and was then answered again stays in the record
+        (conversations are append-only) but is left out here, so the model reads one answer per question."""
+        if not limit:
+            return []
+        msgs = self.lattice.messages(thread)
+        msgs = msgs if before is None else msgs[:before]
+        kept = [m for i, m in enumerate(msgs) if not (m["role"] == "assistant" and i + 1 < len(msgs)
+                                                      and msgs[i + 1]["role"] == "assistant" and msgs[i + 1]["meta"].get("retry"))]
+        return kept[-limit:]
+
+    def rpc_retry(self, thread, note="", model=None):
+        """Answer the last question again after its reply was stopped, cut off or failed, without asking it twice."""
+        l = self.lattice
+        if thread in self.busy:
+            raise ValueError("这段对话正在回答；等它说完或先停止")
+        msgs = l.messages(thread)
+        last = next((i for i in range(len(msgs) - 1, -1, -1) if msgs[i]["role"] == "user"), None)
+        if last is None:
+            raise ValueError("这段对话里还没有可以重新回答的问题")
+        question, head = msgs[last], l.thread_head(thread)
+        meta = question["meta"]
+        agent = meta.get("agent") or head.get("agent") or "tutor"
+        practice = l.practice(thread) if head.get("practice") else None
+        if practice and practice["state"] != "active":
+            raise ValueError("这次练习已经结束")
+        topic = practice["topic"] if practice else head.get("topic")
+        definition = agents.load(self.root, agent)
+        conn = self.config.agent(agent, use=model)
+        if not conn["api_key"]:
+            raise ValueError(f"请先在设置里给{AGENT_NAMES[agent]}填写 {conn['label']} 的 API Key")
+        user, system = self._compose(definition, thread, topic, practice, question["content"], meta.get("task", ""), meta.get("selection", ""),
+                                     meta.get("attach") or [], note)
+        self.retrying.add(thread)
+        self._turn(agent, thread, topic, thread if practice else None, conn, system, self._history(thread, definition["history"], last), user,
+                   definition["tools"])
         return {"thread": thread, "state": "queued"}
 
     def _turn(self, agent, thread, topic, practice, conn, system, history, user, allowed):
@@ -1023,6 +1068,8 @@ class Bridge(QObject):
         l = self.lattice
         thread, agent = evt["thread"], evt["agent"]
         self.busy.discard(thread)
+        retried = thread in self.retrying
+        self.retrying.discard(thread)
         turn = self.turns.pop(thread, tools.Turn())
         _, topic, practice, _ = self.contexts.get(thread, (agent, None, None, set()))
         reason = evt.get("stop_reason", "end_turn")
@@ -1032,6 +1079,7 @@ class Bridge(QObject):
         if body.strip() or turn.actions or turn.suggestions:
             evt["message"] = l.append_message(thread, "assistant", body, {"agent": agent, "stop_reason": reason, "usage": evt.get("usage"),
                                                                           "actions": turn.actions, "sources": sources, "suggestions": turn.suggestions,
+                                                                          **({"retry": True} if retried else {}),
                                                                           **({"thinking": evt["thinking"], "think_seconds": evt.get("think_seconds")} if evt.get("thinking") else {})})
         evt.update(actions=turn.actions, sources=sources, suggestions=turn.suggestions)
         errors = []

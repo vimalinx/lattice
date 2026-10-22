@@ -477,6 +477,37 @@ function linkClicks(opts){
  }});
 }
 
+/* ---- code in rendered Markdown (replies, previews, embeds): the editor's own grammars and colours --------------------- */
+const codeLangs=new Map(),codeHtml=new Map();
+// The grammar for a fence's language: ready (support), unknown (null), or still loading (undefined; drawn when it arrives).
+function codeSupport(name){
+ const key=String(name).toLowerCase();
+ if(codeLangs.has(key)){const v=codeLangs.get(key);return v instanceof Promise?undefined:v;}
+ const desc=CL.LanguageDescription.matchLanguageName(CM.languages,key,true);
+ if(!desc){codeLangs.set(key,null);return null;}
+ if(desc.support){codeLangs.set(key,desc.support);return desc.support;}
+ codeLangs.set(key,desc.load().then(s=>{codeLangs.set(key,s);highlightPending();}).catch(()=>codeLangs.set(key,null)));
+ return undefined;
+}
+function highlightedCode(text,support){
+ const key=support.language.name+"\u0000"+text;if(codeHtml.has(key))return codeHtml.get(key);
+ let out="";
+ CM.highlight.highlightCode(text,support.language.parser.parse(text),cmHighlight,(t,cls)=>{out+=cls?'<span class="'+cls+'">'+esc(t)+'</span>':esc(t);},()=>{out+="\n";});
+ if(codeHtml.size>300)codeHtml.clear();codeHtml.set(key,out);return out;
+}
+const unescapeHtml=s=>s.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,"&");
+function highlightBlocks(html){
+ return html.replace(/<pre><code class="language-([\w+#.-]+)">([\s\S]*?)<\/code><\/pre>/g,(m,lang,body)=>{
+  const sup=codeSupport(lang);
+  if(sup===null)return m;
+  if(sup===undefined)return '<pre><code class="language-'+lang+'" data-hl="'+esc(lang)+'">'+body+'</code></pre>';
+  return '<pre><code class="language-'+lang+' hl">'+highlightedCode(unescapeHtml(body),sup)+'</code></pre>';
+ });
+}
+function highlightPending(){
+ for(const c of all("code[data-hl]")){const sup=codeSupport(c.dataset.hl);if(sup===undefined)continue;delete c.dataset.hl;if(sup){c.innerHTML=highlightedCode(c.textContent,sup);c.classList.add("hl");}}
+}
+
 /* ---- rainbow brackets: each nesting level its own colour, an unmatched closing bracket in red ------------------------- */
 const RAINBOW=[0,1,2].map(i=>CV.Decoration.mark({class:"cm-rb"+i})),RB_BAD=CV.Decoration.mark({class:"cm-rb-bad"});
 function rainbowBrackets(){

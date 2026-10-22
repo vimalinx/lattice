@@ -810,3 +810,9 @@ select{appearance:none;padding-right:28px;background-image:linear-gradient(45deg
 .tab-add:hover{background:var(--surface);color:var(--text)}
 .menu-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 2px}
 .menu-grid button{padding:6px 10px}
+/* a reply that broke off, and answering again */
+.chat-error{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.chat-error .btn{margin-left:auto}
+.chat-error.quiet{color:var(--muted);border-color:var(--line);background:transparent}
+.msg-note{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.msg-note .btn{color:var(--text)}

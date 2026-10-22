@@ -230,6 +230,7 @@ async function onAction(a){
  case "export":{const r=await rpc("export",{},0);if(r)toast("已导出到 "+r);return;}
  case "chat-send":return chatSend(pid);
  case "chat-starter":return chatSend(pid,a.dataset.say);
+ case "chat-retry":return chatRetry(pid);
  case "chat-bottom":{const s=Dock.els[pid]?.querySelector(".chat-scroll");if(s)s.scrollTo({top:s.scrollHeight,behavior:"smooth"});return;}
  case "chat-topic-menu":return topicMenu(pid,a);
  case "chat-attach":return attachMenu(pid,a);

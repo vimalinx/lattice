@@ -131,7 +131,10 @@ function markdown(text){
  try{
   // A table scrolls inside its own frame when it is wider than the text.
   const out=DOMPurify.sanitize(marked.parse(linked,{breaks:true,gfm:true}),{ADD_ATTR:["data-wiki","data-tag","data-vault-src","data-embed"]}).replace(/<table>/g,'<div class="table-wrap"><table>').replace(/<\/table>/g,"</table></div>")
-   .replace(/\uE000(\d+)\uE001/g,(_,i)=>maths[+i]?texHtml(maths[+i].tex.trim(),maths[+i].display):"");if(out.includes('class="mermaid"'))scheduleMermaid();return out;}
+   .replace(/\uE000(\d+)\uE001/g,(_,i)=>maths[+i]?texHtml(maths[+i].tex.trim(),maths[+i].display):"");
+  if(out.includes('class="mermaid"'))scheduleMermaid();
+  // Code fences coloured like the editor (editor.js); a language still loading is coloured when it arrives.
+  return typeof highlightBlocks==="function"?highlightBlocks(out):out;}
  catch(_){return '<pre>'+esc(text)+'</pre>';}
 }
 /* What rendered Markdown names in the vault: images, loaded through the backend (the page cannot read the vault),
