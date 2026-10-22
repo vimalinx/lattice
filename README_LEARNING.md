@@ -98,10 +98,15 @@ journal/<年>/<日期>.jsonl          学习轨迹（只追加）
 
 ## 模型和联网
 
-- 四个 AI（主会话、快答、练习教练、整理）各自选 API 连接和模型，都走 OpenAI 兼容的 Chat Completions（流式 + 工具调用）。内置 DeepSeek、CommandCode、OpenCode Go 和一个自定义连接，每个连接各存一份 Key。
+- 四个 AI（主会话、快答、练习教练、整理）各自选连接和模型，都走 OpenAI 兼容的 Chat Completions（流式 + 工具调用）。
+- 设置「模型连接」是两栏：左边列出所有供应商（DeepSeek、CommandCode、OpenCode Go、OpenRouter、硅基流动、OpenAI、Anthropic、Gemini、xAI、Mistral、Groq、Together、Fireworks、Perplexity、Kimi、智谱、通义千问、豆包、MiniMax、阶跃星辰、Azure OpenAI，以及本机的 Ollama、LM Studio、vLLM），选一个、在右边贴上 API Key 就能用；「测试并读取模型列表」会读出它有哪些模型，点一个设为默认。「自定义连接」可以每一项自己填：地址、Key 怎么传（Bearer、放在某个请求头里、不需要）、从哪个环境变量读、对话和模型列表的接口路径、请求头、附加参数。
 - 联网有两个接口：搜索和读网页，什么时候查由 AI 判断，来源列在回复下面并记进轨迹。搜索服务在设置里选：DuckDuckGo（不需要 Key）、自建 SearXNG、Brave、Tavily。读网页不会访问本机和局域网地址。
 - 设置能改所有东西：外观与交互、工作区与左栏、四个 AI 的模型和规则（工具、历史条数、规则全文，改了存进学习库的 `agents/`）、模型连接、联网、运行器和 Python 环境、沙箱、学习库的位置和挂载目录、学习库的规矩（AGENTS.md）。
 - 本机配置在 `~/.config/lattice/providers.json`（权限 0600），界面偏好和工作区的设置也在里面（每个工作区现在的样子存在学习库的 `.lattice/state.json`）。界面只知道有没有 Key，拿不到 Key 本身；Key 也可以用环境变量 `DEEPSEEK_API_KEY`、`COMMANDCODE_API_KEY`、`OPENCODE_GO_API_KEY` 提供。日志和浏览器配置在 `~/.local/share/lattice/`。使用模型时，相关的学习内容会发给你配置的模型服务。
+
+## LocalRouter 接入
+
+本机装了 LocalRouter 的话，运行一次 `lr connect lattice`：它签发 Lattice 自己的身份，把 Token 存进 `~/.local/share/localrouter/programs/lattice/service-token`（0600），并写好 `~/.config/lattice/localrouter.toml`（只存路径和选择，格式见仓库里的 `localrouter.example.toml`）。之后「模型连接」里多出一个 LocalRouter，和别的供应商一样选它就行。LocalRouter 是可选的：没有这个文件、`enabled = false` 或者探测不到 `/healthz` 时，Lattice 用你别的连接，并提示一句。
 
 ## 快捷键
 

@@ -269,7 +269,7 @@ function modelMenu(pid,anchor){
    '<span>'+esc(modelName(model))+'<small>'+esc(a.label+(note?" · "+note:"")+(a.has_key?"":" · 没有 Key"))+'</small></span></button>');};
  const own=S.config?.agents?.[p.agent];if(own)add(own.api,own.model,agentTitle(p.agent)+"的默认");
  Object.entries(S.config?.agents||{}).forEach(([name,a])=>add(a.api,a.model,agentTitle(name)+"在用"));
- apis.forEach(a=>add(a.id,a.default_model||a.model,""));
+ apis.filter(a=>a.has_key).forEach(a=>add(a.id,a.default_model||a.model,""));
  popMenu(anchor,'<div class="menu-label">只改这个窗口，存在布局里</div>'+items.join("")+'<hr/>'+
   '<button data-action="chat-model-other" data-pid="'+pid+'">'+svg("edit",14)+'<span>填写别的模型名…</span></button>'+
   (m.own?'<button data-action="chat-model-set" data-pid="'+pid+'" data-api="" data-model="">'+svg("undo",14)+'<span>恢复成'+esc(agentTitle(p.agent))+'的默认</span></button>':"")+

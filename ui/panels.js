@@ -220,7 +220,7 @@ const SETTINGS_RENDER={
   for(const [name,a] of Object.entries(c.agents)){
    const d=await rpc("agent_definition",{name}),def=d.definition,apiOpts=c.apis.map(x=>[x.id,x.label+(x.has_key?"":" · 没有 Key")]);
    cards.push('<details class="agent-edit"'+(name==="tutor"?" open":"")+'><summary><b>'+esc(a.title)+'</b> <span class="muted">'+esc(a.label)+(d.overridden?" · 规则已改写":"")+'</span></summary>'+
-    '<div class="three"><label>API 连接<select data-cfg-agent="'+name+'" data-key="api">'+opt(a.api,apiOpts)+'</select></label><label>模型<input data-cfg-agent="'+name+'" data-key="model" value="'+esc(a.model)+'"/></label>'+
+    '<div class="three"><label>API 连接<select data-cfg-agent="'+name+'" data-key="api">'+opt(a.api,apiOpts)+'</select></label><label>模型 <small>可以从连接读到的列表里选</small><input data-cfg-agent="'+name+'" data-key="model" list="models-'+esc(a.api)+'" value="'+esc(a.model)+'"/></label>'+
     '<label>回复上限（含思考）<input type="number" min="256" max="64000" data-cfg-agent="'+name+'" data-key="max_tokens" value="'+esc(a.max_tokens)+'"/></label></div>'+
     '<div class="three"><label>Temperature <small>留空用全局</small><input type="number" step="0.05" min="0" max="2" data-cfg-agent="'+name+'" data-key="temperature" value="'+esc(a.temperature??"")+'"/></label>'+
     '<label>每轮带上多少条历史<input type="number" min="0" max="200" data-agent-history="'+name+'" value="'+esc(def.history)+'"/></label>'+
@@ -229,16 +229,22 @@ const SETTINGS_RENDER={
     '<label>规则 <small>它每一轮都读；改了存进学习库的 agents/'+name+'.md</small><textarea rows="14" data-agent-policy="'+name+'">'+esc(def.policy)+'</textarea></label>'+
     '<div class="inline">'+(d.overridden?button("恢复默认规则","agent-reset",'data-name="'+name+'"',"ghost sm"):"")+button("测试连接","cfg-test",'data-agent="'+name+'"',"ghost sm")+'</div></details>');
   }
-  return '<h3>四个 AI</h3><p class="muted">工具、历史条数和规则改了会存进学习库的 agents/；所有 AI 都还会先读学习库的规矩（AGENTS.md）。</p>'+cards.join("")+'<div class="test-result" id="cfg-test-result"></div>'+saveBar();
+  return '<h3>四个 AI</h3><p class="muted">工具、历史条数和规则改了会存进学习库的 agents/；所有 AI 都还会先读学习库的规矩（AGENTS.md）。连接在「模型连接」里加和改。</p>'+cards.join("")+'<div class="test-result" id="cfg-test-result"></div>'+
+   c.apis.map(x=>'<datalist id="models-'+esc(x.id)+'">'+(x.models||[]).map(m=>'<option value="'+esc(m)+'">').join("")+'</datalist>').join("")+saveBar();
  },
  apis(c){
-  return '<h3>模型连接</h3><p class="muted">都是 OpenAI 兼容的 Chat Completions。每个连接各存一份 Key；Key 只保存在本机，界面拿不到它。</p>'+c.apis.map(a=>'<details class="api" open><summary><b>'+esc(a.label)+'</b><span class="muted">Key：'+esc(a.key_source)+'</span></summary>'+
-   '<label>Base URL<input data-cfg-api="'+a.id+'" data-key="base_url" value="'+esc(a.base_url)+'" placeholder="https://…/v1"/></label>'+
-   '<label>API Key <small>留空表示不改</small><input type="password" autocomplete="new-password" data-cfg-api="'+a.id+'" data-key="api_key" placeholder="'+(a.has_key?"已保存，不会回传":"sk-…")+'"/></label>'+
-   '<div class="two"><label>请求头 <small>{session} 会换成会话 id</small><textarea rows="2" data-cfg-api="'+a.id+'" data-key="headers">'+esc(JSON.stringify(a.headers))+'</textarea></label>'+
-   '<label>附加参数<textarea rows="2" data-cfg-api="'+a.id+'" data-key="extra_body">'+esc(JSON.stringify(a.extra_body))+'</textarea></label></div>'+
-   button("清除本机 Key","cfg-clear-key",'data-api="'+a.id+'"',"ghost xs")+'</details>').join("")+
-   '<div class="two"><label>超时（秒）<input type="number" data-cfg="timeout" value="'+esc(c.timeout)+'"/></label><label>全局 Temperature<input type="number" step="0.05" data-cfg="temperature" value="'+esc(c.temperature)+'"/></label></div>'+saveBar();
+  /* Two columns: every provider on the left, the chosen one on the right with its key first. */
+  const groups=["本机","聚合","国内","云服务","自定义"],ready=a=>a.auth!=="none"&&a.has_key;
+  const q=(Settings.apiQuery||"").trim().toLowerCase();
+  const list=c.apis.filter(a=>!q||(a.label+a.id).toLowerCase().includes(q));
+  const pick=c.apis.find(a=>a.id===Settings.openApi)||c.apis.find(ready)||c.apis[0];
+  const left='<div class="prov-list"><input class="side-input" data-api-query placeholder="搜供应商…" value="'+esc(Settings.apiQuery||"")+'"/>'+
+   (list.some(ready)?'<div class="prov-group">已填好</div>'+list.filter(ready).map(a=>provRow(a,pick)).join(""):"")+
+   groups.map(g=>{const l=list.filter(a=>!ready(a)&&(a.group||"自定义")===g);return l.length?'<div class="prov-group">'+esc(g)+'</div>'+l.map(a=>provRow(a,pick)).join(""):"";}).join("")+
+   '<button class="prov-row prov-add" data-action="api-new">'+svg("plus",13)+'<span>自定义连接</span></button></div>';
+  return '<h3>模型连接</h3><p class="muted">左边选一个供应商，右边贴上 API Key 就能用；Key 只保存在本机，界面拿不到它。都走 OpenAI 兼容的 Chat Completions，其余设置一般不用动。</p>'+
+   '<div class="prov">'+left+'<div class="prov-detail">'+(pick?apiDetail(pick,c):"")+'</div></div>'+
+   '<h3>全局</h3><div class="two"><label>超时（秒）<input type="number" data-cfg="timeout" value="'+esc(c.timeout)+'"/></label><label>全局 Temperature<input type="number" step="0.05" data-cfg="temperature" value="'+esc(c.temperature)+'"/></label></div>'+saveBar();
  },
  web(c){
   return '<h3>联网</h3><p class="muted">AI 有两个联网接口：搜索和读网页。什么时候查由它判断；来源列在回复下面，并记进轨迹。读网页不会访问本机和局域网地址。</p>'+
@@ -281,7 +287,7 @@ const SETTINGS_RENDER={
    '<p class="muted">发送键在「外观与交互」里改。</p>';
  },
 };
-const Settings={env:"default"};
+const Settings={env:"default",tests:{}};
 function saveBar(){return '<div class="settings-save"><span class="save-state">'+svg("check",13)+' 改了就自动保存</span></div>';}
 /* Every setting saves itself shortly after it changes; text fields wait until typing pauses. */
 const Autosave={timers:{}};
@@ -297,12 +303,14 @@ function settingsAutosave(t,changed){
  const node=t.closest?.(".panel-settings");if(!node)return false;
  const delay=changed?250:900;
  if(t.matches("[data-cfg],[data-cfg-agent],[data-cfg-api],[data-cfg-web],[data-runner]")){
-  if(!changed&&t.type==="password")return true;
+  if(!changed&&t.type==="password"&&t.value.length<8)return true;
   autosave(node,"cfg",async()=>{
    const secret=all("input[type=password]",node).some(i=>i.value);
    S.config=await rpc("settings_save",{config:collectSettings(node)});
    Object.keys(Chat).forEach(updateComposer);
-   if(secret)renderSettings(node,node.querySelector(".settings").dataset.page);
+   // A new key, or a different way of sending it, changes what the connection's card shows.
+   if(t.dataset.cfgApi)Settings.openApi=t.dataset.cfgApi;
+   if(secret||t.dataset.key==="auth")renderSettings(node,node.querySelector(".settings").dataset.page);
   },delay);
   return true;
  }
@@ -333,17 +341,64 @@ function collectSettings(node){
  if(runners.length){cfg.runners={};runners.forEach(i=>{if(i.value.trim())cfg.runners[i.dataset.runner]=i.value.trim();});}
  return cfg;
 }
-async function saveSettings(node){
+async function saveSettings(node,quiet=false){
  S.config=await rpc("settings_save",{config:collectSettings(node)});
+ if(quiet)return;
  toast("设置已保存");refreshChats();renderSettings(node,node.querySelector(".settings").dataset.page);
 }
-function settingsTestResult(evt){const box=el("#cfg-test-result");const text=(evt.ok?"✓ ":"连接失败：")+evt.message;if(box)box.textContent=text;toast(text,evt.ok?"info":"error");}
+function provRow(a,pick){
+ const state=a.auth==="none"?"local":a.has_key?"on":"off";
+ return '<button class="prov-row'+(a.id===pick?.id?" on":"")+'" data-action="api-pick" data-api="'+esc(a.id)+'"><i class="prov-dot '+state+'"></i><span>'+esc(a.label)+'</span>'+
+  (a.models?.length?'<small>'+a.models.length+'</small>':"")+'</button>';
+}
+function apiDetail(a,c){
+ const f=(key,label,attrs="",val=a[key])=>'<label>'+label+'<input data-cfg-api="'+esc(a.id)+'" data-key="'+key+'" value="'+esc(val??"")+'" '+attrs+'/></label>';
+ const users=Object.values(c.agents||{}).filter(x=>x.api===a.id).map(x=>x.title),models=a.models||[],test=Settings.tests[a.id];
+ const head='<div class="prov-head"><b>'+esc(a.label)+'</b>'+(users.length?'<span class="chip on">'+esc(users.join("、"))+'在用</span>':"")+'<span class="grow"></span>'+
+  (a.key_url?'<a class="btn ghost xs" data-action="open-url" data-url="'+esc(a.key_url)+'">'+svg("external",12)+' 去获取 Key</a>':"")+'</div>'+(a.note?'<p class="muted small">'+esc(a.note)+'</p>':"");
+ if(a.managed)return head+'<p class="muted">这是本机的 LocalRouter，由 <code>'+esc(c.localrouter.config)+'</code> 接入：Token 从文件里读，不用贴 Key。'+esc(a.key_source)+'。连不上时这次会改用别的连接，并提示一句。</p>'+
+  (a.model?f("model","默认模型","disabled"):"")+'<div class="inline">'+button("测试","api-test",'data-api="'+esc(a.id)+'"',"primary sm")+testLine(a.id,test)+'</div>';
+ const key=a.auth==="none"?'<p class="muted">本机服务，不需要 Key；确认地址对、服务开着就能用。</p>':
+  '<label class="key-field">API Key <small>'+esc(a.has_key?(a.key_source==="本机配置"?"已保存，不会回传；贴新的就替换":"正在用"+a.key_source):"贴进来，自动保存")+'</small>'+
+  '<input type="password" autocomplete="new-password" data-cfg-api="'+esc(a.id)+'" data-key="api_key" placeholder="'+(a.has_key?"••••••••":"sk-…")+'"/></label>';
+ return head+key+
+  '<div class="inline">'+button((models.length?"重新读取":"测试并读取")+"模型列表","api-test",'data-api="'+esc(a.id)+'"',"primary sm")+testLine(a.id,test)+'<span class="grow"></span>'+
+   (a.has_key&&a.key_source==="本机配置"?button("清除 Key","cfg-clear-key",'data-api="'+esc(a.id)+'"',"ghost xs"):"")+'</div>'+
+  f("model","默认模型 <small>选这个连接时默认用它</small>",'list="models-'+esc(a.id)+'"')+
+  (models.length?'<div class="field-label">可用的模型 · '+models.length+' <small>点一个设为默认</small></div><div class="model-chips">'+models.map(m=>'<button class="chip'+(m===a.model?" on":"")+'" data-action="api-use-model" data-api="'+esc(a.id)+'" data-model="'+esc(m)+'">'+esc(m)+'</button>').join("")+'</div>':"")+
+  '<datalist id="models-'+esc(a.id)+'">'+models.map(m=>'<option value="'+esc(m)+'">').join("")+'</datalist>'+
+  '<details class="api-more"'+(a.preset==="custom"?" open":"")+'><summary>地址和高级设置</summary>'+
+   (a.preset==="custom"?f("label","名字"):"")+f("base_url","Base URL",'placeholder="https://…/v1"')+
+   '<div class="three"><label>Key 怎么传<select data-cfg-api="'+esc(a.id)+'" data-key="auth">'+opt(a.auth,[["bearer","Bearer（标准）"],["header","放在请求头里"],["none","不需要 Key"]])+'</select></label>'+
+    f("auth_header","请求头名字 <small>如 api-key</small>",a.auth==="header"?"":"disabled")+f("key_env","从环境变量读 Key",'placeholder="例如 OPENAI_API_KEY"')+'</div>'+
+   '<div class="two">'+f("chat_path","对话接口路径",'placeholder="chat/completions"')+f("models_path","模型列表路径 <small>没有就留空</small>",'placeholder="models"')+'</div>'+
+   '<div class="two"><label>请求头 <small>JSON；{session} 会换成会话 id</small><textarea rows="2" data-cfg-api="'+esc(a.id)+'" data-key="headers">'+esc(JSON.stringify(a.headers||{}))+'</textarea></label>'+
+   '<label>附加参数 <small>JSON，合进每次请求</small><textarea rows="2" data-cfg-api="'+esc(a.id)+'" data-key="extra_body">'+esc(JSON.stringify(a.extra_body||{}))+'</textarea></label></div>'+
+   (a.preset==="custom"?'<div class="inline">'+button("删除这个连接","api-delete",'data-api="'+esc(a.id)+'"',"ghost xs")+'</div>':"")+'</details>';
+}
+function testLine(id,test){return '<span class="test-result'+(test&&!test.ok?" bad":"")+'" id="cfg-test-'+esc(id)+'">'+esc(test?.text||"")+'</span>';}
+function settingsTestResult(evt){
+ const box=(evt.api&&el("#cfg-test-"+CSS.escape(evt.api)))||el("#cfg-test-result"),text=(evt.ok?"✓ ":"连接失败：")+evt.message;
+ if(evt.api)Settings.tests[evt.api]={text,ok:evt.ok};
+ if(box){box.textContent=text;box.classList.toggle("bad",!evt.ok);}toast(text,evt.ok?"info":"error");
+ // A model list just read: show it, and offer it when picking a model.
+ if(evt.ok&&evt.models?.length)setTimeout(()=>all(".panel-settings").forEach(n=>{const pg=n.querySelector(".settings")?.dataset.page;if(pg==="apis"||pg==="agents"){Settings.openApi=evt.api;renderSettings(n,pg);}}),300);
+}
 async function settingsAction(kind,a){
  const node=a.closest(".panel"),page=()=>node.querySelector(".settings").dataset.page,again=()=>renderSettings(node,page());
  switch(kind){
  case "settings-page":return renderSettings(node,a.dataset.page);
  case "cfg-save":return saveSettings(node);
  case "cfg-test":await saveSettings(node);el("#cfg-test-result").textContent="正在读取模型列表…";return rpc("test_api",{agent:a.dataset.agent});
+ case "api-pick":Settings.openApi=a.dataset.api;return again();
+ case "api-new":{const taken=new Set((S.config.apis||[]).map(x=>x.id));let i=1;while(taken.has("custom-"+i))i++;const id="custom-"+i;
+  S.config=await rpc("settings_save",{config:{apis:{[id]:{preset:"custom",label:"自定义连接 "+i}}}});Settings.openApi=id;return again();}
+ case "api-test":{await saveSettings(node,true);const box=el("#cfg-test-"+CSS.escape(a.dataset.api));if(box){box.textContent="正在连接…";box.classList.remove("bad");}return rpc("test_api",{api:a.dataset.api});}
+ case "api-use-model":{S.config=await rpc("settings_save",{config:{apis:{[a.dataset.api]:{model:a.dataset.model}}}});Settings.openApi=a.dataset.api;toast("默认模型改成了 "+a.dataset.model);return again();}
+ case "api-delete":{const src=(S.config.apis||[]).find(x=>x.id===a.dataset.api),users=Object.values(S.config.agents||{}).filter(x=>x.api===a.dataset.api).map(x=>x.title);
+  if(users.length)return toast(users.join("、")+"正在用这个连接，先给它们换一个","error");
+  if(!await ask("它的 Key 也会从本机删掉。",{title:"删除连接「"+src.label+"」？",danger:true,ok:"删除"}))return;
+  S.config=await rpc("settings_save",{config:{apis:{[a.dataset.api]:null}}});return again();}
  case "cfg-clear-key":if(!await ask("环境变量里的不受影响。",{title:"清除本机保存的这个 Key？",danger:true,ok:"清除"}))return;await rpc("settings_save",{config:{apis:{[a.dataset.api]:{clear_key:true}}}});return again();
  case "agent-save":{
   const n=a.dataset.name,q=s=>node.querySelector(s);

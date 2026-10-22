@@ -1,0 +1,17 @@
+# LocalRouter connection for Lattice (optional). The real file lives at
+# $XDG_CONFIG_HOME/lattice/localrouter.toml and is written by running once:
+#   lr connect lattice
+# It holds paths and choices only; the token stays in token_file (mode 0600).
+[localrouter]
+enabled = true
+# Probed in order with GET /healthz; the first that answers ok=true is used.
+base_urls = ["http://127.0.0.1:8317", "http://127.0.0.1:29317"]
+token_file = "/home/<you>/.local/share/localrouter/programs/lattice/service-token"
+agent_code = "lattice"
+timeout_seconds = 30
+
+[localrouter.llm]
+# Empty means <first healthy base_url>/v1.
+base_url = ""
+pack = ""
+model = "deepseek-v4.1-flash"

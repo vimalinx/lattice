@@ -1050,6 +1050,8 @@ class Bridge(QObject):
         return {"thread": thread, "state": "queued"}
 
     def _turn(self, agent, thread, topic, practice, conn, system, history, user, allowed):
+        if conn.get("notice"):
+            self.announce({"type": "notice", "message": conn["notice"]})
         messages = [{"role": "system", "content": system}]
         messages += [{"role": m["role"], "content": m["content"]} for m in history if m["role"] in ("user", "assistant")]
         messages.append({"role": "user", "content": user})
@@ -1086,6 +1088,8 @@ class Bridge(QObject):
             self._finish(evt)
         elif evt["kind"] == "error":
             self.status[thread] = "error"
+        elif evt["kind"] == "connection_test" and evt.get("ok") and evt.get("models") and evt.get("api"):
+            self.config.remember_models(evt["api"], evt["models"])
         self.announce(evt)
 
     def run_tool(self, thread, name, arguments, reply):
@@ -1265,9 +1269,11 @@ class Bridge(QObject):
     def rpc_settings_save(self, config):
         return self.config.save(config)
 
-    def rpc_test_api(self, agent="tutor"):
+    def rpc_test_api(self, agent="tutor", api=None):
+        """Check a connection (or the one an agent uses): its model list, or one tiny request when it has none."""
         self.tests = [w for w in self.tests if w.isRunning()]
-        worker = ApiWorker(agent, "", self.config.agent(agent), [], test=True)
+        conn = self.config.connection(api) if api else self.config.agent(agent)
+        worker = ApiWorker(agent, "", conn, [], test=True)
         self.tests.append(worker)
         worker.event.connect(self.api_event)
         worker.start()

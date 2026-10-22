@@ -174,6 +174,7 @@ async function onEvent(evt){
  if(evt.type==="agent")return chatEvent(evt);
  if(evt.type==="run")return runEvent(evt);
  if(evt.type==="kernel"){kernelEvent(evt);if(["run_finished","batch_finished"].includes(evt.kind))journalsChanged();return;}
+ if(evt.type==="notice"){toast(evt.message);return;}
  if(evt.type==="ui"){const result=await runUiOps(evt.ops);return rpc("ui_done",{request:evt.request,result});}
  if(evt.type==="changed"){fileChanged(evt);embedsChanged(evt.paths);if(evt.paths.some(p=>p.startsWith("skills/")))skillsChanged();sideChanged(evt.paths);mapsChanged();journalsChanged();homesChanged();if(evt.external||evt.paths.some(p=>/^(topics|cards|lessons|notes|insights|notebooks)\//.test(p)))refreshState();return;}
  if(evt.type==="open"){openFile(evt.path,{line:evt.line,highlight:evt.highlight,cell:evt.cell});return;}
@@ -361,6 +362,7 @@ function initInteractions(){
    if(t.value==="/"){t.value="";if(Chat[pid])Chat[pid].input="";safe(()=>skillMenu(pid,t.closest(".capsule")||t));}
    return;}
   if(t.dataset.uiRange){S.ui[t.dataset.uiRange]=Number(t.value);const out=t.parentElement.querySelector("[data-range-out]");if(out)out.textContent=t.value+" 字";applyUi();return saveUi();}
+  if(t.dataset.apiQuery!==undefined){Settings.apiQuery=t.value;const n=t.closest(".panel");renderSettings(n,"apis").then(()=>{const f=n.querySelector("[data-api-query]");if(f){f.focus();f.setSelectionRange(f.value.length,f.value.length);}});return;}
   if(t.closest?.(".panel-settings")&&settingsAutosave(t,false))return;
   if(t.dataset.sideInput&&sideInput(t))return;
   if(t.dataset.libQuery&&libraryInput(t))return;
