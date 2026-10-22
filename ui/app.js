@@ -1,6 +1,12 @@
 "use strict";
 /* Boot, the top bar, routing of backend events and clicks, and reporting what is on screen. */
-const Sel={text:"",timer:null};
+const Sel={text:"",timer:null,el:null};
+/* Selected text is only context until the learner hands it to a conversation; letting go of it clears it everywhere. */
+function clearSelection(){
+ Sel.text="";hidePop();
+ if(Sel.el?.setSelectionRange&&Sel.el.isConnected)Sel.el.setSelectionRange(Sel.el.selectionEnd,Sel.el.selectionEnd);
+ Sel.el=null;window.getSelection()?.removeAllRanges();reportScreen();
+}
 async function refreshState(){
  const st=await safe(()=>rpc("state"));if(!st)return;
  Object.assign(S.data,st);renderTop();sideChanged([]);homesChanged();
@@ -20,8 +26,9 @@ function renderStatus(){
 function renderTop(){renderStatus();renderActivity();}
 /* Interface preferences live in the machine's config; appearance applies at once. */
 // Reading width in characters of body text, so headings and paragraphs share one column and it widens with the text.
-const READ_WIDTH={narrow:34,medium:42,wide:54,none:0};
-function readWidth(name){const chars=READ_WIDTH[name]??READ_WIDTH.medium;return chars?Math.round(chars*(Number(S.ui.font_size)||14.5))+"px":"none";}
+const READ_WIDTH={narrow:34,medium:42,wide:54};
+function readChars(v){if(v==="none"||v===0)return 0;return Math.min(120,Math.max(20,Number(v)||READ_WIDTH[v]||42));}
+function readWidth(v){const chars=readChars(v);return chars?Math.round(chars*(Number(S.ui.font_size)||14.5))+"px":"none";}
 function applyUi(){
  const u=S.ui,root=document.documentElement;
  root.dataset.theme=u.theme==="light"?"light":"dark";root.dataset.density=u.density||"comfortable";
@@ -204,6 +211,9 @@ async function onAction(a){
  case "chat-topic-menu":return topicMenu(pid,a);
  case "chat-attach":return attachMenu(pid,a);
  case "chat-attach-add":{const st=Chat[pid];if(st&&!st.attach.some(x=>x.path===a.dataset.path))st.attach.push({path:a.dataset.path});updateComposer(pid);return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
+ case "chat-attach-pick":{const paths=await rpc("attach_files",{},0);const st=Chat[pid];if(!paths?.length||!st)return;
+  paths.forEach(x=>{if(!st.attach.some(y=>y.path===x))st.attach.push({path:x});});await refreshState();updateComposer(pid);return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
+ case "chat-attach-sel":{const st=Chat[pid];if(st&&Sel.text){st.quote=Sel.text;clearSelection();updateComposer(pid);}return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
  case "chat-attach-remove":Chat[pid]?.attach.splice(Number(a.dataset.index),1);return updateComposer(pid);
  case "chat-model":return modelMenu(pid,a.closest(".menu")?Dock.els[pid]?.querySelector(".model-tag")||a:a);
  case "chat-model-set":return setChatModel(pid,a.dataset.api,a.dataset.model);
@@ -213,8 +223,12 @@ async function onAction(a){
  case "chat-more":return chatMoreMenu(pid,a);
  case "view-step":case "view-set":case "view-reset":case "ui-set":case "ui-step":{
   const again=Menus.reopen,key=a.dataset.key,p=Dock.panels[pid];
-  if(kind==="view-step"){if(key==="zoom")stepZoom(pid,Number(a.dataset.dir));else setView(pid,key,Math.round(Math.min(2.4,Math.max(1.3,(Number(viewOf(p,key))||1.8)+Number(a.dataset.dir)*.1))*100)/100);}
-  else if(kind==="view-set")setView(pid,key,a.dataset.value);
+  if(kind==="view-step"){
+   if(key==="zoom")stepZoom(pid,Number(a.dataset.dir));
+   else if(key==="read_width")setView(pid,key,Math.min(120,Math.max(20,(readChars(viewOf(p,key))||42)+Number(a.dataset.dir)*2)));
+   else setView(pid,key,Math.round(Math.min(2.4,Math.max(1.3,(Number(viewOf(p,key))||1.8)+Number(a.dataset.dir)*.1))*100)/100);
+  }
+  else if(kind==="view-set")setView(pid,key,key==="read_width"&&a.dataset.value==="toggle"?(readChars(viewOf(p,key))?"none":readChars(S.ui.read_width)||42):a.dataset.value);
   else if(kind==="view-reset"){setZoom(pid,null);VIEW_KEYS.forEach(k=>setView(pid,k,null));}
   else{
    const step={font_size:[.5,11,24],code_font_size:[.5,10,24]}[key];
@@ -252,12 +266,13 @@ async function onAction(a){
  case "code-take":{const n=el("#"+a.dataset.target);if(!n)return;const ext=CODE_EXT[(a.dataset.lang||"").toLowerCase()]||".txt";
   const name=prompt("存成哪个文件（放在 code/ 里）：","片段-"+new Date().toLocaleTimeString("zh-CN",{hour12:false}).replace(/:/g,"")+ext);if(!name)return;
   const r=await rpc("file_create",{folder:"code",name,content:n.textContent});await refreshState();return openFile(r.path);}
- case "sel-clear":Sel.text="";Object.keys(Chat).forEach(updateComposer);return;
+ case "quote-clear":if(Chat[pid])Chat[pid].quote="";return updateComposer(pid);
  case "ask-flash":case "ask-tutor":{
-  const agent=kind==="ask-flash"?"flash":"tutor",text=Sel.text;hidePop();
+  // Hands the selection to that conversation's input and waits for the learner's own question.
+  const agent=kind==="ask-flash"?"flash":"tutor",text=Sel.text;clearSelection();
   let target=Object.keys(Chat).find(x=>Dock.panels[x]?.agent===agent&&!Dock.panels[x].thread);
   if(!target)target=openPanel({type:"chat",agent});else activate(target);
-  const go=()=>Chat[target]?.thread?chatSend(target,agent==="flash"?"请解释我选中的内容，结合我正在看的东西给一个容易懂的例子。":"请结合我正在学的内容，讲讲我选中的这段。",{selection:text}):setTimeout(go,200);
+  const go=()=>{if(!Chat[target]?.data)return setTimeout(go,150);Chat[target].quote=text;updateComposer(target);Dock.els[target]?.querySelector(".composer textarea")?.focus();};
   return go();
  }
  case "organizer-dismiss":Organizer.text="";return renderOrganizer();
@@ -287,8 +302,8 @@ function onSelect(e){
  const t=e.target;let text="",rect=null;
  if(t.tagName==="TEXTAREA"||t.tagName==="INPUT"){text=t.value?.slice(t.selectionStart,t.selectionEnd)||"";rect=t.getBoundingClientRect();}
  else{const s=window.getSelection();text=s?.toString()||"";if(s?.rangeCount)rect=s.getRangeAt(0).getBoundingClientRect();}
- if(!text.trim()){hidePop();return;}
- Sel.text=text.slice(0,5000);Object.keys(Chat).forEach(updateComposer);reportScreen();
+ if(!text.trim()){if(Sel.text)clearSelection();else hidePop();return;}
+ Sel.text=text.slice(0,5000);Sel.el=t.tagName==="TEXTAREA"||t.tagName==="INPUT"?t:null;reportScreen();
  if(!rect||S.ui.selection_popup===false)return;hidePop();
  const pop=h('<div id="sel-pop"><button data-action="ask-flash">'+svg("spark",13)+' 问快答</button><button data-action="ask-tutor">'+svg("bot",13)+' 问主会话</button></div>');
  document.body.appendChild(pop);
@@ -311,6 +326,8 @@ function initInteractions(){
   const t=e.target;
   if(t.id==="palette-q")return paletteFilter(t.value);
   if(t.dataset.composer){if(Chat[t.dataset.composer])Chat[t.dataset.composer].input=t.value;fitComposer(t.dataset.composer);return;}
+  if(t.dataset.uiRange){S.ui[t.dataset.uiRange]=Number(t.value);const out=t.parentElement.querySelector("[data-range-out]");if(out)out.textContent=t.value+" 字";applyUi();return saveUi();}
+  if(t.closest?.(".panel-settings")&&settingsAutosave(t,false))return;
   if(t.dataset.sideInput&&sideInput(t))return;
   if(fileInput(t))reportScreen();
  });

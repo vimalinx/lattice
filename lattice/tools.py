@@ -460,7 +460,7 @@ UI_OP = {"type": "object", "properties": {"do": {"type": "string", "enum": ["ope
       "- move：把 panel 移到 to 旁边，where 同上。\n"
       "- layout：整个替换布局。spec 是 {\"split\": \"h\"或\"v\", \"sizes\": [0.5, 0.5], \"parts\": [spec, ...]}，叶子是 {\"tabs\": [面板, ...]}；面板可以是已有面板的 id，也可以是一个 open 那样的对象。\n"
       "- preset：套用学习者存过的布局 name。sidebar：切到左栏的 section（topics、cards、notes、lessons、work、practice、files、search），open 为 false 时收起。\n"
-      "- set：改外观，key 是 theme（dark / light）、font_size、code_font_size、line_height、read_width（narrow / medium / wide / none）、density（compact / comfortable）；"
+      "- set：改外观，key 是 theme（dark / light）、font_size、code_font_size、line_height、read_width（一行最多多少字，20～120，或 none 不限）、density（compact / comfortable）；"
       "key 为 zoom 时只改 panel 那一个窗口的大小，value 是倍数（1.2 即 120%）；给了 panel 的 line_height、read_width 也只改那一个窗口；value 为 null 恢复默认。\n"
       "界面只决定显示什么，不代表学习库里有什么：要知道有哪些卡片、笔记、主题、练习，用 list、graph 或 read 去查，不要从面板上推断。\n"
       "学习者可以一键还原你改动前的界面。正在打字的面板不要关、不要挪。", {"ops": {"type": "array", "items": UI_OP}}, ["ops"])

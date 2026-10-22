@@ -101,8 +101,11 @@ const SETTINGS_RENDER={
    '<label>正文字号<input type="number" step="0.5" min="11" max="24" data-ui="font_size" value="'+esc(u.font_size)+'"/></label>'+
    '<label>代码字号<input type="number" step="0.5" min="10" max="24" data-ui="code_font_size" value="'+esc(u.code_font_size)+'"/></label></div>'+
    '<div class="three"><label>行距<input type="number" step="0.05" min="1.3" max="2.4" data-ui="line_height" value="'+esc(u.line_height)+'"/></label>'+
-   '<label>阅读宽度 <small>对话和文档正文一行最多多宽</small><select data-ui="read_width">'+opt(u.read_width,[["narrow","窄 · 约 32 字"],["medium","中 · 约 40 字"],["wide","宽 · 约 52 字"],["none","不限"]])+'</select></label>'+
    '<label>密度<select data-ui="density">'+opt(u.density,[["comfortable","舒适"],["compact","紧凑"]])+'</select></label></div>'+
+   '<div class="field-label">阅读宽度 <small>对话和文档正文一行最多多少字；某个窗口还能在它的 ⋯ 菜单里单独调</small></div>'+
+   '<div class="range-row"><input type="range" min="20" max="120" step="1" data-ui-range="read_width" value="'+(readChars(u.read_width)||42)+'"'+(readChars(u.read_width)?"":" disabled")+'/>'+
+   '<b data-range-out="read_width">'+(readChars(u.read_width)?readChars(u.read_width)+" 字":"不限")+'</b>'+
+   '<label class="check inline-check"><input type="checkbox" data-read-unlimited'+(readChars(u.read_width)?"":" checked")+'/> 不限</label></div>'+
    '<h3>每种窗口的大小</h3><p class="muted">新开的窗口按这里的比例显示，文字、代码、间距和图标一起缩放。某一个窗口还可以单独调：鼠标放在它上面按 Ctrl + 滚轮，或者聚焦后按 Ctrl + = / Ctrl + - / Ctrl + 0，标签上右键也能调；单独调过的会在标签上显示百分比，存布局时一起存下。</p>'+
    '<div class="zoom-grid">'+ZOOM_KINDS.map(([k,t])=>'<label>'+esc(t)+'<span class="unit"><input type="number" step="5" min="60" max="250" data-zoom-kind="'+k+'" value="'+Math.round((Number(u.zoom?.[k])||1)*100)+'"/>%</span></label>').join("")+'</div>'+
    (Object.values(Dock.panels).some(p=>p.zoom)?'<div class="inline"><span class="muted">有 '+Object.values(Dock.panels).filter(p=>p.zoom).length+' 个窗口单独调过大小。</span>'+button("全部恢复成各自的默认","zoom-reset-all","","ghost sm")+'</div>':"")+
@@ -111,7 +114,7 @@ const SETTINGS_RENDER={
    '<label class="check"><input type="checkbox" data-ui="selection_popup"'+(u.selection_popup?" checked":"")+'/> 选中文字时出现「问快答 / 问主会话」</label>'+
    '<label class="check"><input type="checkbox" data-cfg="agent_auto_organize"'+(c.agent_auto_organize?" checked":"")+'/> 关掉随手写的记录或代码后，自动交给 AI 整理</label>'+
    '<label>停下多少秒后提交我的编辑<input type="number" min="5" max="3600" data-cfg="commit_idle" value="'+esc(c.commit_idle)+'"/></label>'+
-   '<p class="muted">外观改了立刻生效；交互和提交间隔点下面的保存。</p>'+saveBar();
+   saveBar();
  },
  layout(){
   const u=S.ui,presets=Object.keys(u.presets||{});
@@ -138,9 +141,9 @@ const SETTINGS_RENDER={
     '<label class="check"><input type="checkbox" data-agent-blocks="'+name+'"'+(def.blocks?" checked":"")+'/> 能用展示块</label></div>'+
     '<div class="field-label">能用的工具</div><div class="tool-grid">'+d.tools.map(t=>'<label class="check" title="'+esc(t.description)+'"><input type="checkbox" data-agent-tool="'+name+'" value="'+t.name+'"'+(def.tools.includes(t.name)?" checked":"")+'/> '+esc(t.name)+'</label>').join("")+'</div>'+
     '<label>规则 <small>它每一轮都读；改了存进学习库的 agents/'+name+'.md</small><textarea rows="14" data-agent-policy="'+name+'">'+esc(def.policy)+'</textarea></label>'+
-    '<div class="inline">'+button(svg("save",13)+" 保存这个 AI 的规则","agent-save",'data-name="'+name+'"',"primary sm")+(d.overridden?button("恢复默认规则","agent-reset",'data-name="'+name+'"',"ghost sm"):"")+button("测试连接","cfg-test",'data-agent="'+name+'"',"ghost sm")+'</div></details>');
+    '<div class="inline">'+(d.overridden?button("恢复默认规则","agent-reset",'data-name="'+name+'"',"ghost sm"):"")+button("测试连接","cfg-test",'data-agent="'+name+'"',"ghost sm")+'</div></details>');
   }
-  return '<h3>四个 AI</h3><p class="muted">模型连接点下面的「保存设置」；工具、历史条数和规则点各自的「保存这个 AI 的规则」。所有 AI 都还会先读学习库的规矩（AGENTS.md）。</p>'+cards.join("")+'<div class="test-result" id="cfg-test-result"></div>'+saveBar();
+  return '<h3>四个 AI</h3><p class="muted">工具、历史条数和规则改了会存进学习库的 agents/；所有 AI 都还会先读学习库的规矩（AGENTS.md）。</p>'+cards.join("")+'<div class="test-result" id="cfg-test-result"></div>'+saveBar();
  },
  apis(c){
   return '<h3>模型连接</h3><p class="muted">都是 OpenAI 兼容的 Chat Completions。每个连接各存一份 Key；Key 只保存在本机，界面拿不到它。</p>'+c.apis.map(a=>'<details class="api" open><summary><b>'+esc(a.label)+'</b><span class="muted">Key：'+esc(a.key_source)+'</span></summary>'+
@@ -168,7 +171,7 @@ const SETTINGS_RENDER={
    '<h3>Python 环境</h3>'+(env?'<div class="inline"><select data-env-pick>'+opt(env.name,env.names.map(n=>[n,n]))+'</select><input data-env-new placeholder="新环境的名字"/>'+button("新建环境","env-create","","ghost xs")+'</div>'+
    '<p class="muted">'+(env.ready?"已建好":"第一次用时自动建好")+' · 定义在 '+esc(env.definition)+'。在某个目录里放一个内容是环境名的 .lattice-env 文件，那个目录下的文件就用这个环境。</p>'+
    '<label>这个环境里的包（一行一个，可以带版本）<textarea rows="6" data-env-text>'+esc(env.wanted.join("\n"))+'</textarea></label>'+
-   '<div class="inline">'+button(svg("save",13)+" 保存环境定义","env-save","","ghost sm")+'<input data-env-install placeholder="现在就装：包名，空格分开"/>'+button("安装","env-install","","ghost sm")+'</div>'+
+   '<div class="inline"><input data-env-install placeholder="现在就装：包名，空格分开"/>'+button("安装","env-install","","ghost sm")+'</div>'+
    (env.installed.length?'<details><summary class="muted">已经装了 '+env.installed.length+' 个包</summary><p class="small muted">'+env.installed.map(x=>esc(x.name+" "+x.version)).join("、")+'</p></details>':""):"")+
    '<h3>沙箱</h3><p class="'+(S.data.sandbox?.ok?"muted":"warn")+'">'+(S.data.sandbox?.ok?svg("shield",13)+" 沙箱可用（bubblewrap）。AI 的命令和运行都在里面：学习库可写，挂载的目录只读，看不到家目录的其余部分，不联网。":esc(S.data.sandbox?.why||""))+'</p>'+
    '<label>沙箱里额外可见的只读路径 <small>一行一个，比如装在家目录里的工具链</small><textarea rows="2" data-cfg="sandbox_paths">'+esc((c.sandbox_paths||[]).join("\n"))+'</textarea></label>'+saveBar();
@@ -184,7 +187,7 @@ const SETTINGS_RENDER={
  async rules(){
   const r=await rpc("rules");
   return '<h3>学习库的规矩</h3><p class="muted">学习库根目录的 AGENTS.md：目录约定、属性格式、谁能改什么。每个 AI 每一轮都先读它。</p><textarea rows="26" data-rules>'+esc(r.text)+'</textarea>'+
-   '<div class="inline">'+button(svg("save",13)+" 保存规矩","rules-save","","primary sm")+button("恢复成默认的规矩","rules-reset","","ghost sm")+button("在编辑器里打开","open-file",'data-path="AGENTS.md"',"ghost sm")+'</div>';
+   '<div class="inline">'+button("恢复成默认的规矩","rules-reset","","ghost sm")+button("在编辑器里打开","open-file",'data-path="AGENTS.md"',"ghost sm")+'</div>'+saveBar();
  },
  keys(){
   const send=S.ui.send_key==="ctrl"?"Ctrl + Enter 发送，Enter 换行":"Enter 发送，Shift + Enter 换行";
@@ -193,7 +196,41 @@ const SETTINGS_RENDER={
  },
 };
 const Settings={env:"default"};
-function saveBar(){return '<div class="settings-save">'+button(svg("save",14)+" 保存设置","cfg-save","","primary")+'</div>';}
+function saveBar(){return '<div class="settings-save"><span class="save-state">'+svg("check",13)+' 改了就自动保存</span></div>';}
+/* Every setting saves itself shortly after it changes; text fields wait until typing pauses. */
+const Autosave={timers:{}};
+function saveState(node,text,bad=false){const s=node?.querySelector(".save-state");if(s){s.innerHTML=svg(bad?"info":"check",13)+" "+esc(text);s.classList.toggle("bad",bad);}else if(bad)toast(text,"error");}
+function autosave(node,key,fn,delay){
+ clearTimeout(Autosave.timers[key]);saveState(node,"正在保存…");
+ Autosave.timers[key]=setTimeout(async()=>{
+  try{await fn();saveState(node,"已自动保存 · "+new Date().toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit",second:"2-digit"}));}
+  catch(e){saveState(node,"没有保存："+e.message,true);}
+ },delay);
+}
+function settingsAutosave(t,changed){
+ const node=t.closest?.(".panel-settings");if(!node)return false;
+ const delay=changed?250:900;
+ if(t.matches("[data-cfg],[data-cfg-agent],[data-cfg-api],[data-cfg-web],[data-runner]")){
+  if(!changed&&t.type==="password")return true;
+  autosave(node,"cfg",async()=>{
+   const secret=all("input[type=password]",node).some(i=>i.value);
+   S.config=await rpc("settings_save",{config:collectSettings(node)});
+   Object.keys(Chat).forEach(updateComposer);
+   if(secret)renderSettings(node,node.querySelector(".settings").dataset.page);
+  },delay);
+  return true;
+ }
+ const agent=t.dataset.agentHistory||t.dataset.agentBlocks||t.dataset.agentTool||t.dataset.agentPolicy;
+ if(agent){
+  autosave(node,"agent:"+agent,async()=>{const q=s=>node.querySelector(s);
+   await rpc("agent_save",{name:agent,history:Number(q('[data-agent-history="'+agent+'"]').value),blocks:q('[data-agent-blocks="'+agent+'"]').checked,
+    tools:all('[data-agent-tool="'+agent+'"]',node).filter(i=>i.checked).map(i=>i.value),policy:q('[data-agent-policy="'+agent+'"]').value});},changed?250:1500);
+  return true;
+ }
+ if(t.dataset.envText!==undefined){autosave(node,"env",()=>rpc("env_save",{name:Settings.env,text:t.value}),changed?250:1500);return true;}
+ if(t.dataset.rules!==undefined){autosave(node,"rules",()=>rpc("rules_save",{text:t.value}),changed?250:1500);return true;}
+ return false;
+}
 function collectSettings(node){
  const cfg={};
  all("[data-cfg-agent]",node).forEach(i=>{cfg.agents=cfg.agents||{};(cfg.agents[i.dataset.cfgAgent]=cfg.agents[i.dataset.cfgAgent]||{})[i.dataset.key]=i.type==="number"?(i.value===""?null:Number(i.value)):i.value;});
@@ -252,6 +289,8 @@ async function settingsAction(kind,a){
 }
 const ZOOM_KINDS=[["chat:tutor","主会话"],["chat:flash","快答"],["chat:coach","练习教练"],["file","文件"],["home","开始"],["map","知识图"],["journal","学习轨迹"],["review","回顾"],["settings","设置"]];
 function settingsChange(t){
+ if(t.dataset.readUnlimited!==undefined){S.ui.read_width=t.checked?"none":42;applyUi();saveUi();renderSettings(t.closest(".panel"),"look");return true;}
+ if(t.dataset.uiRange){S.ui[t.dataset.uiRange]=Number(t.value);applyUi();saveUi();return true;}
  if(t.dataset.zoomKind){const v=Math.max(60,Math.min(250,Number(t.value)||100))/100;S.ui.zoom={...(S.ui.zoom||{}),[t.dataset.zoomKind]:v};applyUi();saveUi();return true;}
  if(t.dataset.ui){const k=t.dataset.ui;S.ui[k]=t.type==="checkbox"?t.checked:t.type==="number"?Number(t.value):t.value;applyUi();saveUi();
   if(k==="thinking")Object.keys(Chat).forEach(x=>{Chat[x].thoughts={};Chat[x].liveOpen=null;renderChat(x);});return true;}
@@ -259,6 +298,6 @@ function settingsChange(t){
  if(t.dataset.sideWidth!==undefined){S.ui.side.width=Math.max(180,Math.min(560,Number(t.value)));saveUi();renderSide();return true;}
  if(t.dataset.sideShow){const k=t.dataset.sideShow,hidden=new Set(S.ui.side.hidden||[]);t.checked?hidden.delete(k):hidden.add(k);S.ui.side.hidden=[...hidden];if(!t.checked&&S.ui.side.section===k)S.ui.side.section=sideOrder()[0];saveUi();renderSide();return true;}
  if(t.dataset.envPick!==undefined){Settings.env=t.value;renderSettings(t.closest(".panel"),"run");return true;}
- if(t.dataset.cfgAgent&&t.dataset.key==="api"){const api=S.config.apis.find(x=>x.id===t.value);const m=t.closest(".agent-edit").querySelector('[data-key="model"]');if(api?.default_model&&m)m.value=api.default_model;return true;}
- return false;
+ if(t.dataset.cfgAgent&&t.dataset.key==="api"){const api=S.config.apis.find(x=>x.id===t.value);const m=t.closest(".agent-edit").querySelector('[data-key="model"]');if(api?.default_model&&m)m.value=api.default_model;}
+ return settingsAutosave(t,true);
 }

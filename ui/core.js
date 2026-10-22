@@ -80,6 +80,12 @@ function logo(){
  return '<svg viewBox="0 0 128 128" fill="none" aria-hidden="true"><path d="M26 90 55 31 91 85M55 31l43 25M26 90l72-34" stroke="#83e2c7" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/><circle cx="55" cy="31" r="9" fill="#eef9f4"/><circle cx="26" cy="90" r="9" fill="#eef9f4"/><circle cx="91" cy="85" r="9" fill="#eef9f4"/><circle cx="98" cy="56" r="8" fill="#eef9f4"/></svg>';
 }
 /* ```mermaid fenced blocks render as diagrams instead of code. */
+// CommonMark does not open **bold** between a CJK character and punctuation (就是**「…」**的), which Chinese replies do all the time.
+marked.use({extensions:[{name:"strongCjk",level:"inline",start(src){const i=src.indexOf("**");return i<0?undefined:i;},
+ tokenizer(src,tokens){
+  const prev=tokens?.length?tokens[tokens.length-1].raw.slice(-1):"",m=/^\*\*(?=\S)([\s\S]*?\S)\*\*/.exec(src);
+  if(!m||/[A-Za-z0-9]/.test(prev)||/[A-Za-z0-9]/.test(src[m[0].length]||""))return;
+  if(/[\u3000-\u303f\uff00-\uffef\u4e00-\u9fff]/.test(m[0]))return {type:"strong",raw:m[0],text:m[1],tokens:this.lexer.inlineTokens(m[1])};}}]});
 marked.use({renderer:{code(t){if((t.lang||"").trim().toLowerCase()==="mermaid")return '<div class="mermaid">'+esc(t.text)+'</div>';return false;}}});
 let _mmTimer=null,_mmSeq=0,_mmInited=false;
 function scheduleMermaid(){clearTimeout(_mmTimer);_mmTimer=setTimeout(runMermaid,60);}

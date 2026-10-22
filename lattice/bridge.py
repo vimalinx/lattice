@@ -371,6 +371,23 @@ class Bridge(QObject):
         path = path or QFileDialog.getExistingDirectory(None, "挂载一个本地目录（AI 只读）", str(Path.home()), QFileDialog.Option.ShowDirsOnly)
         return self.lattice.add_project(Path(path).name, path) if path else None
 
+    def rpc_attach_files(self, paths=None):
+        """Copy files chosen on this computer into data/附件/, so they can be attached to a message and read
+        by the agents (whose sandbox sees only the vault and mounted folders). The originals stay untouched."""
+        paths = paths or QFileDialog.getOpenFileNames(None, "附上文件（复制进学习库的 data/附件/）", str(Path.home()))[0]
+        out = []
+        for raw in paths or []:
+            source = Path(raw)
+            if not source.is_file() or source.stat().st_size > 50 * 1024 * 1024:
+                raise ValueError(f"{source.name} 不是文件或超过 50MB")
+            rel = self.lattice.vault.unique("data/附件", source.stem or "附件", source.suffix)
+            self.lattice.vault.write_bytes(rel, source.read_bytes())
+            self.lattice.index.reindex(rel)
+            out.append(rel)
+        if out:
+            self.last_write = time.monotonic()
+        return out
+
     def rpc_project_remove(self, id):
         return self.lattice.remove_project(id)
 

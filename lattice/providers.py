@@ -65,7 +65,7 @@ DEFAULTS = {
     "commit_idle": 30,
     # Everything about the interface: appearance, the sidebar, saved layouts.
     # zoom: each kind of panel's default size ("chat:tutor", "file", ...); a window can still set its own.
-    "ui": {"theme": "dark", "thinking": "collapsed", "font_size": 14.5, "code_font_size": 13, "line_height": 1.8, "read_width": "medium", "zoom": {"chat:tutor": 1.1},
+    "ui": {"theme": "dark", "thinking": "collapsed", "font_size": 14.5, "code_font_size": 13, "line_height": 1.8, "read_width": 42, "zoom": {"chat:tutor": 1.1},
            "density": "comfortable", "send_key": "enter",
            "selection_popup": True, "side": {"open": True, "width": 270, "section": "topics", "order": [], "hidden": []},
            "presets": {}, "default_preset": None},

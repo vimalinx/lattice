@@ -308,6 +308,20 @@ label.check input{margin:0}
 .send-round:hover:not(:disabled){filter:brightness(1.08)}
 .send-round.stop{background:var(--text);color:var(--panel)}
 .btn.pill{border-radius:20px}
+.cap-label{display:none}
+/* The plain input: a hairline above, no box, the tools in a row under the text, full panel width. */
+.panel[data-composer="line"] .composer{border-top:1px solid var(--line-soft);padding:8px 14px 10px}
+.panel[data-composer="line"] .composer:before{display:none}
+.panel[data-composer="line"] .composer>*{max-width:none}
+.panel[data-composer="line"] .capsule{grid-template-areas:"text text text text" "plus . model send";border:0;border-radius:0;background:transparent;box-shadow:none;padding:0;gap:2px}
+.panel[data-composer="line"] .capsule textarea{padding:4px 2px 6px;min-height:3.4em}
+.panel[data-composer="line"] .cap-btn{width:auto;height:28px;border-radius:7px;padding:0 9px 0 6px;display:inline-flex;gap:5px;font-size:12px}
+.panel[data-composer="line"] .cap-label{display:inline;white-space:nowrap}
+@container (max-width: 240px){.panel[data-composer="line"] .cap-label{display:none}}
+.panel[data-composer="line"] .send-round{width:30px;height:30px;border-radius:8px}
+.panel[data-composer="line"] .to-bottom{top:-48px}
+.panel[data-composer="line"] .chat.blank .chat-scroll{margin-top:0;flex:1 1 auto}
+.panel[data-composer="line"] .chat.blank .chat-starters{display:none}
 .to-bottom{position:absolute;top:-46px;left:50%;transform:translateX(-50%);width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--panel-hi);color:var(--muted);display:grid;place-items:center;padding:0;box-shadow:var(--shadow);z-index:2}
 .to-bottom svg{transform:rotate(180deg)}
 .to-bottom:hover{color:var(--text)}
@@ -333,6 +347,8 @@ label.check input{margin:0}
 .ctl{display:flex;align-items:center;gap:4px}
 .ctl b{min-width:46px;text-align:center;font-size:12px;font-weight:600}
 .menu .step{width:30px;height:26px;padding:0;justify-content:center;border:1px solid var(--line);font-weight:600}
+.menu .step.wide{width:auto;padding:0 8px;font-weight:500;font-size:12px}
+.menu .step.on{background:var(--accent-glow);color:var(--accent);border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
 .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .menu .seg button{padding:3px 9px;border-radius:0;font-size:12px;gap:0}
 .menu .seg button+button{border-left:1px solid var(--line)}
@@ -570,6 +586,11 @@ details.api summary span{font-size:11.5px}
 .map,.settings-shell{container-type:inline-size}
 @container (max-width:560px){.map-route{display:none}}
 @container (max-width:620px){.settings-nav{flex-basis:46px}.settings-nav button span{display:none}.settings-nav button{justify-content:center;padding:8px}}
+.range-row{display:flex;align-items:center;gap:12px;margin:4px 0 10px}
+.range-row input[type=range]{flex:1;max-width:360px;padding:0;border:0;background:none;accent-color:var(--accent)}
+.range-row b{min-width:52px;font-size:12.5px}
+.save-state{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);padding:6px 12px;border-radius:8px;background:var(--panel-hi);border:1px solid var(--line-soft)}
+.save-state.bad{color:var(--red)}
 .zoom-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px 14px}
 .zoom-grid label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0}
 .zoom-grid .unit{display:flex;align-items:center;gap:5px}.zoom-grid input{width:68px}

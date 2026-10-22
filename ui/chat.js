@@ -14,7 +14,7 @@ panelType("chat",{side:"ai",icon:p=>AGENT_ICON[p.agent]||"bot",
   const topic=head?.topic;return agentTitle(p.agent)+(topic?" · "+topicTitle(topic):"");
  },
  mount(p,node,pid){
-  Chat[pid]={input:"",stream:"",live:[],waiting:"",error:"",data:null,cache:{},attach:[],opened:new Set(),thoughts:{},...freshThinking()};
+  Chat[pid]={input:"",stream:"",live:[],waiting:"",error:"",data:null,cache:{},attach:[],quote:"",opened:new Set(),thoughts:{},...freshThinking()};
   node.innerHTML='<div class="chat"><div class="chat-head"></div><div class="chat-scroll"><div class="loading">正在打开对话…</div></div><div class="composer"></div><div class="chat-starters"></div></div>';
   loadChat(pid);
  },
@@ -212,7 +212,7 @@ function patchLive(pid){
 function composerHtml(pid){
  return '<button class="to-bottom" data-action="chat-bottom" data-pid="'+pid+'" title="回到最新" hidden>'+svg("arrowup",15)+'</button>'+
   '<div class="attach-row"></div><div class="capsule">'+
-  '<button class="cap-btn" data-action="chat-attach" data-pid="'+pid+'" title="附上文件">'+svg("plus",17)+'</button>'+
+  '<button class="cap-btn" data-action="chat-attach" data-pid="'+pid+'" title="附上文件或选中的文字">'+svg("plus",17)+'<span class="cap-label">附件</span></button>'+
   '<textarea rows="1" data-composer="'+pid+'"></textarea>'+
   '<button class="model-tag" data-action="chat-model" data-pid="'+pid+'" title="这个窗口用的模型"></button><span class="send-slot"></span></div>';
 }
@@ -227,7 +227,7 @@ function updateComposer(pid){
  const ended=p.agent==="coach"&&st.data.practice&&st.data.practice.state!=="active",m=chatModel(pid),busy=st.data.busy;
  area.disabled=ended;
  area.placeholder=ended?"这次练习已经结束":!m.ready?"还没接入模型":(AGENT_HINT[p.agent]||"")+" · "+sendHint();
- node.querySelector(".attach-row").innerHTML=(Sel.text?'<span class="sel-chip">'+svg("quote",11)+' 带上选中的 '+Sel.text.length+' 字<button data-action="sel-clear" title="不带">×</button></span>':"")+
+ node.querySelector(".attach-row").innerHTML=(st.quote?'<span class="sel-chip" title="'+esc(shorten(st.quote,400))+'">'+svg("quote",11)+' “'+esc(shorten(st.quote.replace(/\s+/g," "),28))+'” · '+st.quote.length+' 字<button data-action="quote-clear" data-pid="'+pid+'" title="不带">×</button></span>':"")+
   st.attach.map((a,i)=>'<span class="sel-chip file">'+svg(fileIcon(a.path),11)+' '+esc(a.path.split("/").pop())+'<button data-action="chat-attach-remove" data-pid="'+pid+'" data-index="'+i+'" title="不附上">×</button></span>').join("");
  const tag=node.querySelector(".model-tag");
  tag.innerHTML='<span>'+esc(modelName(m.model))+'</span>'+svg("chevrondown",10);tag.hidden=!m.ready;tag.classList.toggle("own",m.own);tag.classList.toggle("working",!!busy);
@@ -239,6 +239,7 @@ function modelName(model){return String(model||"").split("/").pop()||"未选择�
 function fitComposer(pid){
  const area=Dock.els[pid]?.querySelector(".composer textarea"),cap=area?.closest(".capsule");if(!area||!area.isConnected)return;
  // Measured in the one-line shape, so it does not flip back and forth at the edge.
+ if(Dock.els[pid].dataset.composer==="line"){cap.classList.remove("multi");area.style.height="auto";area.style.height=area.scrollHeight+"px";area.style.overflowY=area.scrollHeight>area.clientHeight+1?"auto":"hidden";return;}
  cap.classList.remove("multi");area.style.height="auto";
  const multi=area.value.includes("\n")||area.scrollHeight>area.clientHeight+2;
  cap.classList.toggle("multi",multi);
@@ -249,8 +250,9 @@ function attachMenu(pid,anchor){
  const st=Chat[pid],have=new Set(st.attach.map(a=>a.path));
  const open=Object.values(Dock.panels).filter(p=>p.type==="file"&&p.path).map(p=>p.path);
  const paths=[...new Set([...open,...(Dwell.recent||[]).map(r=>r.path)])].filter(x=>!have.has(x)).slice(0,10);
- popMenu(anchor,'<div class="menu-label">附上文件，AI 需要时会去读</div>'+(paths.map(x=>'<button data-action="chat-attach-add" data-pid="'+pid+'" data-path="'+esc(x)+'">'+svg(fileIcon(x),14)+'<span>'+esc(x.split("/").pop())+'<small>'+esc(x)+'</small></span></button>').join("")||
-  '<p class="menu-empty">先打开一个文件，或者在左栏里点开一个，就能附上。</p>'),{above:true});
+ popMenu(anchor,(Sel.text?'<button data-action="chat-attach-sel" data-pid="'+pid+'">'+svg("quote",14)+'<span>带上选中的文字<small>“'+esc(shorten(Sel.text.replace(/\s+/g," "),36))+'” · '+Sel.text.length+' 字</small></span></button><hr/>':"")+
+  '<button data-action="chat-attach-pick" data-pid="'+pid+'">'+svg("upload",14)+'<span>从电脑里选文件…<small>复制进学习库的 data/附件/，AI 也能读</small></span></button>'+
+  (paths.length?'<hr/><div class="menu-label">学习库里的文件，AI 需要时会去读</div>'+paths.map(x=>'<button data-action="chat-attach-add" data-pid="'+pid+'" data-path="'+esc(x)+'">'+svg(fileIcon(x),14)+'<span>'+esc(x.split("/").pop())+'<small>'+esc(x)+'</small></span></button>').join(""):""),{above:true});
 }
 function modelMenu(pid,anchor){
  const p=Dock.panels[pid],m=chatModel(pid),apis=S.config?.apis||[],seen=new Set(),items=[];
@@ -277,12 +279,12 @@ async function chatSend(pid,text,extra={}){
  if(!message&&!extra.task)return;
  if(st.data?.busy)return toast("这段对话正在回答；可以先停止");
  if(typeof flushAll==="function")await flushAll();
- const selection=extra.selection??Sel.text,attach=text==null?st.attach.map(a=>a.path):[];
+ const selection=extra.selection??st.quote??"",attach=text==null?st.attach.map(a=>a.path):[];
  if(text==null&&area){area.value="";fitComposer(pid);}st.input="";
  st.error="";st.stream="";st.live=[];st.waiting="";Object.assign(st,freshThinking());
  try{
   const r=await rpc("send",{agent:p.agent,message,thread:st.thread,selection,task:extra.task||"",note:screenNote(),answer:extra.answer||null,attach,model:p.model||null});
-  st.thread=r.thread;Sel.text="";if(text==null)st.attach=[];
+  st.thread=r.thread;if(extra.selection==null)st.quote="";if(text==null)st.attach=[];
   st.data.messages.push({id:"pending",role:"user",content:message||({check:"我写好了，帮我看看我的代码和运行结果。",hint:"我卡住了，给我一点提示，先别直接给答案。",capture:"把我们讨论过的内容整理成知识卡。"})[extra.task]||"",meta:{selection,answer:extra.answer,attach},at:new Date().toISOString()});
   st.data.busy=true;renderChat(pid,false);
  }catch(e){if(text==null&&area){area.value=message;fitComposer(pid);}st.error=e.message;renderLive(pid);throw e;}
@@ -352,7 +354,7 @@ function escalate(pid,mid){
 /* The ⋯ menu: how this window shows the conversation, how all windows do, and the rest of what a conversation can do. */
 function chatMoreMenu(pid,anchor){
  const p=Dock.panels[pid],st=Chat[pid],u=S.ui;if(!p||!st)return;
- const lh=Number(viewOf(p,"line_height"))||1.8,rw=viewOf(p,"read_width")||"medium",own=p.zoom||p.line_height||p.read_width;
+ const lh=Number(viewOf(p,"line_height"))||1.8,rw=readChars(viewOf(p,"read_width")),own=p.zoom||p.line_height||p.read_width||p.composer;
  const row=(label,ctl)=>'<div class="menu-row"><span>'+esc(label)+'</span><div class="ctl">'+ctl+'</div></div>';
  const step=(action,key,dir,label,title)=>'<button class="step" data-action="'+action+'" data-pid="'+pid+'" data-key="'+key+'" data-dir="'+dir+'" title="'+esc(title||"")+'">'+label+'</button>';
  const seg=(action,key,cur,list)=>'<div class="seg">'+list.map(([v,t])=>'<button class="'+(String(cur)===String(v)?"on":"")+'" data-action="'+action+'" data-pid="'+pid+'" data-key="'+key+'" data-value="'+v+'">'+esc(t)+'</button>').join("")+'</div>';
@@ -360,7 +362,9 @@ function chatMoreMenu(pid,anchor){
  popMenu(anchor,'<div class="menu-label">这个窗口</div>'+
   row("大小",step("view-step","zoom",-1,"A−","Ctrl -")+'<b>'+Math.round(zoomOf(p)*100)+'%</b>'+step("view-step","zoom",1,"A+","Ctrl ="))+
   row("行距",step("view-step","line_height",-1,"−")+'<b>'+lh.toFixed(2)+'</b>'+step("view-step","line_height",1,"+"))+
-  row("阅读宽度",seg("view-set","read_width",rw,[["narrow","窄"],["medium","中"],["wide","宽"],["none","不限"]]))+
+  row("阅读宽度",(rw?step("view-step","read_width",-1,"−","窄一点")+'<b>'+rw+' 字</b>'+step("view-step","read_width",1,"+","宽一点"):'<b>不限</b>')+
+   '<button class="step wide'+(rw?"":" on")+'" data-action="view-set" data-pid="'+pid+'" data-key="read_width" data-value="toggle">不限</button>')+
+  row("输入框",seg("view-set","composer",viewOf(p,"composer"),[["capsule","胶囊"],["line","线条"]]))+
   (own?item("undo","这个窗口恢复成默认显示","view-reset"):"")+
   '<hr/><div class="menu-label">所有窗口</div>'+
   row("思考过程",seg("ui-set","thinking",u.thinking||"collapsed",[["collapsed","折叠"],["open","展开"],["hidden","不显示"]]))+

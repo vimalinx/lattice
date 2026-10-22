@@ -126,7 +126,9 @@ function float(pid){
 }
 /* Size: each kind of panel has a default in the settings; a window can set its own, kept in the layout.
    Line height and reading width likewise fall back to the settings unless the window sets its own. */
-const VIEW_KEYS=["line_height","read_width"];
+const VIEW_KEYS=["line_height","read_width","composer"];
+// Conversations write in a capsule by default; quick answers in a plain box under a hairline.
+function composerDefault(p){return p.agent==="flash"?"line":"capsule";}
 function zoomKind(p){return p.type==="chat"?"chat:"+(p.agent||"tutor"):p.type;}
 function zoomDefault(p){return Number(S.ui.zoom?.[zoomKind(p)])||1;}
 function zoomOf(p){return Number(p.zoom)||zoomDefault(p);}
@@ -135,13 +137,14 @@ function applyView(pid){
  node.style.zoom=zoomOf(p);
  if(p.line_height)node.style.setProperty("--line-height",String(p.line_height));else node.style.removeProperty("--line-height");
  if(p.read_width)node.style.setProperty("--read-width",readWidth(p.read_width));else node.style.removeProperty("--read-width");
+ if(p.type==="chat")node.dataset.composer=p.composer||composerDefault(p);
 }
-function viewOf(p,key){return key==="zoom"?zoomOf(p):p[key]??S.ui[key];}
+function viewOf(p,key){return key==="zoom"?zoomOf(p):key==="composer"?p.composer||composerDefault(p):p[key]??S.ui[key];}
 function setView(pid,key,value){
  if(key==="zoom")return setZoom(pid,value);
  const p=Dock.panels[pid];if(!p||!VIEW_KEYS.includes(key))return;
- if(value==null||value===""||value===S.ui[key])delete p[key];else p[key]=value;
- applyView(pid);const t=Dock.types[p.type],node=Dock.els[pid];if(t?.shown&&node?.isConnected)t.shown(p,node);
+ if(value==null||value===""||value===S.ui[key]||key==="composer"&&value===composerDefault(p))delete p[key];else p[key]=value;
+ applyView(pid);if(key==="composer"&&typeof fitComposer==="function")fitComposer(pid);const t=Dock.types[p.type],node=Dock.els[pid];if(t?.shown&&node?.isConnected)t.shown(p,node);
  saveLayout();
 }
 function setZoom(pid,value){
