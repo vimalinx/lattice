@@ -81,7 +81,7 @@ function splitBeside(target,zone,newStack){
  parent.kids[parent.kids.indexOf(target)]=split;
 }
 /* ---- opening and closing ----------------------------------------------------------------------- */
-function panelKey(p){return p.type+":"+(p.path||p.url||p.thread||p.agent||"")+(p.type==="chat"&&!p.thread?":follow":"");}
+function panelKey(p){return p.type+":"+(p.path||p.url||p.change||p.compare||p.thread||p.agent||"")+(p.type==="chat"&&!p.thread?":follow":"");}
 function findPanel(params){const key=panelKey(params);return Object.keys(Dock.panels).find(pid=>panelKey(Dock.panels[pid])===key)||null;}
 // A conversation on show is never covered by a new tab: the AI that opened something would hide itself.
 function covers(s){return !!(s?.active&&Dock.panels[s.active]?.type==="chat");}

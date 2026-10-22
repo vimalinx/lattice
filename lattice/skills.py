@@ -14,6 +14,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import yaml
+
 from .vault import join_frontmatter, split_frontmatter
 
 SHIPPED = Path(__file__).with_name("skills")
@@ -89,7 +91,8 @@ def prompt_section(root, agent):
         return ""
     lines = "\n".join(f"- {s['name']}（{s['title']}）：{s['description']}" for s in skills)
     return ("# 技能\n学习库里装了下面这些技能，每个是做某一类事的完整做法。学习者的请求正好是某个技能管的事时，先用 skill 读它的完整说明，"
-            "再照着做（说明里提到的附带文件用 skill 的 file 读）；学习者点名用某个技能时一定要用。不相干时不用，也不要为了用而用。\n" + lines)
+            "再照着做（说明里提到的附带文件用 skill 的 file 读）；学习者点名用某个技能时一定要用。不相干时不用，也不要为了用而用。"
+            "学习者让你改一个技能、或者用下来发现它的做法有问题时，用 skill_edit 提出修改（不要用 write 或 edit），由学习者审过批准。\n" + lines)
 
 
 def instructions(skill):
@@ -178,3 +181,83 @@ def file_of(root, skill, name):
     if not path.is_relative_to(folder) or not path.is_file():
         raise ValueError("这个技能里没有这个文件：" + str(name))
     return path.read_text(encoding="utf-8", errors="replace")[:200_000]
+
+
+def change_target(root, name, file="SKILL.md", new=False):
+    """What a change to a skill touches: (slug, title, vault path). new=True names a skill that does not exist yet."""
+    try:
+        found = find(root, name)
+        slug, title = found["slug"], found["title"]
+    except ValueError:
+        if not new:
+            raise
+        slug, title = slug_of(name), str(name).strip()[:60]
+        if (Path(root) / FOLDER / slug).exists():
+            raise ValueError("已经有一个叫「" + slug + "」的技能了") from None
+    part = Path(str(file or "SKILL.md"))
+    if part.is_absolute() or ".." in part.parts or not part.parts:
+        raise ValueError("技能里的文件要写相对路径")
+    if new and part.as_posix() != "SKILL.md":
+        raise ValueError("新建技能先写它的 SKILL.md")
+    return slug, title, f"{FOLDER}/{slug}/{part.as_posix()}"
+
+
+def apply_edits(content, edits):
+    """Edits as [{old, new}], applied in order; each old must occur exactly once in the text as it is by then."""
+    for i, e in enumerate(edits or [], 1):
+        old, new = str(e.get("old") or ""), str(e.get("new") or "")
+        if not old:
+            raise ValueError(f"第 {i} 处修改没有给 old")
+        if content.count(old) != 1:
+            raise ValueError(f"第 {i} 处修改的 old 在原文里出现了 {content.count(old)} 次，必须恰好一次")
+        content = content.replace(old, new, 1)
+    return content
+
+
+def keep_attributes(base, after):
+    """An agent's new SKILL.md keeps the attributes it left out (agents, tags, version, enabled…) and a valid category;
+    the heading and file list the skill tool puts around the instructions are not part of the file. When the
+    attributes come out unchanged, the original lines are kept as they were, so the comparison shows only real changes."""
+    old, _ = split_frontmatter(base)
+    new, body = split_frontmatter(after)
+    body = re.sub(r"^#\s*技能：[^\n]*\n+", "", body.lstrip("\n"))
+    body = re.sub(r"\n+这个技能附带的文件（用 skill 工具的 file 参数读）：[^\n]*\s*$", "", body).strip("\n")
+    merged = {**old, **{k: v for k, v in new.items() if v not in (None, "", [], {})}}
+    if "category" in merged and merged["category"] not in CATEGORIES:
+        if old.get("category") in CATEGORIES:
+            merged["category"] = old["category"]
+        else:
+            merged.pop("category")
+    end = base.find("\n---", 4) if base.startswith("---\n") else -1
+    if end < 0:
+        return join_frontmatter(merged, body)
+    # Each attribute's lines as they were; only the ones whose value changed are written anew.
+    blocks, key = [], None
+    for line in base[4:end].split("\n"):
+        found = re.match(r"([^\s#][^:]*):", line)
+        if found:
+            key = found.group(1).strip()
+            blocks.append([key, [line]])
+        elif blocks:
+            blocks[-1][1].append(line)
+        else:
+            blocks.append([None, [line]])
+    out = []
+    for key, lines in blocks:
+        same = key is None or key not in merged or merged[key] == old.get(key)
+        out.append("\n".join(lines) if same else yaml.safe_dump({key: merged[key]}, allow_unicode=True, sort_keys=False, width=1000).rstrip("\n"))
+    out += [yaml.safe_dump({k: v}, allow_unicode=True, sort_keys=False, width=1000).rstrip("\n") for k, v in merged.items() if k not in old]
+    rest = base[end + 4:]
+    gap = rest[:len(rest) - len(rest.lstrip("\n"))] or "\n\n"
+    return "---\n" + "\n".join(out) + "\n---" + gap + body + ("\n" if base.endswith("\n") else "")
+
+
+def check_page(content):
+    """A SKILL.md must keep readable attributes; returns the body (the instructions)."""
+    try:
+        attrs, body = split_frontmatter(content)
+    except ValueError as exc:
+        raise ValueError("SKILL.md 开头的属性写坏了：" + str(exc)) from None
+    if not attrs.get("name") and not attrs.get("title"):
+        raise ValueError("SKILL.md 开头要有 name 或 title")
+    return body.strip()

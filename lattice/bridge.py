@@ -94,6 +94,8 @@ class Bridge(QObject):
         self.retrying = set()
         # Quick-answer turns checking an answer to the tutor's question: their thread -> the tutor's conversation.
         self.checking = {}
+        # Skill comparisons: id -> the conversation they continue and what each side wrote.
+        self.compares = {}
         self.reviews = {}
         self.runs, self.kernels, self.kernel_states, self.batches = {}, {}, {}, {}
         self.screen, self.edits, self.last_write = {}, {}, 0.0
@@ -418,6 +420,136 @@ class Bridge(QObject):
         found = skills.find(self.root, slug)
         agent = agent if agent in found["agents"] else found["agents"][0]
         return {"thread": self.lattice.thread_new(agent, None, "试用 · " + found["title"], {"trial": found["slug"]})["id"], "agent": agent}
+
+    # ---- changing a skill: proposed (by an agent, or by the learner restoring a version), reviewed side by side,
+    # approved or dismissed. Proposals and decisions are journal entries, so every change keeps its history.
+    def propose_skill_change(self, slug, title, rel, base, after, why, by, thread=None):
+        ident = uid()
+        self.lattice.record("skill_proposed", {"change": ident, "skill": slug, "title": title, "file": rel, "base": base, "proposed": after,
+                                               "why": why, "by": by, "thread": thread}, by, [rel, "skillchange:" + ident, *([thread] if thread else [])])
+        self.announce({"type": "skill_change", "change": ident, "state": "open", "by": by})
+        return ident
+
+    def rpc_skill_change(self, id):
+        l = self.lattice
+        entries = l.journal(["skill_proposed", "skill_changed", "skill_change_dismissed"], ref="skillchange:" + str(id), limit=10)
+        proposed = next((e for e in entries if e["type"] == "skill_proposed"), None)
+        if not proposed:
+            raise ValueError("找不到这次修改")
+        decided = next((e for e in entries if e["type"] != "skill_proposed"), None)
+        d = proposed["data"]
+        current = l.vault.read_text(d["file"]) if l.vault.path(d["file"]).exists() else ""
+        return {**d, "id": id, "at": proposed["at"], "current": current,
+                "state": {"skill_changed": "approved", "skill_change_dismissed": "dismissed"}.get(decided["type"], "open") if decided else "open",
+                **({"decided_at": decided["at"], "final": decided["data"].get("after")} if decided else {})}
+
+    def rpc_skill_propose(self, slug, content=None, why="", file="SKILL.md"):
+        """The learner's own change, e.g. bringing back an older version: reviewed the same way as an agent's.
+        Without content it starts from the skill as it is, to be changed by hand on the right."""
+        found = skills.find(self.root, slug)
+        _, _, rel = skills.change_target(self.root, slug, file)
+        base = self.lattice.vault.read_text(rel) if self.lattice.vault.path(rel).exists() else ""
+        return {"change": self.propose_skill_change(found["slug"], found["title"], rel, base, base if content is None else text(content, 200_000), text(why, 500), "me")}
+
+    def rpc_skill_change_decide(self, id, decision, content=None):
+        l, change = self.lattice, self.rpc_skill_change(id)
+        if change["state"] != "open":
+            raise ValueError("这次修改已经处理过了")
+        refs = [change["file"], "skillchange:" + str(id)]
+        if decision != "approved":
+            l.record("skill_change_dismissed", {"change": id, "skill": change["skill"], "title": change["title"], "file": change["file"], "why": change["why"]}, "me", refs)
+            self.announce({"type": "skill_change", "change": id, "state": "dismissed"})
+            return {"state": "dismissed"}
+        after = text(content if content is not None else change["proposed"], 200_000)
+        if change["file"].endswith("/SKILL.md"):
+            skills.check_page(after)
+        self.commit_mine()
+        l.vault.write_text(change["file"], after)
+        edited = after != change["proposed"]
+        who = {"me": "我"}.get(change["by"], AGENT_NAMES.get(change["by"], change["by"]))
+        l.vault.commit(f"改技能「{change['title']}」：{change['why'] or '（没写原因）'}（{who}提的{'，我改过再批准' if edited else '，我批准'}）"[:200], "me")
+        l.record("skill_changed", {"change": id, "skill": change["skill"], "title": change["title"], "file": change["file"], "before": change["current"],
+                                   "after": after, "why": change["why"], "by": change["by"], "edited": edited}, "me", refs)
+        self.changed([change["file"]])
+        self.announce({"type": "skill_change", "change": id, "state": "approved"})
+        return {"state": "approved", "edited": edited}
+
+    def rpc_skill_history(self, slug):
+        """Every committed version of a skill's SKILL.md, newest first, the one on disk now marked."""
+        rel = f"{skills.FOLDER}/{skills.find(self.root, slug)['slug']}/SKILL.md"
+        vault = self.lattice.vault
+        current = vault.read_text(rel) if vault.path(rel).exists() else None
+        versions = vault.history(rel)
+        for i, v in enumerate(versions):
+            v["current"] = i == 0 and vault.at(v["commit"], v["path"]) == current
+        return versions
+
+    def rpc_skill_compare(self, slug, a, b, thread=None, message=""):
+        """Continue one conversation twice, once with each version of a skill's instructions, without tools and without
+        writing anything to the conversation; the learner then picks one side (or edits it) or neither."""
+        l, found = self.lattice, skills.find(self.root, slug)
+        if not thread:
+            row = l.index.one("SELECT id FROM threads WHERE json_extract(head,'$.trial')=? ORDER BY created DESC LIMIT 1", (found["slug"],))
+            thread = row["id"] if row else l.thread_for("tutor", l.active_topic())
+        head = l.thread_head(thread)
+        agent = head.get("agent") if head.get("agent") in found["agents"] else found["agents"][0]
+        definition, msgs = agents.load(self.root, agent), l.messages(thread)
+        question = str(message or "").strip()
+        if question:
+            history = self._history(thread, definition["history"])
+        else:
+            last = next((i for i in range(len(msgs) - 1, -1, -1) if msgs[i]["role"] == "user"), None)
+            if last is None:
+                raise ValueError("这段对话里还没有问题；写一句要它接着回答的话")
+            question, history = msgs[last]["content"], self._history(thread, definition["history"], before=last)
+        conn = self.config.agent(agent)
+        if not conn["api_key"]:
+            raise ValueError(f"请先在设置里给{AGENT_NAMES[agent]}填写 {conn['label']} 的 API Key")
+        ident = uid()
+        self.compares[ident] = {"thread": thread, "agent": agent, "question": question, "skill": found["slug"]}
+        for side, page in (("a", a), ("b", b)):
+            version = {**found, "body": skills.check_page(page)}
+            user, system = self._compose(definition, thread, head.get("topic"), None, question, "", "", [], "",
+                                         "\n\n（这是在比较一个技能的两个版本：这一轮不调用工具，直接写出回答。）", version)
+            messages = [{"role": "system", "content": system}, *({"role": m["role"], "content": m["content"]} for m in history if m["role"] in ("user", "assistant")),
+                        {"role": "user", "content": user}]
+            key = f"compare:{ident}:{side}"
+            worker = ApiWorker(agent, key, conn, messages)
+            worker.event.connect(self.api_event)
+            self.workers[key] = worker
+            self.compares[ident][side] = {"text": "", "done": False}
+            worker.start()
+        return {"compare": ident, "thread": thread, "agent": agent, "question": question[:2000], "title": head.get("title")}
+
+    def rpc_compare_stop(self, id):
+        for side in ("a", "b"):
+            worker = self.workers.get(f"compare:{id}:{side}")
+            if worker:
+                worker.stop()
+        return True
+
+    def rpc_compare_pick(self, id, side, content):
+        """The side the learner chose (as they left it) becomes the conversation's next reply."""
+        found = self.compares.get(str(id))
+        if not found:
+            raise ValueError("这次比较已经不在了")
+        content = text(content, 200_000).strip()
+        if not content:
+            raise ValueError("这一边是空的")
+        l = self.lattice
+        msgs = l.messages(found["thread"])
+        last = next((i for i in range(len(msgs) - 1, -1, -1) if msgs[i]["role"] == "user"), None)
+        # The last question answered again: the chosen reply supersedes the old one, as a retry does. A new question is
+        # asked first.
+        again = last is not None and msgs[last]["content"] == found["question"]
+        if not again:
+            l.append_message(found["thread"], "user", found["question"], {"agent": found["agent"]})
+        edited = content != (found.get(side) or {}).get("text", "").strip()
+        message = l.append_message(found["thread"], "assistant", content, {"agent": found["agent"], "compare": {"id": id, "side": side, "edited": edited},
+                                                                          **({"retry": True} if again and last < len(msgs) - 1 else {})})
+        l.record("skill_compared", {"skill": found["skill"], "picked": side, "edited": edited, "question": found["question"][:400]}, "me", [found["thread"]])
+        self.announce({"type": "agent", "kind": "finished", "agent": found["agent"], "thread": found["thread"], "text": content})
+        return {"message": message, "thread": found["thread"]}
 
     def rpc_skill_install_many(self, slugs):
         self.commit_mine()
@@ -1234,6 +1366,17 @@ class Bridge(QObject):
             worker = self.workers.get(thread)
             self.run_tool(thread, evt["name"], evt["arguments"], lambda content, w=worker, c=evt["call_id"]: w and w.tool_result(c, content))
             return
+        if str(thread).startswith("compare:"):
+            # One side of a skill comparison: nothing is written to a conversation until the learner picks it.
+            if evt["kind"] == "finished":
+                self._record_usage(evt.get("agent"), thread, evt.get("usage"))
+                ident, side = thread.split(":")[1:3]
+                if ident in self.compares:
+                    self.compares[ident][side] = {"text": evt.get("text", ""), "done": True, "stop_reason": evt.get("stop_reason")}
+                # The thread is still winding down when it reports finishing; it is let go only once it has stopped.
+                self._retire(self.workers.pop(thread, None))
+            self.announce(evt)
+            return
         if evt["kind"] == "status":
             self.status[thread] = evt.get("state", "")
         elif evt["kind"] == "finished":
@@ -1291,9 +1434,10 @@ class Bridge(QObject):
         if checked and body.strip():
             l.record("judged", {"text": body[:800], "agent": agent, "question": checked[1], "source": checked[0]}, agent, [checked[0], thread])
         sources = list({s["url"]: s for s in turn.sources if s.get("url")}.values())[:12]
-        if body.strip() or turn.actions or turn.suggestions:
+        if body.strip() or turn.actions or turn.suggestions or turn.changes:
             evt["message"] = l.append_message(thread, "assistant", body, {"agent": agent, "stop_reason": reason, "usage": evt.get("usage"),
                                                                           "actions": turn.actions, "sources": sources, "suggestions": turn.suggestions,
+                                                                          **({"changes": turn.changes} if turn.changes else {}),
                                                                           **({"retry": True} if retried else {}),
                                                                           **({"thinking": evt["thinking"], "think_seconds": evt.get("think_seconds")} if evt.get("thinking") else {})})
         evt.update(actions=turn.actions, sources=sources, suggestions=turn.suggestions)

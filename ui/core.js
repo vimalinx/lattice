@@ -195,7 +195,7 @@ function dialog({title,message="",ok="确定",cancel="取消",danger=false,input
    '<div class="dialog-actions"><button class="btn ghost" data-answer="no">'+esc(cancel)+'</button><button class="btn '+(danger?"danger":"primary")+'" data-answer="yes">'+esc(ok)+'</button></div></div></div>');
   const field=box.querySelector(".dialog-input");
   const finish=yes=>{document.removeEventListener("keydown",keys,true);box.classList.add("leaving");setTimeout(()=>box.remove(),120);
-   done(input?(yes?field.value.trim()||null:null):yes);};
+   done(input?(yes?field.value.trim()||(input.allowEmpty?"":null):null):yes);};
   const keys=e=>{
    if(e.key==="Escape"){e.preventDefault();e.stopPropagation();finish(false);}
    else if(e.key==="Enter"&&!e.isComposing&&e.keyCode!==229){e.preventDefault();e.stopPropagation();finish(true);}
@@ -229,5 +229,5 @@ const stageName={suggested:"待探索",seen:"接触过",explained:"能解释",ap
 const stageColor={suggested:"#5b6675",seen:"#e0be88",explained:"#b5a8fa",applied:"#83e2c7"};
 const linkName={prerequisite:"是前置",part_of:"是一部分",related:"有关联",applies_to:"应用于",contrasts:"对比",explains:"解释了",branch_of:"分支自",mentions:"提到"};
 const kindName={topic:"主题",card:"知识卡",lesson:"课程",note:"笔记",insight:"薄弱点",notebook:"实验笔记",file:"文件"};
-const journalName={asked:"提问",answered:"作答",judged:"AI 判断",explained:"讲解",ran:"运行",viewed:"查看",wrote:"写作",staged:"理解阶段",reviewed:"回顾",detour:"岔开",bridged:"接回主干",insight:"薄弱点",organized:"整理",searched:"联网",installed:"装包",action:"AI 动作",undo:"撤销"};
+const journalName={asked:"提问",answered:"作答",judged:"AI 判断",explained:"讲解",ran:"运行",viewed:"查看",wrote:"写作",staged:"理解阶段",reviewed:"回顾",detour:"岔开",bridged:"接回主干",insight:"薄弱点",organized:"整理",searched:"联网",installed:"装包",action:"AI 动作",undo:"撤销",skill_proposed:"提议改技能",skill_changed:"改了技能",skill_change_dismissed:"没采用的技能修改",skill_compared:"技能两版对比"};
 function who(actor){return actor==="me"?"我":({tutor:"主会话",flash:"快答",coach:"练习教练",organizer:"整理",lattice:"Lattice",app:"Lattice"})[actor]||actor;}

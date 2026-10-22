@@ -54,7 +54,7 @@ function skillCard(s){
   '<p>'+esc(s.description)+'</p>'+
   '<div class="sk-meta">'+s.agents.map(a=>'<span>'+esc(SKILL_AGENTS[a]||a)+'</span>').join("")+(s.files.length?'<span>附带 '+s.files.length+' 个文件</span>':"")+'</div>'+
   '<div class="sk-actions">'+(!on?b(svg("download",12)+" 装上","skill-install","primary xs"):
-   b(s.enabled?"停用":"启用","skill-toggle")+b("试用","skill-try")+b("打开","skill-open")+
+   b(s.enabled?"停用":"启用","skill-toggle")+b("试用","skill-try")+b("改","skill-revise")+b("历史","skill-history")+
    (s.state==="update"?b("更新到 v"+s.latest,"skill-install"):s.state==="changed"?b("恢复商城版","skill-install"):"")+b(s.shipped?"卸下":"删除","skill-uninstall"))+'</div></div>';
 }
 async function skillDetail(slug){
@@ -64,7 +64,8 @@ async function skillDetail(slug){
   '<p class="muted">'+esc(s.description)+'</p><div class="markdown skill-body">'+markdown(full.body)+'</div>'+
   (full.files?.length?'<div class="field-label">附带的文件</div><div class="sk-files">'+full.files.map(f=>s.state==="absent"?'<span>'+svg("document",12)+' '+esc(f)+'</span>':'<a data-action="open-file" data-path="skills/'+esc(s.slug)+'/'+esc(f)+'">'+svg("document",12)+' '+esc(f)+'</a>').join("")+'</div>':"")+
   '<div class="modal-actions">'+(s.state==="absent"?button(svg("download",13)+" 装上","skill-install",'data-slug="'+esc(slug)+'"',"primary"):
-   button("开个临时会话试用","skill-try",'data-slug="'+esc(slug)+'"',"primary")+button("打开文件改","skill-open",'data-slug="'+esc(slug)+'"',"ghost"))+'</div></div>',"large");
+   button("开个临时会话试用","skill-try",'data-slug="'+esc(slug)+'"',"primary")+button("左右对照着改","skill-revise",'data-slug="'+esc(slug)+'"',"ghost")+
+   button(svg("history",13)+" 历史","skill-history",'data-slug="'+esc(slug)+'"',"ghost")+button("打开文件","skill-open",'data-slug="'+esc(slug)+'"',"ghost"))+'</div></div>',"large");
 }
 // Pick a skill for the next message in this conversation (or the main conversation, from the store).
 function useSkill(pid,s){
@@ -87,6 +88,9 @@ async function skillAction(kind,a){
    await rpc("skill_uninstall",{slug});await list();return skillsChanged();}
   case "skill-toggle":{const s=(await skillList()).find(x=>x.slug===slug);await rpc("skill_enable",{slug,on:!s.enabled});await list();skillsChanged();return toast(s.enabled?"停用了；AI 不会再看到它":"启用了");}
   case "skill-open":closeModal();return openFile("skills/"+slug+"/SKILL.md");
+  case "skill-history":closeModal();return skillHistory(slug);
+  // Changing it by hand, side by side with how it is now: the same review as an agent's proposal.
+  case "skill-revise":closeModal();return rpc("skill_propose",{slug,why:"我自己改"});
   case "skill-try":{
    // A trial runs in a conversation of its own, so nothing of it lands in the main conversation.
    closeModal();const s=(await skillList()).find(x=>x.slug===slug);if(!s)return;

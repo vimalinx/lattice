@@ -174,7 +174,9 @@ function screenNote(){
 }
 /* ---- events from the backend ---------------------------------------------------------------------------------- */
 async function onEvent(evt){
+ if(evt.type==="agent"&&String(evt.thread||"").startsWith("compare:"))return compareEvent(evt);
  if(evt.type==="agent")return chatEvent(evt);
+ if(evt.type==="skill_change"){skillsChanged();return skillChangeEvent(evt);}
  if(evt.type==="run")return runEvent(evt);
  if(evt.type==="kernel"){kernelEvent(evt);if(["run_finished","batch_finished"].includes(evt.kind))journalsChanged();return;}
  if(evt.type==="notice"){toast(evt.message);return;}
@@ -322,6 +324,10 @@ async function onAction(a){
   return go();
  }
  case "theme-color":return themeColorPick(a);
+ case "sc-all-left":case "sc-reset":case "sc-rebase":case "sc-history":case "sc-compare":case "sc-dismiss":case "sc-approve":return changeAction(kind,a);
+ case "sc-restore":return restoreVersion(a);
+ case "open-change":return wideWindow(openPanel({type:"skillchange",change:a.dataset.change}));
+ case "cmp-stop":case "cmp-edit":case "cmp-pick":return compareAction(kind,a);
  case "organizer-dismiss":Organizer.text="";return renderOrganizer();
  case "topic-focus":{await rpc("focus",{topic:a.dataset.id});await refreshState();followingPanels().forEach(x=>loadChat(x));
   let tutor=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="tutor"&&!Dock.panels[x].thread);if(!tutor)openPanel({type:"chat",agent:"tutor"});else activate(tutor);return;}

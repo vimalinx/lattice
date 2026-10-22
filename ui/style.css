@@ -1006,3 +1006,56 @@ input[type=checkbox],input[type=radio],input[type=range]{accent-color:var(--acce
 .reader-note{max-width:var(--read-width,42em);margin:18px auto 0;padding:9px 12px;border-radius:10px;background:var(--surface);color:var(--muted);font-size:12.5px}
 @container (max-width:420px){.reader-where small,.reader-when{display:none}}
 .reader{container-type:inline-size}
+/* changing a skill side by side (skillchange.js): taken out is red on the left, put in is green on the right */
+.sc{display:flex;flex-direction:column;height:100%;min-height:0;container-type:inline-size}
+.sc-head{padding:12px 16px 10px;border-bottom:1px solid var(--line-soft);display:grid;gap:5px}
+.sc-title{display:flex;align-items:center;gap:8px;min-width:0}
+.sc-title>svg{color:var(--accent);flex:0 0 auto}
+.sc-title b{font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sc-title small{color:var(--subtle);font-family:var(--mono);font-size:11.5px}
+.sc-why{color:var(--muted);font-size:12.5px;line-height:1.6}
+.sc-warn{display:flex;align-items:center;gap:8px;margin:8px 16px 0;padding:7px 11px;border-radius:9px;font-size:12.5px;color:var(--amber);
+ background:color-mix(in srgb,var(--amber) 12%,transparent);border:1px solid color-mix(in srgb,var(--amber) 35%,transparent)}
+.sc-warn span{flex:1}
+.sc-cols{display:grid;grid-template-columns:1fr 1fr;gap:0;padding:8px 16px 4px;font-size:12px;font-weight:600;color:var(--muted)}
+.sc-cols>div{display:flex;align-items:center;gap:8px;min-width:0;padding:0 6px}
+.sc-cols>div+div{padding-left:24px}
+.sc-cols b{white-space:nowrap;font-weight:600}
+.sc-cols small{font-weight:400;color:var(--subtle);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sc-merge{flex:1;min-height:0;margin:0 16px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel-hi)}
+.sc-merge .cm-mergeView{height:100%;overflow:auto}
+.sc-merge .cm-mergeViewEditors{min-height:100%}
+.sc-merge .cm-editor{font-size:13px;background:transparent}
+.sc-merge .cm-merge-a{border-right:1px solid var(--line-soft)}
+.sc-merge .cm-merge-a .cm-changedLine,.sc-merge .cm-merge-a .cm-deletedChunk{background:color-mix(in srgb,var(--red) 13%,transparent)!important}
+.sc-merge .cm-merge-a .cm-changedText{background:color-mix(in srgb,var(--red) 38%,transparent)!important;border-radius:2px}
+.sc-merge .cm-merge-b .cm-changedLine,.sc-merge .cm-merge-b .cm-insertedLine{background:color-mix(in srgb,var(--green) 13%,transparent)!important}
+.sc-merge .cm-merge-b .cm-changedText{background:color-mix(in srgb,var(--green) 38%,transparent)!important;border-radius:2px}
+.sc-merge .cm-merge-a .cm-changeGutter{background:var(--red)!important}
+.sc-merge .cm-merge-b .cm-changeGutter{background:var(--green)!important}
+.sc-merge .cm-merge-revert{width:26px;background:var(--surface);border-right:1px solid var(--line-soft)}
+.sc-take{display:grid;place-items:center;width:20px;height:20px;margin:0 3px;padding:0;border-radius:6px;border:1px solid var(--line);background:var(--panel-hi);color:var(--muted);cursor:pointer}
+.sc-take:hover{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 50%,var(--line))}
+.sc-foot{display:flex;align-items:center;gap:8px;padding:10px 16px 12px;flex-wrap:wrap}
+.sc-stat{font-size:12px;color:var(--muted)}
+.sc-del{color:var(--red)}.sc-add{color:var(--green)}.sc-mine{color:var(--ai)}
+.sc-history .version b{font-weight:550}
+@container (max-width:560px){.sc-cols small{display:none}}
+/* trying two versions of a skill on one conversation */
+.cmp{display:flex;flex-direction:column;height:100%;min-height:0}
+.cmp-head{display:grid;gap:6px;padding:12px 16px;border-bottom:1px solid var(--line-soft);font-size:13px}
+.cmp-head>.btn{justify-self:start}
+.cmp-q{color:var(--muted);font-size:12.5px;line-height:1.6}
+.cmp-cols{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 16px}
+.cmp-side{display:flex;flex-direction:column;min-height:0;border:1px solid var(--line);border-radius:12px;background:var(--panel-hi);overflow:hidden}
+.cmp-side.picked{border-color:color-mix(in srgb,var(--accent) 60%,var(--line));box-shadow:0 0 0 3px var(--accent-glow)}
+.cmp-label{display:flex;align-items:center;gap:7px;padding:8px 12px;font-size:12px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--line-soft)}
+.cmp-live{margin-left:auto;font-weight:400;color:var(--ai)}
+.cmp-body{flex:1;min-height:0;overflow:auto;padding:10px 14px}
+.cmp-body .markdown{font-size:.95em}
+.cmp-body .cm-host{min-height:100%}
+.cmp-foot{display:flex;gap:6px;justify-content:flex-end;padding:8px 10px;border-top:1px solid var(--line-soft);min-height:42px;align-items:center}
+.cmp-gone{flex:1;display:grid;place-items:center}
+@container (max-width:620px){.cmp-cols{grid-template-columns:1fr;grid-auto-rows:minmax(260px,1fr);overflow:auto}}
+.cmp{container-type:inline-size}
+.skill-change .suggestion-head>svg{color:var(--accent)}

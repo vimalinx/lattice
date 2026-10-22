@@ -172,7 +172,7 @@ function messageEl(pid,m,answers){
    :'<div class="msg from-ai" data-mid="'+m.id+'">'+thinkingHtml(meta.thinking,meta.think_seconds)+'<div class="markdown msg-body">'+r.html+'</div>'+
     (redone?'<div class="msg-note">这次没有答完，下面是重新回答的</div>':incomplete?'<div class="msg-note">'+esc(meta.stop_reason==="cancelled"?"已停止 · 保留了部分回答":meta.stop_reason==="max_tokens"?"达到回复长度上限":"没有正常结束 · 只保留了收到的部分")+
      (canRetry?button(svg("refresh",12)+" 重新回答","chat-retry",'data-pid="'+pid+'"',"ghost xs"):"")+'</div>':"")+
-    actionChips(meta.actions||[],st.data.undone||[])+sourcesHtml(meta.sources)+suggestionsHtml(pid,m)+foot+'</div>';
+    actionChips(meta.actions||[],st.data.undone||[])+sourcesHtml(meta.sources)+suggestionsHtml(pid,m)+changesHtml(meta.changes)+foot+'</div>';
   cached=st.cache[m.id]={key,html,blocks:r.blocks};
  }
  const node=h(cached.html);
@@ -203,6 +203,11 @@ function actionChips(actions,undone=[],live=false){
 }
 // A search result's title can be a PDF's raw bytes read as text; the site's name says more then.
 function sourceTitle(s){const t=String(s.title||"");return !t||(t.match(/[\u0080-\u00ff\ufffd]/g)||[]).length>t.length*.15?hostOf(s.url):t;}
+/* Skill changes an agent proposed in this reply: each opens side by side for review. */
+function changesHtml(list){
+ return (list||[]).map(c=>'<div class="suggestion skill-change"><div class="suggestion-head">'+svg("store",13)+' '+(c.new?"提议新建技能":"提议修改技能")+'「'+esc(c.title)+'」'+
+  (c.why?'<span>'+esc(c.why)+'</span>':"")+'</div><div class="suggestion-actions">'+button(svg("split",12)+" 左右对照着审","open-change",'data-change="'+esc(c.change)+'"',"primary xs")+'</div></div>').join("");
+}
 function sourcesHtml(sources){
  if(!sources?.length)return "";
  return '<div class="sources"><span>'+svg("link",12)+' 来源</span>'+sources.map(s=>'<a data-action="open-web" data-url="'+esc(s.url)+'" title="'+esc(s.url)+'">'+esc(shorten(sourceTitle(s),48))+'</a>').join("")+'</div>';

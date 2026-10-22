@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import skills as skillbook
 from .model import AGENT_RECORDS, LINK_KINDS, readable_outputs, text, title_of
-from .vault import APPEND_ONLY, kind_of, slug
+from .vault import APPEND_ONLY, kind_of, slug, split_frontmatter
 
 ALL = {"tutor", "flash", "coach", "organizer"}
 
@@ -31,6 +31,7 @@ class Turn:
 
     def __init__(self):
         self.actions, self.sources, self.suggestions, self.after, self.carry = [], [], [], [], []
+        self.changes = []   # proposed skill changes, waiting for the learner
         self.focus = None
         self.refocus = False
 
@@ -109,6 +110,8 @@ def _guard(ctx, path):
         raise ValueError("挂载的外部目录对你只读；需要改的话用 suggest 提给学习者")
     if rel.startswith(APPEND_ONLY) or rel.startswith(".lattice/") or rel == "AGENTS.md" or rel.startswith("agents/"):
         raise ValueError("对话、轨迹、规则和 .lattice 只由 Lattice 和学习者维护")
+    if rel.startswith("skills/"):
+        raise ValueError("技能不直接改：用 skill_edit 提出修改，学习者在左右对照里看过、批准了才生效")
     if ctx.bridge.typing(rel):
         raise ValueError("学习者正在编辑这个文件；不要直接改，用 suggest 提出修改建议")
     return rel
@@ -130,7 +133,9 @@ def skill(ctx, name, file=None):
     if not found["enabled"]:
         raise ValueError("学习者停用了这个技能")
     ctx.act("用了技能「" + found["title"] + "」", "skill:" + found["slug"], False)
-    return {"skill": found["name"], "title": found["title"], "instructions": skillbook.instructions(found)}
+    # The attributes too, so a change proposed with skill_edit can start from the whole file.
+    attrs, _ = split_frontmatter(ctx.l.vault.read_text(f"{skillbook.FOLDER}/{found['slug']}/SKILL.md"))
+    return {"skill": found["name"], "title": found["title"], "attributes": attrs, "instructions": skillbook.instructions(found)}
 
 
 @tool("graph", ALL, "整张知识图：全部节点（id、种类、标题、所属主题、理解阶段、证据数、最近活动）、全部关系，以及每个主题的主干路线。给 topic 时只看这个主题和它的分支，加上直接相连的节点。用它判断学习者在哪、学过什么、该往哪走。",
@@ -517,10 +522,38 @@ def open_file(ctx, file, line=None, highlight=None, cell=None):
     return {"opened": rel or str(absolute)}
 
 
+@tool("skill_edit", ALL, "提出修改一个技能（技能列表见系统说明的「技能」一节；先用 skill 读它现在的全文）。不会直接改："
+      "学习者在左右对照里看你改了哪里（删的标红、加的标绿），可以接着改、换回原文或者不用，批准了才生效，每次修改都留历史。"
+      "name 是技能名；file 默认 SKILL.md，也可以是它附带的文件；给 content 就是改后的全文（SKILL.md 可以只写正文，开头的属性没写的会保留原来的），或者给 edits（[{old, new}]，"
+      "每个 old 必须在原文里恰好出现一次）；why 用一句话说为什么这样改。new 为 true 时是新建一个技能：name 是它的名字，"
+      "content 是完整的 SKILL.md（开头的属性要有 name、title、description、category）。",
+      {"name": S, "why": S, "file": S, "content": S, "new": {"type": "boolean"},
+       "edits": {"type": "array", "items": {"type": "object", "properties": {"old": S, "new": S}, "required": ["old", "new"]}}}, ["name", "why"])
+def skill_edit(ctx, name, why, file="SKILL.md", content=None, edits=None, new=False):
+    slug, title, rel = skillbook.change_target(ctx.l.root, name, file, bool(new))
+    base = ctx.l.vault.read_text(rel) if ctx.l.vault.path(rel).exists() else ""
+    if content is None and not edits:
+        raise ValueError("给 content（改后的全文）或 edits")
+    after = text(content, 200_000) if content is not None else skillbook.apply_edits(base, edits)
+    if after == base:
+        raise ValueError("改完和原来一样")
+    if rel.endswith("/SKILL.md"):
+        if base:
+            after = skillbook.keep_attributes(base, after)
+            if after == base:
+                raise ValueError("改完和原来一样")
+        skillbook.check_page(after)
+    change = ctx.bridge.propose_skill_change(slug, title, rel, base, after, text(why, 500), ctx.agent, ctx.thread)
+    ctx.turn.changes.append({"change": change, "skill": slug, "title": title, "file": rel, "why": text(why, 500), "new": not base})
+    return {"change": change, "note": "已经在学习者那边打开了左右对照，等 TA 审；批准之前技能还是原来的样子，不要当成已经改好了"}
+
+
 @tool("suggest", {"tutor", "coach"}, "对学习者的一个文件提修改建议：old 是文件里现有的一段原文（必须只出现一次；不给 old 表示把 new 加到文件末尾），new 是改成什么，why 一句话说明。建议显示在你的回复下面，学习者点了才应用。",
       {"file": S, "old": S, "new": S, "why": S}, ["file", "new"])
 def suggest(ctx, file, new, old="", why=""):
     path = _path_of(ctx, file)
+    if str(path).startswith("skills/"):
+        raise ValueError("技能的修改用 skill_edit 提出")
     got = ctx.l.read_file(path, 4 * 1024 * 1024)
     if got.get("binary"):
         raise ValueError("不能对二进制文件提建议")

@@ -40,9 +40,9 @@ def load(vault_root, name):
     source = (own if own.is_file() else HERE / f"{name}.md").read_text(encoding="utf-8")
     attrs, policy = split_frontmatter(source)
     tools = list(attrs.get("tools") or [])
-    # Every agent can read the skills it is given, whatever its own tool list says.
+    # Every agent can read the skills it is given, and propose changes to them, whatever its own tool list says.
     return {"name": name, "title": attrs.get("title", name), "history": int(attrs.get("history", 12)),
-            "blocks": bool(attrs.get("blocks", True)), "tools": tools + ([] if "skill" in tools else ["skill"]), "policy": policy.strip()}
+            "blocks": bool(attrs.get("blocks", True)), "tools": tools + [t for t in ("skill", "skill_edit") if t not in tools], "policy": policy.strip()}
 
 
 def system_prompt(vault_root, agent, extra=""):
