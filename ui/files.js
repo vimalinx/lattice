@@ -136,6 +136,7 @@ function fileMenu(pid,anchor){
  const st=Files[pid],d=st.data,form=d.doc||d.card||d.topic,mode=st.raw?"":st.mode;
  popMenu(anchor,'<div class="menu-label">显示方式 <small>Ctrl + E 在编辑和阅读之间切换</small></div>'+
   MD_MODES.map(([m,t])=>'<button data-action="file-mode" data-pid="'+pid+'" data-mode="'+m+'"'+(st.raw?" disabled":"")+'>'+svg(mode===m?"check":"document",14)+'<span>'+t+'</span></button>').join("")+
+  (st.mode!=="preview"&&!st.raw?'<hr/><button data-action="file-table" data-pid="'+pid+'">'+svg("layout",14)+'<span>插入表格 · Ctrl Shift T</span></button>':"")+
   (form?'<hr/><button data-action="file-raw" data-pid="'+pid+'">'+svg(st.raw?"layout":"code",14)+'<span>'+(st.raw?"回到表单":"编辑原文（包括开头的属性）")+'</span></button>':"")+
   '<hr/><button data-action="open-settings" data-page="look">'+svg("sliders",14)+'<span>笔记默认的显示方式…</span></button>',{cls:"menu-wide"});
 }
@@ -468,6 +469,8 @@ async function fileAction(kind,a){
   Files[pid].afterInstall=a.dataset.package;await rpc("env_install",{name:a.dataset.env,packages:[a.dataset.package]});return;
  }
  case "file-menu":return fileMenu(pid,a);
+ case "file-table":{const v=Dock.els[pid]?.querySelector(".cm-host.editor")?.cmView;if(!v)return;if(Files[pid].mode!=="live"){Files[pid].mode="live";p.mode="live";renderFile(pid);}
+  const view=Dock.els[pid].querySelector(".cm-host.editor").cmView;view.focus();return insertTable(view);}
  case "file-mode":await flushFile(pid);st.mode=a.dataset.mode;p.mode=st.mode;saveLayout();renderFile(pid);return st.mode!=="preview"&&focusEditor(Dock.els[pid]);
  case "file-raw":await flushFile(pid);st.raw=!st.raw;return loadFile(pid);
  case "file-external":return rpc("file_external",{path:p.path});

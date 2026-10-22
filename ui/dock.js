@@ -84,6 +84,8 @@ function splitBeside(target,zone,newStack){
 function panelKey(p){return p.type+":"+(p.path||p.thread||p.agent||"")+(p.type==="chat"&&!p.thread?":follow":"");}
 function findPanel(params){const key=panelKey(params);return Object.keys(Dock.panels).find(pid=>panelKey(Dock.panels[pid])===key)||null;}
 function targetStack(side){
+ // Opened from a group's own +: into that group, whatever kind of window it is.
+ if(Dock.into){const s=Dock.into.until>Date.now()&&findStack(Dock.into.stack);Dock.into=null;if(s)return s;}
  const remembered=findStack(Dock.lastStack[side]);
  if(remembered&&(remembered.tabs.length?remembered.tabs.some(pid=>sideOf(pid)===side&&hosts(pid)):remembered.keep))return remembered;
  let found=null;
@@ -99,7 +101,8 @@ function targetStack(side){
 }
 function openPanel(params,opts={}){
  let pid=opts.reuse===false?null:findPanel(params);
- // Already open, maybe in another workspace: show the same panel here too.
+ // Already open, maybe in another workspace: show the same panel here too (moved into the group asked for, if any).
+ if(pid&&Dock.into&&Dock.into.until>Date.now()&&findStack(Dock.into.stack)&&!findStack(Dock.into.stack).tabs.includes(pid)){detach(pid);tidy();}
  if(pid){activate(pid);if(opts.then)opts.then(pid);return pid;}
  pid=newId("p");Dock.panels[pid]=params;
  const side=Dock.types[params.type]?.side||"mine";
@@ -212,6 +215,7 @@ function stackEl(s,floating=null){
    (floating?"":'<button class="tab-btn" data-action="dock-float" data-pid="'+pid+'" title="浮出">'+svg("float",12)+'</button>')+
    '<button class="tab-btn" data-action="dock-close" data-pid="'+pid+'" title="关闭">'+svg("close",12)+'</button></div>'));
  });
+ bar.appendChild(h('<button class="tab-add" data-action="stack-add" data-stack="'+s.id+'" title="在这一组里新建或打开…">'+svg("plus",13)+'</button>'));
  bar.appendChild(h('<div class="tabs-fill" data-stack="'+s.id+'"'+(floating?' data-float-move="'+floating.id+'"':"")+'></div>'));
  if(s.active&&Dock.els[s.active]){
   node.lastElementChild.appendChild(Dock.els[s.active]);

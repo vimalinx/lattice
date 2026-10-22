@@ -50,9 +50,23 @@ const NEW_ITEMS=[
 // Panels that already have a button of their own; the palette still lists them as commands.
 const PANEL_ITEMS=[["开始","open-home","home",""],["知识图","open-map","network",""],["学习轨迹","open-journal","history",""],["回顾","open-review","refresh",""],["卡片库","open-library","card",""],["记忆","open-memory","calendar",""],
  ["快速打开笔记 · Ctrl O","note-switcher","document",""],["今天的日记","note-daily","calendar",""],["大纲与链接","open-noteinfo","list",""],["设置","open-settings","sliders",""]];
+// What a group of tabs can open: something new, or any window. The same list is behind the activity bar's +, when it is shown.
+const OPEN_ITEMS=[["主会话","open-agent","bot",'data-agent="tutor"'],["快答","open-agent","spark",'data-agent="flash"'],["开始","open-home","home"],["知识图","open-map","network"],
+ ["卡片库","open-library","card"],["回顾","open-review","refresh"],["记忆","open-memory","calendar"],["大纲与链接","open-noteinfo","list"],["学习轨迹","open-journal","history"],["设置","open-settings","sliders"]];
+function openMenuHtml(){
+ const item=([t,a,i,d,x])=>'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+(d?'<small>'+esc(d)+'</small>':"")+'</span></button>';
+ return '<div class="menu-label">新建</div><div class="menu-grid">'+NEW_ITEMS.slice(0,4).map(([t,a,i,d,x])=>item([t,a,i,"",x])).join("")+
+  '<button data-action="note-new" data-folder="">'+svg("notenew",14)+'<span>新笔记</span></button></div>'+
+  '<hr/><div class="menu-label">打开窗口</div><div class="menu-grid">'+OPEN_ITEMS.map(([t,a,i,x])=>'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+'</span></button>').join("")+'</div>'+
+  '<hr/><button data-action="note-switcher">'+svg("search",14)+'<span>打开一篇笔记或文件… <small>Ctrl O</small></span></button>'+
+  '<button data-action="space-new">'+svg("layout",14)+'<span>新工作区…</span></button>';
+}
+// From a group's own +: whatever is opened goes into that group.
+function stackMenu(anchor,stack){Dock.into={stack,until:Date.now()+15000};popMenu(anchor,openMenuHtml(),{cls:"menu-wide"});}
 function newMenu(anchor){
+ Dock.into=null;
  const r=anchor.getBoundingClientRect();
- const menu=h('<div class="menu" style="left:'+(r.right+6)+'px;top:'+r.top+'px">'+NEW_ITEMS.map(([t,a,i,d,x],k)=>(k===4||k===6?'<hr/>':'')+'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+(d?'<small>'+esc(d)+'</small>':"")+'</span></button>').join("")+'</div>');
+ const menu=h('<div class="menu menu-wide" style="left:'+(r.right+6)+'px;top:'+r.top+'px">'+openMenuHtml()+'</div>');
  closeMenus();document.body.appendChild(menu);
  menu.style.top=Math.max(8,Math.min(r.top,innerHeight-menu.offsetHeight-8))+"px";
 }
@@ -180,6 +194,7 @@ async function onAction(a){
  case "dock-float":return float(pid);
  case "modal-close":return closeModal();
  case "new-menu":return newMenu(a);
+ case "stack-add":return stackMenu(a,a.dataset.stack);
  case "palette":return palette();
  case "theme":S.ui.theme=S.ui.theme==="dark"?"light":"dark";applyUi();return saveUi();
  case "side-collapse":return setSideOpen(false);
@@ -292,6 +307,7 @@ async function onAction(a){
  case "file-history":return showHistory(pid);
  }
  if(kind.startsWith("space")||kind==="stack-unkeep"){const r=await spaceAction(kind,a);if(r!==null)return r;}
+ if(kind.startsWith("grid-")){const r=gridAction(kind,a);if(r!==null)return r;}
  if(/^(note-|noteinfo-|folder-new|ni-|switcher-)/.test(kind)){const r=await notesAction(kind,a);if(r!==null)return r;}
  if(a.closest(".panel-settings")){const r=await settingsAction(kind,a);if(r!==null)return r;}
  return fileAction(kind,a);
@@ -328,7 +344,7 @@ function initInteractions(){
   if(wiki){e.preventDefault();safe(()=>openWiki(wiki.dataset.wiki,wiki.closest(".panel")?.dataset.pid));return;}
   const tag=e.target.closest("a.tag[data-tag]");if(tag){e.preventDefault();showTag(tag.dataset.tag);return;}
   const link=e.target.closest(".markdown a[href^='http']");if(link){e.preventDefault();safe(()=>rpc("open_url",{url:link.href}));return;}
-  if(!e.target.closest(".menu,[data-action='new-menu']"))closeMenus();
+  if(!e.target.closest(".menu,[data-action='new-menu'],[data-action='stack-add']")){closeMenus();Dock.into=null;}
   if(e.target.closest("[data-dismiss]")&&e.target===e.target.closest("[data-dismiss]")){closeModal();return;}
   const a=e.target.closest("[data-action]");if(a&&!a.disabled)safe(()=>onAction(a));
  });

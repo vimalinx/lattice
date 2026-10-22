@@ -147,7 +147,7 @@ async function spaceAction(kind,a){
  const id=a.dataset.space;
  switch(kind){
   case "space":if(id===Dock.space)return setSideOpen(!sideOpen());return switchSpace(id);
-  case "space-new":return spaceForm(null);
+  case "space-new":Dock.into=null;return spaceForm(null);
   case "space-edit":return spaceForm(id);
   case "space-icon":all(".icon-pick button").forEach(b=>b.classList.toggle("on",b===a));return;
   case "space-save":return spaceSave(a.closest("[data-space-form]"));
