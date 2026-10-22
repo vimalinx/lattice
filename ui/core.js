@@ -25,6 +25,7 @@ function svg(name,size=18){
   search:'<circle cx="10.6" cy="10.6" r="6.5"/><path d="m15.6 15.6 5 5"/>',
   plus:'<path d="M12 5v14M5 12h14"/>',
   chevron:'<path d="m9 18 6-6-6-6"/>',
+  store:'<path d="M4 8h16l-1.2 11.2a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>',
   list:'<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>',
   star:'<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
   sort:'<path d="M7 4v16m0 0-3-3m3 3 3-3M17 20V4m0 0-3 3m3-3 3 3"/>',

@@ -122,6 +122,7 @@ function messageEl(pid,m,answers){
   const foot='<div class="msg-foot">'+(mine?"":'<span>'+esc(agentTitle(meta.agent||p.agent))+'</span>')+'<time>'+esc(fmtDate(m.at,true))+'</time>'+
    (m.content.trim()?iconButton("copy","msg-copy","复制",'data-pid="'+pid+'" data-mid="'+m.id+'"'):"")+(!mine&&m.content.trim()?messageTools(pid,m):"")+'</div>';
   const html=mine?'<div class="msg from-me" data-mid="'+m.id+'"><div class="bubble">'+
+    (meta.skill_title?'<div class="msg-skill">'+svg("store",11)+' 按技能「'+esc(meta.skill_title)+'」</div>':"")+
     (meta.selection?'<div class="msg-quote">'+esc(shorten(meta.selection,180))+'</div>':"")+
     (meta.attach?.length?'<div class="msg-attach">'+meta.attach.map(x=>'<a data-action="open-file" data-path="'+esc(x)+'">'+svg(fileIcon(x),12)+' '+esc(x.split("/").pop())+'</a>').join("")+'</div>':"")+
     '<div class="markdown msg-body">'+r.html+'</div></div>'+foot+'</div>'
@@ -233,7 +234,7 @@ function updateComposer(pid){
  const ended=p.agent==="coach"&&st.data.practice&&st.data.practice.state!=="active",m=chatModel(pid),busy=st.data.busy;
  area.disabled=ended;
  area.placeholder=ended?"这次练习已经结束":!m.ready?"还没接入模型":(AGENT_HINT[p.agent]||"")+" · "+sendHint();
- node.querySelector(".attach-row").innerHTML=(st.quote?'<span class="sel-chip" title="'+esc(shorten(st.quote,400))+'">'+svg("quote",11)+' “'+esc(shorten(st.quote.replace(/\s+/g," "),28))+'” · '+st.quote.length+' 字<button data-action="quote-clear" data-pid="'+pid+'" title="不带">×</button></span>':"")+
+ node.querySelector(".attach-row").innerHTML=(st.skill?'<span class="sel-chip skill">'+svg("store",11)+' 技能：'+esc(st.skill.title)+'<button data-action="skill-clear" data-pid="'+pid+'" title="不用这个技能">×</button></span>':"")+(st.quote?'<span class="sel-chip" title="'+esc(shorten(st.quote,400))+'">'+svg("quote",11)+' “'+esc(shorten(st.quote.replace(/\s+/g," "),28))+'” · '+st.quote.length+' 字<button data-action="quote-clear" data-pid="'+pid+'" title="不带">×</button></span>':"")+
   st.attach.map((a,i)=>'<span class="sel-chip file">'+svg(fileIcon(a.path),11)+' '+esc(a.path.split("/").pop())+'<button data-action="chat-attach-remove" data-pid="'+pid+'" data-index="'+i+'" title="不附上">×</button></span>').join("");
  const tag=node.querySelector(".model-tag");
  tag.innerHTML='<span>'+esc(modelName(m.model))+'</span>'+svg("chevrondown",10);tag.hidden=!m.ready;tag.classList.toggle("own",m.own);tag.classList.toggle("working",!!busy);
@@ -257,6 +258,7 @@ function attachMenu(pid,anchor){
  const open=Object.values(Dock.panels).filter(p=>p.type==="file"&&p.path).map(p=>p.path);
  const paths=[...new Set([...open,...(Dwell.recent||[]).map(r=>r.path)])].filter(x=>!have.has(x)).slice(0,10);
  popMenu(anchor,(Sel.text?'<button data-action="chat-attach-sel" data-pid="'+pid+'">'+svg("quote",14)+'<span>带上选中的文字<small>“'+esc(shorten(Sel.text.replace(/\s+/g," "),36))+'” · '+Sel.text.length+' 字</small></span></button><hr/>':"")+
+  '<button data-action="skill-menu" data-pid="'+pid+'">'+svg("store",14)+'<span>用一个技能…<small>这条消息按某个技能的做法来（也可以在输入框里打 /）</small></span></button>'+
   '<button data-action="chat-attach-pick" data-pid="'+pid+'">'+svg("upload",14)+'<span>从电脑里选文件…<small>复制进学习库的 data/附件/，AI 也能读</small></span></button>'+
   (paths.length?'<hr/><div class="menu-label">学习库里的文件，AI 需要时会去读</div>'+paths.map(x=>'<button data-action="chat-attach-add" data-pid="'+pid+'" data-path="'+esc(x)+'">'+svg(fileIcon(x),14)+'<span>'+esc(x.split("/").pop())+'<small>'+esc(x)+'</small></span></button>').join(""):""),{above:true});
 }
@@ -289,9 +291,10 @@ async function chatSend(pid,text,extra={}){
  if(text==null&&area){area.value="";fitComposer(pid);}st.input="";
  st.error="";st.stream="";st.live=[];st.waiting="";Object.assign(st,freshThinking());
  try{
-  const r=await rpc("send",{agent:p.agent,message,thread:st.thread,selection,task:extra.task||"",note:screenNote(),answer:extra.answer||null,attach,model:p.model||null});
-  st.thread=r.thread;if(extra.selection==null)st.quote="";if(text==null)st.attach=[];
-  st.data.messages.push({id:"pending",role:"user",content:message||({check:"我写好了，帮我看看我的代码和运行结果。",hint:"我卡住了，给我一点提示，先别直接给答案。",capture:"把我们讨论过的内容整理成知识卡。"})[extra.task]||"",meta:{selection,answer:extra.answer,attach},at:new Date().toISOString()});
+  const skill=text==null?st.skill:null;
+  const r=await rpc("send",{agent:p.agent,message,thread:st.thread,selection,task:extra.task||"",note:screenNote(),answer:extra.answer||null,attach,model:p.model||null,skill:skill?.slug||null});
+  st.thread=r.thread;if(extra.selection==null)st.quote="";if(text==null){st.attach=[];st.skill=null;}
+  st.data.messages.push({id:"pending",role:"user",content:message||({check:"我写好了，帮我看看我的代码和运行结果。",hint:"我卡住了，给我一点提示，先别直接给答案。",capture:"把我们讨论过的内容整理成知识卡。"})[extra.task]||"",meta:{selection,answer:extra.answer,attach,skill_title:skill?.title},at:new Date().toISOString()});
   st.data.busy=true;renderChat(pid,false);
  }catch(e){if(text==null&&area){area.value=message;fitComposer(pid);}st.error=e.message;renderLive(pid);throw e;}
 }

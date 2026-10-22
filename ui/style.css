@@ -816,3 +816,30 @@ select{appearance:none;padding-right:28px;background-image:linear-gradient(45deg
 .chat-error.quiet{color:var(--muted);border-color:var(--line);background:transparent}
 .msg-note{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .msg-note .btn{color:var(--text)}
+/* skills */
+.store{height:100%;display:flex;flex-direction:column;min-height:0}
+.store-head{padding:14px 16px 8px;border-bottom:1px solid var(--line-soft);display:flex;flex-direction:column;gap:9px}
+.store-intro b{font-size:15px;display:block;margin-bottom:3px}
+.store-intro small{color:var(--muted);font-size:12px;line-height:1.6;display:block}
+.store-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.store-bar .side-input{width:auto;flex:0 1 200px;margin:0}
+.store-head .stage-chips{margin:0}
+.store-list{flex:1;overflow:auto;padding:4px 16px 28px}
+.store-list h4{display:flex;align-items:center;gap:6px;margin:18px 0 8px;font-size:12.5px;color:var(--muted);font-weight:600}
+.store-list h4 small{color:var(--subtle);font-weight:400}
+.skill-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+.skill-card{display:flex;flex-direction:column;gap:7px;padding:12px 14px;border:1px solid var(--line-soft);border-radius:12px;background:var(--surface);cursor:pointer;transition:border-color .12s}
+.skill-card:hover{border-color:var(--line)}
+.skill-card.on{border-color:color-mix(in srgb,var(--accent) 35%,var(--line-soft))}
+.skill-card.off{opacity:.6}
+.sk-top{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.sk-top>svg{color:var(--accent)}
+.sk-top b{font-size:13.5px}
+.skill-card p{margin:0;color:var(--muted);font-size:12px;line-height:1.6;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.sk-meta{display:flex;flex-wrap:wrap;gap:4px 8px;font-size:11px;color:var(--subtle)}
+.sk-meta span{background:var(--panel);border-radius:10px;padding:1px 7px}
+.sk-actions{display:flex;flex-wrap:wrap;gap:5px;margin-top:auto}
+.chip.warn{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 50%,var(--line))}
+.skill-detail .skill-body{margin-top:10px;padding:12px 16px;border:1px solid var(--line-soft);border-radius:10px;background:var(--panel-hi);max-height:52vh;overflow:auto}
+.sk-files{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:12px}
+.sel-chip.skill{color:var(--ai);border-color:color-mix(in srgb,var(--ai) 45%,var(--line))}
+.msg-skill{font-size:11.5px;color:var(--ai);margin-bottom:4px;display:flex;align-items:center;gap:4px}

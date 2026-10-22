@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from . import skills
 from .vault import split_frontmatter
 
 HERE = Path(__file__).with_name("agents")
@@ -38,8 +39,10 @@ def load(vault_root, name):
     own = Path(vault_root) / "agents" / f"{name}.md"
     source = (own if own.is_file() else HERE / f"{name}.md").read_text(encoding="utf-8")
     attrs, policy = split_frontmatter(source)
+    tools = list(attrs.get("tools") or [])
+    # Every agent can read the skills it is given, whatever its own tool list says.
     return {"name": name, "title": attrs.get("title", name), "history": int(attrs.get("history", 12)),
-            "blocks": bool(attrs.get("blocks", True)), "tools": list(attrs.get("tools") or []), "policy": policy.strip()}
+            "blocks": bool(attrs.get("blocks", True)), "tools": tools + ([] if "skill" in tools else ["skill"]), "policy": policy.strip()}
 
 
 def system_prompt(vault_root, agent, extra=""):
@@ -47,6 +50,7 @@ def system_prompt(vault_root, agent, extra=""):
     parts = [rules.read_text(encoding="utf-8").strip() if rules.is_file() else "", agent["policy"]]
     if agent["blocks"]:
         parts.append((HERE / "blocks.md").read_text(encoding="utf-8").strip())
+    parts.append(skills.prompt_section(vault_root, agent["name"]))
     if extra:
         parts.append(extra.strip())
     return "\n\n---\n\n".join(p for p in parts if p)

@@ -362,7 +362,7 @@ async function settingsAction(kind,a){
  }
  return null;
 }
-const ZOOM_KINDS=[["chat:tutor","主会话"],["chat:flash","快答"],["chat:coach","练习教练"],["file","文件"],["home","开始"],["map","知识图"],["journal","学习轨迹"],["review","回顾"],["library","卡片库"],["memory","记忆"],["noteinfo","大纲与链接"],["settings","设置"]];
+const ZOOM_KINDS=[["chat:tutor","主会话"],["chat:flash","快答"],["chat:coach","练习教练"],["file","文件"],["home","开始"],["map","知识图"],["journal","学习轨迹"],["review","回顾"],["library","卡片库"],["memory","记忆"],["noteinfo","大纲与链接"],["skills","技能商城"],["settings","设置"]];
 function settingsChange(t){
  if(t.dataset.readUnlimited!==undefined){S.ui.read_width=t.checked?"none":42;applyUi();saveUi();renderSettings(t.closest(".panel"),"look");return true;}
  if(t.dataset.uiRange){S.ui[t.dataset.uiRange]=Number(t.value);applyUi();saveUi();return true;}

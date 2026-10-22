@@ -49,10 +49,10 @@ const NEW_ITEMS=[
  ["新工作区…","space-new","layout","自己搭一套窗口组合"]];
 // Panels that already have a button of their own; the palette still lists them as commands.
 const PANEL_ITEMS=[["开始","open-home","home",""],["知识图","open-map","network",""],["学习轨迹","open-journal","history",""],["回顾","open-review","refresh",""],["卡片库","open-library","card",""],["记忆","open-memory","calendar",""],
- ["快速打开笔记 · Ctrl O","note-switcher","document",""],["今天的日记","note-daily","calendar",""],["大纲与链接","open-noteinfo","list",""],["设置","open-settings","sliders",""]];
+ ["快速打开笔记 · Ctrl O","note-switcher","document",""],["技能商城","open-skills","store",""],["今天的日记","note-daily","calendar",""],["大纲与链接","open-noteinfo","list",""],["设置","open-settings","sliders",""]];
 // What a group of tabs can open: something new, or any window. The same list is behind the activity bar's +, when it is shown.
 const OPEN_ITEMS=[["主会话","open-agent","bot",'data-agent="tutor"'],["快答","open-agent","spark",'data-agent="flash"'],["开始","open-home","home"],["知识图","open-map","network"],
- ["卡片库","open-library","card"],["回顾","open-review","refresh"],["记忆","open-memory","calendar"],["大纲与链接","open-noteinfo","list"],["学习轨迹","open-journal","history"],["设置","open-settings","sliders"]];
+ ["卡片库","open-library","card"],["回顾","open-review","refresh"],["记忆","open-memory","calendar"],["大纲与链接","open-noteinfo","list"],["学习轨迹","open-journal","history"],["技能商城","open-skills","store"],["设置","open-settings","sliders"]];
 function openMenuHtml(){
  const item=([t,a,i,d,x])=>'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+(d?'<small>'+esc(d)+'</small>':"")+'</span></button>';
  return '<div class="menu-label">新建</div><div class="menu-grid">'+NEW_ITEMS.slice(0,4).map(([t,a,i,d,x])=>item([t,a,i,"",x])).join("")+
@@ -175,7 +175,7 @@ async function onEvent(evt){
  if(evt.type==="run")return runEvent(evt);
  if(evt.type==="kernel"){kernelEvent(evt);if(["run_finished","batch_finished"].includes(evt.kind))journalsChanged();return;}
  if(evt.type==="ui"){const result=await runUiOps(evt.ops);return rpc("ui_done",{request:evt.request,result});}
- if(evt.type==="changed"){fileChanged(evt);embedsChanged(evt.paths);sideChanged(evt.paths);mapsChanged();journalsChanged();homesChanged();if(evt.external||evt.paths.some(p=>/^(topics|cards|lessons|notes|insights|notebooks)\//.test(p)))refreshState();return;}
+ if(evt.type==="changed"){fileChanged(evt);embedsChanged(evt.paths);if(evt.paths.some(p=>p.startsWith("skills/")))skillsChanged();sideChanged(evt.paths);mapsChanged();journalsChanged();homesChanged();if(evt.external||evt.paths.some(p=>/^(topics|cards|lessons|notes|insights|notebooks)\//.test(p)))refreshState();return;}
  if(evt.type==="open"){openFile(evt.path,{line:evt.line,highlight:evt.highlight,cell:evt.cell});return;}
  if(evt.type==="env"){
   toast(evt.message,evt.ok?"info":"error");
@@ -213,6 +213,7 @@ async function onAction(a){
  case "open-library":return openPanel({type:"library"});
  case "open-memory":return openPanel({type:"memory"});
  case "open-noteinfo":return openPanel({type:"noteinfo"});
+ case "open-skills":return openPanel({type:"skills"});
  case "open-settings":{const page=a.dataset.page,had=findPanel({type:"settings"}),id=openPanel({type:"settings",...(page?{page}:{})});if(had&&page)renderSettings(Dock.els[id],page);return;}
  case "open-file":return openFile(a.dataset.path||a.dataset.id,{line:a.dataset.line?Number(a.dataset.line):null,highlight:a.dataset.highlight||null});
  case "open-doc":{const d=(S.data.docs||[]).find(x=>x.id===a.dataset.id);if(d)return openFile(d.path);return toast("找不到这个文档，它可能已经被删除","error");}
@@ -309,6 +310,7 @@ async function onAction(a){
  }
  if(kind.startsWith("space")||kind==="stack-unkeep"){const r=await spaceAction(kind,a);if(r!==null)return r;}
  if(kind.startsWith("grid-")){const r=gridAction(kind,a);if(r!==null)return r;}
+ if(kind.startsWith("skill-")){const r=await skillAction(kind,a);if(r!==null)return r;}
  if(/^(note-|noteinfo-|folder-new|ni-|switcher-)/.test(kind)){const r=await notesAction(kind,a);if(r!==null)return r;}
  if(a.closest(".panel-settings")){const r=await settingsAction(kind,a);if(r!==null)return r;}
  return fileAction(kind,a);
@@ -353,7 +355,11 @@ function initInteractions(){
   const t=e.target;
   if(t.id==="palette-q")return t.dataset.switcher!=null?switcherFilter(t.value):paletteFilter(t.value);
   if(t.dataset.niTagQuery){const p=Dock.panels[t.dataset.niTagQuery];if(p){p.tagQuery=t.value;renderTags(t.dataset.niTagQuery).then(()=>{const f=el('[data-ni-tag-query="'+t.dataset.niTagQuery+'"]');if(f){f.focus();f.setSelectionRange(f.value.length,f.value.length);}});}return;}
-  if(t.dataset.composer){if(Chat[t.dataset.composer])Chat[t.dataset.composer].input=t.value;fitComposer(t.dataset.composer);return;}
+  if(t.dataset.composer){
+   const pid=t.dataset.composer;if(Chat[pid])Chat[pid].input=t.value;fitComposer(pid);
+   // A / on its own picks a skill for this message.
+   if(t.value==="/"){t.value="";if(Chat[pid])Chat[pid].input="";safe(()=>skillMenu(pid,t.closest(".capsule")||t));}
+   return;}
   if(t.dataset.uiRange){S.ui[t.dataset.uiRange]=Number(t.value);const out=t.parentElement.querySelector("[data-range-out]");if(out)out.textContent=t.value+" 字";applyUi();return saveUi();}
   if(t.closest?.(".panel-settings")&&settingsAutosave(t,false))return;
   if(t.dataset.sideInput&&sideInput(t))return;

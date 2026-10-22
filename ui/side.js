@@ -111,7 +111,7 @@ async function treeRows(path,depth){
  }
  return out;
 }
-const FOLDER_NAME={topics:"主题",cards:"知识卡",lessons:"课程",notes:"笔记",insights:"薄弱点",notebooks:"实验笔记",code:"代码",data:"数据",envs:"环境",threads:"对话",journal:"轨迹",agents:"AI 的规则"};
+const FOLDER_NAME={topics:"主题",cards:"知识卡",lessons:"课程",notes:"笔记",insights:"薄弱点",notebooks:"实验笔记",code:"代码",data:"数据",envs:"环境",threads:"对话",journal:"轨迹",agents:"AI 的规则",skills:"技能"};
 function sideChanged(paths){
  for(const path of paths||[]){const parts=path.split("/");for(let i=0;i<parts.length;i++)delete Side.entries[parts.slice(0,i).join("/")];}
  clearTimeout(Side.timer);Side.timer=setTimeout(()=>safe(renderSide),300);

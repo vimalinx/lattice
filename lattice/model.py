@@ -700,7 +700,7 @@ class Lattice:
                 break
         return out
 
-    ORDER = ("topics", "cards", "notes", "lessons", "notebooks", "code", "data", "insights", "envs", "agents", "threads", "journal")
+    ORDER = ("topics", "cards", "notes", "lessons", "notebooks", "code", "data", "insights", "skills", "envs", "agents", "threads", "journal")
 
     def _dirs(self, base):
         names = [d.name for d in base.iterdir() if d.is_dir() and not d.name.startswith(".")]

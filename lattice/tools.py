@@ -12,6 +12,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 
+from . import skills as skillbook
 from .model import AGENT_RECORDS, LINK_KINDS, readable_outputs, text, title_of
 from .vault import APPEND_ONLY, kind_of, slug
 
@@ -118,6 +119,18 @@ def _guard(ctx, path):
 @tool("screen", ALL, "学习者此刻的界面：开着哪些面板、哪个在前台、每个文件看到哪一节或哪几格、光标和选中的内容、没保存的草稿、最近看过的文件和停留时间、正在运行什么和最近一次运行的结果。")
 def screen(ctx):
     return ctx.bridge.screen_state()
+
+
+@tool("skill", ALL, "读学习库里装的一个技能的完整做法（技能列表在系统说明的「技能」一节）。name 是技能名；file 给出时读它附带的那个文件（模板、清单、例子）。读到以后照着做。",
+      {"name": S, "file": S}, ["name"])
+def skill(ctx, name, file=None):
+    found = skillbook.find(ctx.l.root, name)
+    if file:
+        return {"skill": found["name"], "file": file, "content": skillbook.file_of(ctx.l.root, found, file)}
+    if not found["enabled"]:
+        raise ValueError("学习者停用了这个技能")
+    ctx.act("用了技能「" + found["title"] + "」", "skill:" + found["slug"], False)
+    return {"skill": found["name"], "title": found["title"], "instructions": skillbook.instructions(found)}
 
 
 @tool("graph", ALL, "整张知识图：全部节点（id、种类、标题、所属主题、理解阶段、证据数、最近活动）、全部关系，以及每个主题的主干路线。给 topic 时只看这个主题和它的分支，加上直接相连的节点。用它判断学习者在哪、学过什么、该往哪走。",
@@ -457,7 +470,7 @@ UI_OP = {"type": "object", "properties": {"do": {"type": "string", "enum": ["ope
 
 @tool("ui", {"tutor", "flash", "coach"}, "控制整个界面，ops 按顺序执行。界面分成几个工作区（活动栏上的图标，见 screen 的 workspace），每个是一套窗口组合，左栏放它自己的列表；"
       "同一个面板（比如主会话）可以同时出现在几个工作区。下面的操作都作用在学习者眼前的这个工作区；对话工作区可以放任何面板，由你按需要安排。\n"
-      "- open：打开面板。panel 是 chat（给 agent：tutor 主会话 / flash 快答）、file（给 path）、map（可给 topic）、journal、review（回顾到期的卡）、library（卡片库）、memory（记忆：理解阶段、到期预报、回顾记录）、noteinfo（笔记旁边的大纲、反向链接、出链和标签）、settings、home；where 是 left / right / top / bottom（贴着 to 指定的面板分栏）、float（浮出）或 tab（默认：放进 to 所在的那组标签，不给 to 就放进同一侧最近用的那组）。\n"
+      "- open：打开面板。panel 是 chat（给 agent：tutor 主会话 / flash 快答）、file（给 path）、map（可给 topic）、journal、review（回顾到期的卡）、library（卡片库）、memory（记忆：理解阶段、到期预报、回顾记录）、noteinfo（笔记旁边的大纲、反向链接、出链和标签）、skills（技能商城）、settings、home；where 是 left / right / top / bottom（贴着 to 指定的面板分栏）、float（浮出）或 tab（默认：放进 to 所在的那组标签，不给 to 就放进同一侧最近用的那组）。\n"
       "- close / focus / float：panel 是面板 id 或标题（从 screen 里看）。\n"
       "- move：把 panel 移到 to 旁边，where 同上。\n"
       "- layout：整个替换这个工作区的布局。spec 是 {\"split\": \"h\"或\"v\", \"sizes\": [0.5, 0.5], \"parts\": [spec, ...]}，叶子是 {\"tabs\": [面板, ...]}；面板可以是已有面板的 id，也可以是一个 open 那样的对象。\n"

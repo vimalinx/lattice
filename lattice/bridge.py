@@ -21,7 +21,7 @@ from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QFileDialog
 
-from . import agents, tools
+from . import agents, skills, tools
 from .envs import Envs, missing_module
 from .index import dump, uid
 from .model import Lattice, STAGES, outside_code, readable_outputs, text
@@ -371,6 +371,50 @@ class Bridge(QObject):
         if not row or not row["id"]:
             return {"title": "", "backlinks": [], "unlinked": [], "outgoing": []}
         return self.lattice.note_links(row["id"])
+
+    # ---- skills: the store ships them, the vault keeps the ones in use ------------------------------------------
+    def rpc_skills(self):
+        return skills.catalog(self.root)
+
+    def rpc_skill_read(self, slug, shipped=False):
+        source = [s for s in (skills.shipped() if shipped else skills.installed(self.root)) if s["slug"] == slug]
+        if not source:
+            raise ValueError("没有这个技能")
+        return source[0]
+
+    def rpc_skill_install(self, slug):
+        self.commit_mine()
+        target = skills.install(self.lattice.vault, slug)
+        self.lattice.vault.commit("装上技能 " + slug, "me")
+        return {"path": target + "/SKILL.md"}
+
+    def rpc_skill_install_many(self, slugs):
+        self.commit_mine()
+        for slug in slugs[:100]:
+            skills.install(self.lattice.vault, slug)
+        self.lattice.vault.commit(f"装上 {len(slugs)} 个技能", "me")
+        return True
+
+    def rpc_skill_uninstall(self, slug):
+        self.commit_mine()
+        skills.uninstall(self.lattice.vault, slug)
+        self.lattice.vault.commit("卸下技能 " + slug, "me")
+        return True
+
+    def rpc_skill_enable(self, slug, on=True):
+        return skills.set_enabled(self.lattice.vault, slug, on)
+
+    def rpc_skill_create(self, title, description="", category="其他", agents=None):
+        return {"path": skills.create(self.lattice.vault, title, description, category, agents or skills.AGENTS)}
+
+    def rpc_skill_import(self, folder=None):
+        folder = folder or QFileDialog.getExistingDirectory(None, "选一个技能文件夹（里面要有 SKILL.md）", str(Path.home()))
+        if not folder:
+            return None
+        self.commit_mine()
+        target = skills.import_folder(self.lattice.vault, folder)
+        self.lattice.vault.commit("导入技能 " + target, "me")
+        return {"path": target + "/SKILL.md"}
 
     def rpc_tags(self):
         return self.lattice.tags()
@@ -903,10 +947,10 @@ class Bridge(QObject):
         name = self.lattice.topic(topic)["title"] if topic else None
         return {"thread": self.lattice.thread_new(agent, topic, AGENT_NAMES[agent] + (" · " + name if name else ""))["id"]}
 
-    def rpc_send(self, agent, message="", thread=None, topic=None, selection="", task="", note="", answer=None, attach=None, model=None):
-        return self.send(agent, message, thread, topic, selection, task, note, answer, attach=attach, model=model)
+    def rpc_send(self, agent, message="", thread=None, topic=None, selection="", task="", note="", answer=None, attach=None, model=None, skill=None):
+        return self.send(agent, message, thread, topic, selection, task, note, answer, attach=attach, model=model, skill=skill)
 
-    def send(self, agent, message="", thread=None, topic=None, selection="", task="", note="", answer=None, extra="", attach=None, model=None):
+    def send(self, agent, message="", thread=None, topic=None, selection="", task="", note="", answer=None, extra="", attach=None, model=None, skill=None):
         l = self.lattice
         definition = agents.load(self.root, agent)
         practice = None
@@ -932,19 +976,24 @@ class Bridge(QObject):
             raise ValueError(f"请先在设置里给{AGENT_NAMES[agent]}填写 {conn['label']} 的 API Key")
         history = self._history(thread, definition["history"])
         attach = [str(x)[:500] for x in (attach or []) if str(x).strip()][:12]
+        picked = skills.find(self.root, skill) if skill else None
         meta = {"agent": agent, **({"selection": selection} if selection else {}), **({"task": task} if task else {}), **({"answer": answer} if answer else {}),
-                **({"attach": attach} if attach else {})}
+                **({"attach": attach} if attach else {}), **({"skill": picked["slug"], "skill_title": picked["title"]} if picked else {})}
         l.append_message(thread, "user", message, meta)
         l.record("answered" if answer else "asked", {"text": message[:600], "agent": agent, **({"question": answer.get("question", "")[:400]} if answer else {}),
                                                     **({"screen": note[:300]} if note else {})}, "me", [thread, *([topic] if topic else [])])
-        user, system = self._compose(definition, thread, topic, practice, message, task, selection, attach, note, extra)
+        user, system = self._compose(definition, thread, topic, practice, message, task, selection, attach, note, extra, picked)
         self._turn(agent, thread, topic, thread if practice else None, conn, system, history, user, definition["tools"])
         return {"thread": thread, "state": "queued"}
 
-    def _compose(self, definition, thread, topic, practice, message, task, selection, attach, note, extra=""):
+    def _compose(self, definition, thread, topic, practice, message, task, selection, attach, note, extra="", skill=None):
         """The learner's turn as the model gets it, and the system prompt around it."""
         l = self.lattice
         user = agents.task_prompt(message, task) + extra
+        if skill:
+            # The learner picked a skill for this message: its whole way of working comes with it, so no lookup is needed.
+            user += "\n\n（学习者要求这一轮按技能「" + skill["title"] + "」来做。完整做法如下，照着做；说明里提到的附带文件用 skill 工具的 file 读。）\n\n" + skills.instructions(skill)
+            l.record("skill", {"skill": skill["slug"], "title": skill["title"], "by": "learner"}, "me", [thread])
         notes = "；".join(x for x in (note.strip(), ("附上了这些文件，需要时用 read 读：" + "、".join(attach)) if attach else "",
                                       ("选中了这段内容：\n" + selection.strip()[:5000]) if selection.strip() else "") if x)
         if notes:
@@ -987,8 +1036,14 @@ class Bridge(QObject):
         conn = self.config.agent(agent, use=model)
         if not conn["api_key"]:
             raise ValueError(f"请先在设置里给{AGENT_NAMES[agent]}填写 {conn['label']} 的 API Key")
+        picked = None
+        if meta.get("skill"):
+            try:
+                picked = skills.find(self.root, meta["skill"])
+            except ValueError:
+                picked = None
         user, system = self._compose(definition, thread, topic, practice, question["content"], meta.get("task", ""), meta.get("selection", ""),
-                                     meta.get("attach") or [], note)
+                                     meta.get("attach") or [], note, "", picked)
         self.retrying.add(thread)
         self._turn(agent, thread, topic, thread if practice else None, conn, system, self._history(thread, definition["history"], last), user,
                    definition["tools"])
