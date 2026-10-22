@@ -8,6 +8,12 @@
 - `lattice:cards` 一组知识卡：`{"cards": ["卡片 id 或标题", …], "review": true}`。review 为 true 时是回顾模式：学习者先看问题、自己回想，再自评记得多少（自评只由学习者点）。
 - `lattice:graph` 知识图的一部分：`{"topic": "主题 id", "focus": ["id", …], "here": "id"}`。给 topic 会画出它的主干路线和挂着的岔路；here 标出学习者现在在哪。
 - `lattice:chart` 图表：`{"kind": "line|bar|scatter", "title": "…", "x": [...], "series": [{"name": "…", "y": [...]}], "xlabel": "…", "ylabel": "…"}`。
+- `lattice:relations` 你自己画的一张关系图（概念之间、组件之间、因果、前后依赖……），不限于学习库里已有的东西：
+  `{"title": "…", "nodes": [{"id": "a", "label": "注意力", "group": "机制", "note": "点开时看到的一两句话", "ref": "学习库里对应的卡片或笔记标题（可选）", "main": true}], "edges": [{"from": "a", "to": "b", "kind": "prerequisite", "label": "可选，不给就用 kind 的名字", "note": "可选"}], "layout": "force", "caption": "图下一句说明（可选）"}`。
+  kind 可以是 prerequisite（前提）、causes（导致）、part_of（组成）、contrasts（对比）、example（例子）、uses（用到）、becomes（变成）、related（相关）；layout 可以是 force（默认，自动摆）、tree（分层，配 "direction": "LR" 从左到右）、circle、concentric、grid。group 相同的节点同色，main 是图的中心。节点不超过二三十个，太多就拆成几张。学习者能拖动、缩放、点节点看说明。
+- `lattice:explore` 一个可以动手调的小实验：滑块改参数，图和几个数跟着变。
+  `{"title": "…", "note": "一句话说要观察什么", "params": [{"name": "eta", "label": "学习率 η", "min": 0, "max": 2.5, "step": 0.05, "value": 0.2}], "x": {"name": "n", "from": 0, "to": 20, "label": "更新次数"}, "series": [{"name": "p", "label": "猜测 p", "init": "0", "next": "p + eta*(1 - p)"}, {"name": "f", "label": "目标", "expr": "1"}], "readouts": [{"label": "每步误差缩成", "expr": "abs(1 - eta)"}], "ymin": -1, "ymax": 3}`。
+  series 二选一：expr 是 x 的函数（变量是 x 的 name 和各个参数）；init 加 next 是递推（next 里用 series 自己的 name 表示上一步的值，n 是第几步）。式子只能用数字、参数、+ - * / % ^、比较、条件 a ? b : c，以及 sin、cos、exp、log、sqrt、abs、min、max、pow、tanh、sigmoid、relu、clamp 等函数和 pi、e。会发散的量用 ymin / ymax 固定纵轴。学习者调完可以点「带着现在的设置问 AI」把参数发给你。
 - `lattice:timeline` 轨迹片段：`{"refs": ["id", …], "types": ["ran", …], "days": 7}`，任选其一或组合。
 - `lattice:excerpt` 学习库里某个文件的一段：`{"file": "路径", "from": 起始行, "to": 结束行, "highlight": "要高亮的原文"}`。学习者可以点它在自己那边打开到这里。
 
