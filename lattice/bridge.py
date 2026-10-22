@@ -7,6 +7,7 @@ thread; everything that touches the vault or the index happens on it.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -37,6 +38,7 @@ DATA_HOME = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
 APP_HOME = DATA_HOME / "lattice"
 LEGACY_DB = APP_HOME / "lattice.db"
 USAGE_LOG = APP_HOME / "usage.jsonl"
+WEB_CACHE = APP_HOME / "web-cache"
 TEXT_EXT = {".md", ".txt", ".py", ".js", ".mjs", ".ts", ".c", ".h", ".cpp", ".cc", ".hpp", ".rs", ".go", ".sh", ".json", ".yaml", ".yml",
             ".toml", ".csv", ".tsv", ".html", ".css", ".rb", ".lua", ".jl", ".r", ".R", ".java", ".pl", ".php", ".ini", ".cfg", ".tex", ".sql", ".jsonl"}
 IMAGE_EXT = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp"}
@@ -535,6 +537,46 @@ class Bridge(QObject):
         entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
         return {"path": str(folder), "parent": str(folder.parent) if folder.parent != folder else None,
                 "entries": entries[:3000], "more": max(0, len(entries) - 3000), "places": _places()}
+
+    def rpc_web_open(self, url, refresh=False):
+        """A web page or PDF for the learner's reader. Pages read once are kept on this computer, so a cited page opens
+        at once and the same as before; refresh reads it again. A page not kept yet arrives later as a "web" event."""
+        from . import web
+        url = str(url or "").strip()
+        if not url.startswith(("http://", "https://")):
+            raise ValueError("只能打开 http(s) 网页")
+        cache = WEB_CACHE / (hashlib.sha1(url.encode("utf-8")).hexdigest()[:24] + ".json")
+        if not refresh:
+            try:
+                return {"state": "ready", "page": json.loads(cache.read_text(encoding="utf-8"))}
+            except (OSError, ValueError):
+                pass
+
+        def then(result):
+            if isinstance(result, Exception):
+                return self.announce({"type": "web", "url": url, "error": str(result)})
+            result.update(asked=url, fetched=datetime.now().astimezone().isoformat(timespec="seconds"))
+            try:
+                WEB_CACHE.mkdir(parents=True, exist_ok=True)
+                cache.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+            except OSError as exc:
+                LOG.warning("could not keep web page: %s", exc)
+            self.announce({"type": "web", "url": url, "page": result})
+        self.background(lambda: web.page(url), then)
+        return {"state": "loading"}
+
+    def rpc_web_save(self, url):
+        """A page the learner read, kept as a note under notes/网页/ with where it came from."""
+        found = self.rpc_web_open(url)
+        if found.get("state") != "ready":
+            raise ValueError("这个网页还没读完")
+        page, l = found["page"], self.lattice
+        body = f"> 来源：[{page['title']}]({page['url']}) · {page.get('fetched', '')[:10]} 存下\n\n" + page["markdown"]
+        self.commit_mine()
+        rel = l.note_create(page["title"][:120], body[:50000], "网页", ("网页",), "me", l.active_topic())
+        l.vault.commit("存下网页：" + page["title"][:60], "me")
+        self.changed([rel])
+        return {"path": rel}
 
     def rpc_clipboard_text(self):
         return QGuiApplication.clipboard().text()

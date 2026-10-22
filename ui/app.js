@@ -178,6 +178,7 @@ async function onEvent(evt){
  if(evt.type==="run")return runEvent(evt);
  if(evt.type==="kernel"){kernelEvent(evt);if(["run_finished","batch_finished"].includes(evt.kind))journalsChanged();return;}
  if(evt.type==="notice"){toast(evt.message);return;}
+ if(evt.type==="web")return readerEvent(evt);
  if(evt.type==="ui"){const result=await runUiOps(evt.ops);return rpc("ui_done",{request:evt.request,result});}
  if(evt.type==="changed"){fileChanged(evt);embedsChanged(evt.paths);if(evt.paths.some(p=>p.startsWith("skills/")))skillsChanged();sideChanged(evt.paths);mapsChanged();journalsChanged();homesChanged();if(evt.external||evt.paths.some(p=>/^(topics|cards|lessons|notes|insights|notebooks)\//.test(p)))refreshState();return;}
  if(evt.type==="open"){openFile(evt.path,{line:evt.line,highlight:evt.highlight,cell:evt.cell});return;}
@@ -232,6 +233,8 @@ async function onAction(a){
  case "open-practice":return openPractice(a.dataset.id);
  case "open-ref":return openRef(a.dataset.ref);
  case "open-url":return rpc("open_url",{url:a.dataset.url});
+ case "open-web":return openWeb(a.dataset.url,pid);
+ case "web-back":case "web-refresh":case "web-copy":case "web-save":return readerAction(kind,a,pid);
  case "open-vault":return rpc("open_folder",{});
  case "tree-toggle":{const p=a.dataset.path;Side.open.has(p)?Side.open.delete(p):Side.open.add(p);return renderSide();}
  case "project-add":{const path=await pickPath({mode:"dir",title:"挂载一个本地目录",ok:"挂载",hint:"挂载后你能读写，AI 只读"});if(!path)return;const r=await rpc("project_add",{path},0);if(r){delete Side.entries[""];await refreshState();renderSide();toast("已挂载 "+r.name+"：你能读写，AI 只读");}return;}
@@ -365,7 +368,8 @@ function initInteractions(){
   const wiki=e.target.closest("a[data-wiki]");
   if(wiki){e.preventDefault();safe(()=>openWiki(wiki.dataset.wiki,wiki.closest(".panel")?.dataset.pid));return;}
   const tag=e.target.closest("a.tag[data-tag]");if(tag){e.preventDefault();showTag(tag.dataset.tag);return;}
-  const link=e.target.closest(".markdown a[href^='http']");if(link){e.preventDefault();safe(()=>rpc("open_url",{url:link.href}));return;}
+  // Web links open in the reader; with Ctrl, in the browser.
+  const link=e.target.closest(".markdown a[href^='http']");if(link){e.preventDefault();openWeb(link.href,link.closest(".panel")?.dataset.pid,e.ctrlKey||e.metaKey);return;}
   if(!e.target.closest(".menu,[data-action='new-menu'],[data-action='stack-add']")){closeMenus();Dock.into=null;}
   if(e.target.closest("[data-dismiss]")&&e.target===e.target.closest("[data-dismiss]")){closeModal();return;}
   const a=e.target.closest("[data-action]");if(a&&!a.disabled)safe(()=>onAction(a));

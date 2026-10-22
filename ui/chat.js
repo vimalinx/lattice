@@ -201,9 +201,11 @@ function actionChips(actions,undone=[],live=false){
  return '<details class="actions'+(live?" live":"")+'"><summary>'+svg(live?"spark":"check",12)+'<b>'+actions.length+' 步</b><span>'+esc(line)+'</span>'+svg("chevrondown",11)+'</summary><div class="action-list">'+rows+'</div></details>'+
   (lead?'<div class="action-lead">'+lead+'</div>':"");
 }
+// A search result's title can be a PDF's raw bytes read as text; the site's name says more then.
+function sourceTitle(s){const t=String(s.title||"");return !t||(t.match(/[\u0080-\u00ff\ufffd]/g)||[]).length>t.length*.15?hostOf(s.url):t;}
 function sourcesHtml(sources){
  if(!sources?.length)return "";
- return '<div class="sources"><span>'+svg("link",12)+' 来源</span>'+sources.map(s=>'<a data-action="open-url" data-url="'+esc(s.url)+'" title="'+esc(s.url)+'">'+esc(shorten(s.title||s.url,48))+'</a>').join("")+'</div>';
+ return '<div class="sources"><span>'+svg("link",12)+' 来源</span>'+sources.map(s=>'<a data-action="open-web" data-url="'+esc(s.url)+'" title="'+esc(s.url)+'">'+esc(shorten(sourceTitle(s),48))+'</a>').join("")+'</div>';
 }
 function suggestionsHtml(pid,m){
  const list=m.meta?.suggestions||[];if(!list.length)return "";

@@ -160,17 +160,19 @@ async function contextDo(kind,ctx){
   else{f.focus();document.execCommand("selectAll");}
   return;
  }
- if(kind==="open")return ctx.link.click();
- if(kind==="link")return writeClipboard(ctx.link.href);
+ if(kind==="open")return ctx.link.dataset.wiki?ctx.link.click():openWeb(ctx.link.href||ctx.link.dataset.url,ctx.link.closest(".panel")?.dataset.pid);
+ if(kind==="browser")return rpc("open_url",{url:ctx.link.href||ctx.link.dataset.url});
+ if(kind==="link")return writeClipboard(ctx.link.href||ctx.link.dataset.url);
 }
 addEventListener("contextmenu",e=>{
  // The tab, workspace, note-tree and table menus handled it already; everywhere else the system menu never shows.
  if(e.defaultPrevented)return;
  e.preventDefault();hideTip();
- const t=e.target,field=fieldOf(t),text=fieldSelection(field),link=t.closest?.("a[href^='http'],a[data-wiki]");
+ const t=e.target,field=fieldOf(t),text=fieldSelection(field),link=t.closest?.("a[href^='http'],a[data-wiki],a[data-action='open-web']");
  const row=(kind,icon,label,keys="",off=false)=>'<button type="button" data-ctx="'+kind+'"'+(off?" disabled":"")+'>'+svg(icon,14)+'<span>'+label+'</span>'+(keys?'<kbd>'+keys+'</kbd>':"")+'</button>';
  const parts=[];
- if(link)parts.push(row("open",link.dataset.wiki?"document":"external",link.dataset.wiki?"打开「"+esc(shorten(link.dataset.wiki,24))+"」":"在浏览器里打开链接")+(link.dataset.wiki?"":row("link","link","复制链接地址")));
+ if(link)parts.push(link.dataset.wiki?row("open","document","打开「"+esc(shorten(link.dataset.wiki,24))+"」"):
+  row("open","document","在 Lattice 里读")+row("browser","external","在浏览器里打开","Ctrl 点击")+row("link","link","复制链接地址"));
  if(field){
   const locked=fieldLocked(field);
   parts.push(row("cut","cut","剪切","Ctrl X",!text||locked)+row("copy","copy","复制","Ctrl C",!text)+row("paste","paste","粘贴","Ctrl V",locked)+row("all","selectall","全选","Ctrl A"));

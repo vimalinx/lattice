@@ -81,7 +81,7 @@ function splitBeside(target,zone,newStack){
  parent.kids[parent.kids.indexOf(target)]=split;
 }
 /* ---- opening and closing ----------------------------------------------------------------------- */
-function panelKey(p){return p.type+":"+(p.path||p.thread||p.agent||"")+(p.type==="chat"&&!p.thread?":follow":"");}
+function panelKey(p){return p.type+":"+(p.path||p.url||p.thread||p.agent||"")+(p.type==="chat"&&!p.thread?":follow":"");}
 function findPanel(params){const key=panelKey(params);return Object.keys(Dock.panels).find(pid=>panelKey(Dock.panels[pid])===key)||null;}
 // A conversation on show is never covered by a new tab: the AI that opened something would hide itself.
 function covers(s){return !!(s?.active&&Dock.panels[s.active]?.type==="chat");}
@@ -388,6 +388,7 @@ function paramsOf(op){
  if(type==="chat")return {type,agent:op.agent||"tutor",...(op.thread?{thread:op.thread}:{})};
  if(type==="file"){if(!op.path)throw new Error("打开文件要给 path");return {type,path:op.path};}
  if(type==="map")return {type,topic:op.topic||null};
+ if(type==="web"){if(!/^https?:\/\//.test(op.url||""))throw new Error("打开网页要给 http(s) 的 url");return {type,url:op.url};}
  if(!Dock.types[type])throw new Error("没有这种面板："+type);
  return {type};
 }
