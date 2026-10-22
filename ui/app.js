@@ -71,16 +71,17 @@ function newMenu(anchor){
  closeMenus();document.body.appendChild(menu);
  menu.style.top=Math.max(8,Math.min(r.top,innerHeight-menu.offsetHeight-8))+"px";
 }
-function closeMenus(){all(".menu").forEach(m=>m.remove());}
+function closeMenus(){all(".menu").forEach(m=>m.remove());Menus.owner=null;}
 /* A small menu next to what opened it (above it for things at the bottom), kept inside the window. */
-const Menus={reopen:null};
+const Menus={reopen:null,owner:null};
 function popMenu(anchor,html,opts={}){
  closeMenus();Menus.reopen=null;
  const r=anchor.getBoundingClientRect?anchor.getBoundingClientRect():{left:anchor.x,right:anchor.x,top:anchor.y,bottom:anchor.y};
- const menu=h('<div class="menu '+(opts.cls||"")+'">'+html+'</div>');document.body.appendChild(menu);
- const w=menu.offsetWidth,ht=menu.offsetHeight;
- const x=Math.max(8,Math.min(r.left,innerWidth-w-8)),y=opts.above?r.top-ht-6:r.bottom+6;
- menu.style.left=x+"px";menu.style.top=Math.max(8,Math.min(y<8?r.bottom+6:y,innerHeight-ht-8))+"px";
+ const menu=h('<div class="menu '+(opts.cls||"")+'">'+html+'</div>');if(opts.width)menu.style.minWidth=opts.width+"px";document.body.appendChild(menu);
+ const w=menu.offsetWidth,ht=menu.offsetHeight,below=r.bottom+6,above=r.top-ht-6;
+ // Below unless it does not fit there and does above (or asked for above and it fits).
+ const y=opts.above?(above>=8?above:below):(below+ht<=innerHeight-8||above<8?below:above);
+ menu.style.left=Math.max(8,Math.min(r.left,innerWidth-w-8))+"px";menu.style.top=Math.max(8,Math.min(y,innerHeight-ht-8))+"px";
  return menu;
 }
 function tabMenu(pid,at){
@@ -233,10 +234,10 @@ async function onAction(a){
  case "open-url":return rpc("open_url",{url:a.dataset.url});
  case "open-vault":return rpc("open_folder",{});
  case "tree-toggle":{const p=a.dataset.path;Side.open.has(p)?Side.open.delete(p):Side.open.add(p);return renderSide();}
- case "project-add":{const r=await rpc("project_add",{},0);if(r){delete Side.entries[""];await refreshState();renderSide();toast("已挂载 "+r.name+"：你能读写，AI 只读");}return;}
+ case "project-add":{const path=await pickPath({mode:"dir",title:"挂载一个本地目录",ok:"挂载",hint:"挂载后你能读写，AI 只读"});if(!path)return;const r=await rpc("project_add",{path},0);if(r){delete Side.entries[""];await refreshState();renderSide();toast("已挂载 "+r.name+"：你能读写，AI 只读");}return;}
  case "project-remove":if(!await ask("目录本身不会被改动。",{title:"取消挂载这个目录？",ok:"取消挂载",cancel:"留着"}))return;await rpc("project_remove",{id:a.dataset.id});delete Side.entries[""];await refreshState();return renderSide();
- case "import-md":{const r=await rpc("import_markdown",{},0);if(r){toast("导入了 "+r.count+" 篇");sideChanged(["notes/x"]);refreshState();}return;}
- case "export":{const r=await rpc("export",{},0);if(r)toast("已导出到 "+r);return;}
+ case "import-md":{const folder=await pickPath({mode:"dir",title:"从已有的 Markdown 笔记目录导入",ok:"导入",hint:"只复制，原来的文件不动"});if(!folder)return;const r=await rpc("import_markdown",{folder},0);if(r){toast("导入了 "+r.count+" 篇");sideChanged(["notes/x"]);refreshState();}return;}
+ case "export":{const path=await pickPath({mode:"save",title:"导出学习库",ok:"导出",name:"lattice-learning.zip",ext:".zip",hint:"一个 ZIP，不含 API Key"});if(!path)return;const r=await rpc("export",{path},0);if(r)toast("已导出到 "+r);return;}
  case "chat-send":return chatSend(pid);
  case "chat-starter":return chatSend(pid,a.dataset.say);
  case "chat-retry":return chatRetry(pid);
@@ -244,7 +245,7 @@ async function onAction(a){
  case "chat-topic-menu":return topicMenu(pid,a);
  case "chat-attach":return attachMenu(pid,a);
  case "chat-attach-add":{const st=Chat[pid];if(st&&!st.attach.some(x=>x.path===a.dataset.path))st.attach.push({path:a.dataset.path});updateComposer(pid);return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
- case "chat-attach-pick":{const paths=await rpc("attach_files",{},0);const st=Chat[pid];if(!paths?.length||!st)return;
+ case "chat-attach-pick":{const picked=await pickPath({mode:"files",title:"附上文件",ok:"附上",hint:"会复制进学习库的 data/附件/，原文件不动"});if(!picked?.length)return;const paths=await rpc("attach_files",{paths:picked},0);const st=Chat[pid];if(!paths?.length||!st)return;
   paths.forEach(x=>{if(!st.attach.some(y=>y.path===x))st.attach.push({path:x});});await refreshState();updateComposer(pid);return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
  case "chat-attach-sel":{const st=Chat[pid];if(st&&Sel.text){st.quote=Sel.text;clearSelection();updateComposer(pid);}return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
  case "chat-attach-remove":Chat[pid]?.attach.splice(Number(a.dataset.index),1);return updateComposer(pid);
@@ -308,6 +309,7 @@ async function onAction(a){
   const go=()=>{if(!Chat[target]?.data)return setTimeout(go,150);Chat[target].quote=text;updateComposer(target);Dock.els[target]?.querySelector(".composer textarea")?.focus();};
   return go();
  }
+ case "theme-color":return themeColorPick(a);
  case "organizer-dismiss":Organizer.text="";return renderOrganizer();
  case "topic-focus":{await rpc("focus",{topic:a.dataset.id});await refreshState();followingPanels().forEach(x=>loadChat(x));
   let tutor=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="tutor"&&!Dock.panels[x].thread);if(!tutor)openPanel({type:"chat",agent:"tutor"});else activate(tutor);return;}
@@ -368,7 +370,6 @@ function initInteractions(){
    // A / on its own picks a skill for this message.
    if(t.value==="/"){t.value="";if(Chat[pid])Chat[pid].input="";safe(()=>skillMenu(pid,t.closest(".capsule")||t));}
    return;}
-  if(t.dataset.themeVar){themeColorInput(t);return;}
   if(t.dataset.uiRange){S.ui[t.dataset.uiRange]=Number(t.value);const out=t.parentElement.querySelector("[data-range-out]");if(out)out.textContent=t.value+" 字";applyUi();return saveUi();}
   if(t.dataset.apiQuery!==undefined){Settings.apiQuery=t.value;const n=t.closest(".panel");renderSettings(n,"apis").then(()=>{const f=n.querySelector("[data-api-query]");if(f){f.focus();f.setSelectionRange(f.value.length,f.value.length);}});return;}
   if(t.closest?.(".panel-settings")&&settingsAutosave(t,false))return;
@@ -424,7 +425,7 @@ function initInteractions(){
   if(tab){e.preventDefault();tabMenu(tab.dataset.pid,{x:e.clientX,y:e.clientY});}
   else if(space){e.preventDefault();const r=space.getBoundingClientRect();spaceMenu(space.dataset.space,{x:r.right+8,y:r.top});}
  });
- document.addEventListener("mouseup",e=>setTimeout(()=>onSelect(e),0));
+ document.addEventListener("mouseup",e=>{if(e.button!==2)setTimeout(()=>onSelect(e),0);});
  document.addEventListener("scroll",()=>{hidePop();reportScreen();},true);
  document.addEventListener("focusin",()=>reportScreen());
  setInterval(trackDwell,2000);

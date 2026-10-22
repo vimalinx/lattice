@@ -638,8 +638,10 @@ class ApiWorker(QThread):
             async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
                 if self.test:
                     api, model = config.get("api"), config.get("model") or ""
-                    if config.get("models_path"):
-                        response = await client.get(endpoint(config["base_url"], config["models_path"]), headers=headers)
+                    # Not given means the standard /models; an empty one means the service has no model list.
+                    models_path = config.get("models_path", "models")
+                    if models_path:
+                        response = await client.get(endpoint(config["base_url"], models_path), headers=headers)
                         if response.status_code >= 400:
                             raise ValueError(f"读取模型列表失败：HTTP {response.status_code} {response.text[:300]}")
                         payload = response.json()

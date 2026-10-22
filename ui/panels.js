@@ -221,7 +221,7 @@ const SETTINGS_RENDER={
   for(const [name,a] of Object.entries(c.agents)){
    const d=await rpc("agent_definition",{name}),def=d.definition,apiOpts=c.apis.map(x=>[x.id,x.label+(x.has_key?"":" · 没有 Key")]);
    cards.push('<details class="agent-edit"'+(name==="tutor"?" open":"")+'><summary><b>'+esc(a.title)+'</b> <span class="muted">'+esc(a.label)+(d.overridden?" · 规则已改写":"")+'</span></summary>'+
-    '<div class="three"><label>API 连接<select data-cfg-agent="'+name+'" data-key="api">'+opt(a.api,apiOpts)+'</select></label><label>模型 <small>可以从连接读到的列表里选</small><input data-cfg-agent="'+name+'" data-key="model" list="models-'+esc(a.api)+'" value="'+esc(a.model)+'"/></label>'+
+    '<div class="three"><label>API 连接<select data-cfg-agent="'+name+'" data-key="api">'+opt(a.api,apiOpts)+'</select></label><label>模型 <small>可以从连接读到的列表里选</small><input data-cfg-agent="'+name+'" data-key="model" data-suggest="models-'+esc(a.api)+'" value="'+esc(a.model)+'"/></label>'+
     '<label>回复上限（含思考）<input type="number" min="256" max="64000" data-cfg-agent="'+name+'" data-key="max_tokens" value="'+esc(a.max_tokens)+'"/></label></div>'+
     '<div class="three"><label>Temperature <small>留空用全局</small><input type="number" step="0.05" min="0" max="2" data-cfg-agent="'+name+'" data-key="temperature" value="'+esc(a.temperature??"")+'"/></label>'+
     '<label>每轮带上多少条历史<input type="number" min="0" max="200" data-agent-history="'+name+'" value="'+esc(def.history)+'"/></label>'+
@@ -364,7 +364,7 @@ function apiDetail(a,c){
  return head+key+
   '<div class="inline">'+button((models.length?"重新读取":"测试并读取")+"模型列表","api-test",'data-api="'+esc(a.id)+'"',"primary sm")+testLine(a.id,test)+'<span class="grow"></span>'+
    (a.has_key&&a.key_source==="本机配置"?button("清除 Key","cfg-clear-key",'data-api="'+esc(a.id)+'"',"ghost xs"):"")+'</div>'+
-  f("model","默认模型 <small>选这个连接时默认用它</small>",'list="models-'+esc(a.id)+'"')+
+  f("model","默认模型 <small>选这个连接时默认用它</small>",'data-suggest="models-'+esc(a.id)+'"')+
   (models.length?'<div class="field-label">可用的模型 · '+models.length+' <small>点一个设为默认</small></div><div class="model-chips">'+models.map(m=>'<button class="chip'+(m===a.model?" on":"")+'" data-action="api-use-model" data-api="'+esc(a.id)+'" data-model="'+esc(m)+'">'+esc(m)+'</button>').join("")+'</div>':"")+
   '<datalist id="models-'+esc(a.id)+'">'+models.map(m=>'<option value="'+esc(m)+'">').join("")+'</datalist>'+
   '<details class="api-more"'+(a.preset==="custom"?" open":"")+'><summary>地址和高级设置</summary>'+

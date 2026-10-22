@@ -18,8 +18,7 @@ import time
 import zipfile
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QFileDialog
+from PySide6.QtGui import QDesktopServices, QGuiApplication
 
 from . import agents, skills, tools
 from .envs import Envs, missing_module
@@ -42,6 +41,26 @@ IMAGE_EXT = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", "
 CODE_EXT = {"python": ".py", "py": ".py", "c": ".c", "cpp": ".cpp", "c++": ".cpp", "rust": ".rs", "rs": ".rs", "go": ".go",
             "javascript": ".js", "js": ".js", "typescript": ".ts", "ts": ".ts", "bash": ".sh", "sh": ".sh", "shell": ".sh", "ruby": ".rb",
             "lua": ".lua", "julia": ".jl", "r": ".r", "java": ".java"}
+
+
+def _places():
+    """The usual folders (the XDG user folders, under whatever names they have here) for the file picker's side."""
+    home, out = Path.home(), [{"name": "家目录", "path": str(Path.home())}]
+    names = {"DESKTOP": ("桌面", "Desktop"), "DOWNLOAD": ("下载", "Downloads"), "DOCUMENTS": ("文档", "Documents"),
+             "PROJECTS": ("项目", "Projects"), "PICTURES": ("图片", "Pictures")}
+    found = {}
+    try:
+        for line in (Path(os.environ.get("XDG_CONFIG_HOME", home / ".config")) / "user-dirs.dirs").read_text(encoding="utf-8").splitlines():
+            m = re.match(r'XDG_(\w+)_DIR="(.*)"', line.strip())
+            if m and m.group(1) in names:
+                found[m.group(1)] = Path(m.group(2).replace("$HOME", str(home)))
+    except OSError:
+        pass
+    for key, (name, usual) in names.items():
+        folder = found.get(key, home / usual)
+        if folder.is_dir() and folder != home:
+            out.append({"name": name, "path": str(folder)})
+    return out
 
 
 def compact(items):
@@ -414,7 +433,6 @@ class Bridge(QObject):
         return {"path": skills.create(self.lattice.vault, title, description, category, agents or skills.AGENTS)}
 
     def rpc_skill_import(self, folder=None):
-        folder = folder or QFileDialog.getExistingDirectory(None, "选一个技能文件夹（里面要有 SKILL.md）", str(Path.home()))
         if not folder:
             return None
         self.commit_mine()
@@ -490,14 +508,39 @@ class Bridge(QObject):
             raise ValueError("不支持该外部链接")
         return QDesktopServices.openUrl(target)
 
+    def rpc_browse(self, path=None, hidden=False):
+        """One folder of this computer for the program's own file picker (choosing where to import from, what to
+        attach, where to export): its folders, then its files. Only the learner's picker asks; agents never do."""
+        folder = Path(path).expanduser().resolve() if path else Path.home()
+        if not folder.is_dir():
+            raise ValueError("不是一个文件夹：" + str(folder))
+        try:
+            items = list(os.scandir(folder))
+        except PermissionError:
+            raise ValueError("没有权限打开这个文件夹：" + str(folder)) from None
+        entries = []
+        for item in items:
+            if not hidden and item.name.startswith("."):
+                continue
+            try:
+                is_dir = item.is_dir()
+                size = 0 if is_dir else item.stat().st_size
+            except OSError:
+                continue
+            entries.append({"name": item.name, "dir": is_dir, "size": size})
+        entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
+        return {"path": str(folder), "parent": str(folder.parent) if folder.parent != folder else None,
+                "entries": entries[:3000], "more": max(0, len(entries) - 3000), "places": _places()}
+
+    def rpc_clipboard_text(self):
+        return QGuiApplication.clipboard().text()
+
     def rpc_project_add(self, path=None):
-        path = path or QFileDialog.getExistingDirectory(None, "挂载一个本地目录（AI 只读）", str(Path.home()), QFileDialog.Option.ShowDirsOnly)
         return self.lattice.add_project(Path(path).name, path) if path else None
 
     def rpc_attach_files(self, paths=None):
         """Copy files chosen on this computer into data/附件/, so they can be attached to a message and read
         by the agents (whose sandbox sees only the vault and mounted folders). The originals stay untouched."""
-        paths = paths or QFileDialog.getOpenFileNames(None, "附上文件（复制进学习库的 data/附件/）", str(Path.home()))[0]
         out = []
         for raw in paths or []:
             source = Path(raw)
@@ -1342,7 +1385,6 @@ class Bridge(QObject):
 
     def rpc_export(self, path=None):
         """The vault is the archive: every file as it is, without the index, git or machine-local state."""
-        path = path or QFileDialog.getSaveFileName(None, "导出学习库（不含 API Key）", str(Path.home() / "lattice-learning.zip"), "ZIP (*.zip)")[0]
         if not path:
             return None
         self.commit_mine()
@@ -1353,7 +1395,6 @@ class Bridge(QObject):
 
     def rpc_import_markdown(self, folder=None):
         """Copy a folder of Markdown notes into notes/<folder name>/; the original stays untouched."""
-        folder = folder or QFileDialog.getExistingDirectory(None, "从已有 Markdown 笔记目录导入（只复制）", str(Path.home()), QFileDialog.Option.ShowDirsOnly)
         if not folder:
             return None
         source = Path(folder).resolve()

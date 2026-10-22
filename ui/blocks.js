@@ -142,8 +142,8 @@ function chartSvg(d){
  let body="";
  series.forEach((s,k)=>{
   const c=colors[k%colors.length];
-  if(d.kind==="bar"){const bw=(W-2*P)/n/(series.length+1);s.y.forEach((v,i)=>{body+='<rect x="'+(P+i*(W-2*P)/n+k*bw+bw/2)+'" y="'+Y(Math.max(0,v))+'" width="'+bw+'" height="'+Math.abs(Y(v)-Y(0))+'" fill="'+c+'"><title>'+esc(xs[i])+": "+esc(v)+'</title></rect>';});}
-  else if(d.kind==="scatter")s.y.forEach((v,i)=>{if(clip(v)==null)return;body+='<circle cx="'+X(xs[i],i)+'" cy="'+Y(v)+'" r="3.2" fill="'+c+'"><title>'+esc(xs[i])+", "+esc(v)+'</title></circle>';});
+  if(d.kind==="bar"){const bw=(W-2*P)/n/(series.length+1);s.y.forEach((v,i)=>{body+='<rect x="'+(P+i*(W-2*P)/n+k*bw+bw/2)+'" y="'+Y(Math.max(0,v))+'" width="'+bw+'" height="'+Math.abs(Y(v)-Y(0))+'" fill="'+c+'" data-tip="'+esc(xs[i])+": "+esc(v)+'"></rect>';});}
+  else if(d.kind==="scatter")s.y.forEach((v,i)=>{if(clip(v)==null)return;body+='<circle cx="'+X(xs[i],i)+'" cy="'+Y(v)+'" r="3.2" fill="'+c+'" data-tip="'+esc(xs[i])+", "+esc(v)+'"></circle>';});
   else{
    // A gap (a value that is not a number) breaks the line instead of drawing it to nowhere.
    let seg=[];const flush=()=>{if(seg.length>1)body+='<polyline fill="none" stroke="'+c+'" stroke-width="2" points="'+seg.join(" ")+'"/>';seg=[];};

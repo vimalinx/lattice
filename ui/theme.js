@@ -79,11 +79,16 @@ function themeSettings(){
    ((u.theme_custom||"")===n?'<span class="chip on">在用</span>':button("用这个","theme-use",'data-name="'+esc(n)+'"',"ghost xs"))+
    (n?button("删除","theme-delete",'data-name="'+esc(n)+'"',"ghost xs"):"")+'</div>').join("")+'</div>'+
   '<div class="field-label">'+(t?"改「"+esc(t.name)+"」的主要颜色":"改主要颜色（会存成「我的主题」）")+'</div><div class="theme-colors">'+
-  ["bg","panel","surface","text","muted","accent","ai","line"].map(k=>'<label class="color-pick"><input type="color" data-theme-var="'+k+'" value="'+hex(k)+'"/><span>'+esc(THEME_VARS[k])+'</span></label>').join("")+'</div>';
+  ["bg","panel","surface","text","muted","accent","ai","line"].map(k=>'<button class="color-pick" data-action="theme-color" data-color-var="'+k+'" data-value="'+hex(k)+'"><i class="swatch" style="background:'+hex(k)+'"></i><span>'+esc(THEME_VARS[k])+'</span></button>').join("")+'</div>';
 }
 function themeSwatch(t){const v=t.vars||{};return "background:linear-gradient(135deg,"+(v.bg||(t.base==="light"?"#f3f4ef":"#0d1117"))+" 50%,"+(v.accent||(t.base==="light"?"#1b7868":"#8bdcc5"))+" 50%)";}
-function themeColorInput(t){
- const name=S.ui.theme_custom||"我的主题";
- try{themeOp({name,vars:{[t.dataset.themeVar]:t.value},note:S.ui.themes?.[name]?.note||"在设置里调的"});}catch(e){toast(e.message,"error");}
- return true;
+/* A colour swatch in settings opens the colour picker; each change is applied at once and kept in the theme in use. */
+function themeColorPick(button){
+ const key=button.dataset.colorVar,was=S.ui.theme_custom,panel=button.closest(".panel");
+ colorPicker(button,button.dataset.value,value=>{
+  const name=S.ui.theme_custom||"我的主题";
+  try{themeOp({name,vars:{[key]:value},note:S.ui.themes?.[name]?.note||"在设置里调的"});}catch(e){return toast(e.message,"error");}
+  all('[data-color-var="'+key+'"]').forEach(b=>{b.dataset.value=value;b.querySelector(".swatch").style.background=value;});
+ // The first change makes 「我的主题」: the list above shows it once the picker closes.
+ },()=>{if(S.ui.theme_custom!==was&&panel?.isConnected)renderSettings(panel,"look");});
 }

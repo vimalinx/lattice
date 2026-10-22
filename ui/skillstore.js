@@ -95,7 +95,7 @@ async function skillAction(kind,a){
    const go=()=>{if(!Chat[target]?.data)return setTimeout(go,150);useSkill(target,s);toast("这是试用「"+s.title+"」的单独会话，不会进主会话");};return go();}
   case "skill-new":{const title=await askText("新技能叫什么","",{hint:"比如「讲公式的三步法」；建好后会打开它的 SKILL.md，照模板写做法",ok:"新建"});if(!title)return;
    const r=await rpc("skill_create",{title});await list();skillsChanged();return openFile(r.path);}
-  case "skill-import":{const r=await rpc("skill_import",{});if(!r)return;await list();skillsChanged();toast("导入了；Claude 的技能文件夹也能直接导入");return openFile(r.path);}
+  case "skill-import":{const folder=await pickPath({mode:"dir",title:"导入一个技能文件夹",ok:"导入",hint:"文件夹里要有 SKILL.md；Claude 的技能文件夹也能直接导入"});if(!folder)return;const r=await rpc("skill_import",{folder});if(!r)return;await list();skillsChanged();toast("导入了；Claude 的技能文件夹也能直接导入");return openFile(r.path);}
   case "skill-pick":{const s=(await skillList()).find(x=>x.slug===slug);if(s)useSkill(pid,s);return;}
   case "skill-clear":if(Chat[pid]){Chat[pid].skill=null;updateComposer(pid);}return;
   case "skill-menu":return skillMenu(pid,a);

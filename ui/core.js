@@ -15,6 +15,9 @@ function baseName(p){return String(p||"").split("/").pop();}
 function svg(name,size=18){
  const paths={
   home:'<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-6v-7H10v7H4a1 1 0 0 1-1-1z"/>',
+  cut:'<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/>',
+  paste:'<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>',
+  selectall:'<path d="M5 3a2 2 0 0 0-2 2m16-2a2 2 0 0 1 2 2m0 14a2 2 0 0 1-2 2M5 21a2 2 0 0 1-2-2M9 3h1m-1 18h1m4-18h1m-1 18h1M3 9v1m18-1v1M3 14v1m18-1v1"/><path d="M8 9h8M8 12h8M8 15h5"/>',
   book:'<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/>',
   network:'<circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="19" r="2"/><circle cx="4" cy="19" r="2"/><path d="m9.8 9.8-3-2.5m7.5 2.5 3-3m-2.8 8 3 3m-7.5-3.5-4 3"/>',
   flask:'<path d="M9 3h6m-1 0v7l5.6 8.4A2 2 0 0 1 17.9 21H6.1a2 2 0 0 1-1.7-3L10 10V3"/><path d="M7 15h10"/>',
@@ -172,11 +175,15 @@ function toast(text,type="info"){
 async function safe(fn){try{return await fn();}catch(e){console.error(e);toast(e.message||String(e),"error");return null;}}
 function button(label,action,attrs="",variant=""){return '<button class="btn '+variant+'" data-action="'+esc(action)+'" '+attrs+'>'+label+'</button>';}
 function iconButton(icon,action,title,attrs=""){return '<button class="icon" data-action="'+esc(action)+'" title="'+esc(title)+'" aria-label="'+esc(title)+'" '+attrs+'>'+svg(icon,15)+'</button>';}
+/* One window at a time; whoever opened it can hear when it closes (Esc, a click outside, or replaced by another). */
+const Modal={onClose:null};
+function modalClosed(){const f=Modal.onClose;Modal.onClose=null;f?.();}
 function modal(content,size=""){
+ modalClosed();
  el("#overlays").innerHTML='<div class="modal-backdrop" data-dismiss="1"><div class="modal '+size+'" role="dialog" aria-modal="true">'+content+'</div></div>';
  return el("#overlays .modal");
 }
-function closeModal(){el("#overlays").innerHTML="";}
+function closeModal(){el("#overlays").innerHTML="";modalClosed();}
 /* The program's own question box instead of the system's confirm() and prompt(): same look as the rest, Enter to agree,
    Esc or a click outside to cancel. It sits above any open window, so a question asked from one does not close it. */
 function dialog({title,message="",ok="确定",cancel="取消",danger=false,input=null}){

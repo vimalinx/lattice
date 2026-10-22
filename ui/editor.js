@@ -37,7 +37,7 @@ const cmTheme=CV.EditorView.theme({
  ".cm-selectionMatch":{backgroundColor:"var(--accent-glow)"},
  ".cm-searchMatch":{backgroundColor:"rgba(236,201,148,.25)",outline:"1px solid var(--amber)"},
  ".cm-searchMatch.cm-searchMatch-selected":{backgroundColor:"rgba(236,201,148,.5)"},
- ".cm-tooltip":{background:"var(--panel)",border:"1px solid var(--line)",borderRadius:"8px",boxShadow:"var(--shadow)",color:"var(--text)"},
+ ".cm-tooltip":{background:"var(--pop-bg)",border:"1px solid var(--line)",borderRadius:"10px",boxShadow:"var(--pop-shadow)",color:"var(--text)"},
  ".cm-tooltip-autocomplete > ul > li":{padding:"3px 10px"},
  ".cm-tooltip-autocomplete > ul > li[aria-selected]":{background:"var(--accent-glow)",color:"var(--text)"},
  ".cm-completionDetail":{color:"var(--subtle)",fontStyle:"normal",marginLeft:"10px"},

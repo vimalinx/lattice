@@ -205,7 +205,7 @@ function linksBlock(pid,links,id){
  }).join("");
  return '<details class="links"><summary>关系 · '+links.length+'</summary>'+rows+
   '<div class="link-add"><select data-link-kind="'+pid+'">'+Object.entries(linkName).filter(([k])=>!["branch_of","mentions"].includes(k)).map(([k,v])=>'<option value="'+k+'">'+esc(v)+'</option>').join("")+'</select>'+
-  '<input data-link-target="'+pid+'" list="doc-titles" placeholder="连到哪个卡片、笔记或主题（输入标题）"/>'+button("连上","link-add",'data-pid="'+pid+'"',"ghost xs")+'</div></details>';
+  '<input data-link-target="'+pid+'" data-suggest="doc-titles" placeholder="连到哪个卡片、笔记或主题（输入标题）"/>'+button("连上","link-add",'data-pid="'+pid+'"',"ghost xs")+'</div></details>';
 }
 
 /* ---- knowledge cards: the learner's own parts are only edited here -------------------------------------- */
