@@ -105,9 +105,21 @@ async function runMermaid(){
   catch(_){n.innerHTML='<pre class="mermaid-error">'+esc(src)+'</pre><small class="muted">图表语法未能解析</small>';}
  }
 }
+/* Maths, drawn by KaTeX (ui/vendor/katex): $…$ and \(…\) in a line, $$…$$ and \[…\] on their own. A $ that opens
+   before a space, or closes before a digit, is a price, not maths. Drawings are cached, so streaming replies stay quick. */
+const MATH_RE=/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|(?<![\\$\w])\$(?=[^\s$])((?:\\\$|[^$\n])+?)(?<=[^\s\\])\$(?![\d$])/g;
+const texCache=new Map();
+function texHtml(tex,display){
+ const key=(display?"D":"I")+tex;if(texCache.has(key))return texCache.get(key);
+ let out;
+ try{out=typeof katex==="undefined"?'<code>'+esc(tex)+'</code>':katex.renderToString(tex,{displayMode:display,throwOnError:false,strict:"ignore",output:"html"});}
+ catch(_){out='<code class="math-error" title="公式写错了">'+esc(tex)+'</code>';}
+ if(texCache.size>800)texCache.clear();texCache.set(key,out);return out;
+}
 function markdown(text){
- const src=String(text||""),codes=[];
- const masked=src.replace(/(`+)([\s\S]*?)\1/g,m=>{codes.push(m);return "\u0000"+(codes.length-1)+"\u0000";});
+ const src=String(text||""),codes=[],maths=[];
+ const masked=src.replace(/(`+)([\s\S]*?)\1/g,m=>{codes.push(m);return "\u0000"+(codes.length-1)+"\u0000";})
+  .replace(MATH_RE,(m,a,b,c,d)=>{maths.push({tex:a??b??c??d,display:a!=null||b!=null});return "\uE000"+(maths.length-1)+"\uE001";});
  // [[target|shown]] links, ![[image]] embeds and #tags; images from the vault are filled in afterwards (hydrateImages).
  const linked=masked.replace(/(!?)\[\[([^\]\n]+)\]\]/g,(_,bang,inner)=>{
    const bar=inner.indexOf("|"),target=(bar<0?inner:inner.slice(0,bar)).split("#")[0].trim(),shown=bar<0?inner:inner.slice(bar+1);
@@ -117,7 +129,8 @@ function markdown(text){
   .replace(/\u0000(\d+)\u0000/g,(_,i)=>codes[+i]);
  try{
   // A table scrolls inside its own frame when it is wider than the text.
-  const out=DOMPurify.sanitize(marked.parse(linked,{breaks:true,gfm:true}),{ADD_ATTR:["data-wiki","data-tag","data-vault-src"]}).replace(/<table>/g,'<div class="table-wrap"><table>').replace(/<\/table>/g,"</table></div>");if(out.includes('class="mermaid"'))scheduleMermaid();return out;}
+  const out=DOMPurify.sanitize(marked.parse(linked,{breaks:true,gfm:true}),{ADD_ATTR:["data-wiki","data-tag","data-vault-src"]}).replace(/<table>/g,'<div class="table-wrap"><table>').replace(/<\/table>/g,"</table></div>")
+   .replace(/\uE000(\d+)\uE001/g,(_,i)=>maths[+i]?texHtml(maths[+i].tex.trim(),maths[+i].display):"");if(out.includes('class="mermaid"'))scheduleMermaid();return out;}
  catch(_){return '<pre>'+esc(text)+'</pre>';}
 }
 /* Images in rendered Markdown that name a vault file: load them through the backend (the page cannot read the vault). */

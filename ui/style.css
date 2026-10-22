@@ -778,3 +778,11 @@ select{appearance:none;padding-right:28px;background-image:linear-gradient(45deg
 .dialog .btn:focus-visible{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 28%,transparent)}
 .dialog .btn.danger:focus-visible{box-shadow:0 0 0 3px color-mix(in srgb,var(--red) 30%,transparent)}
 .dialog-input:focus,.dialog-input:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+/* maths */
+.cm-math{cursor:pointer;padding:0 1px}
+.cm-math-block{display:block;text-align:center;padding:4px 0;overflow-x:auto;overflow-y:hidden;cursor:pointer}
+.cm-math-block .katex-display{margin:.3em 0}
+.cm-mathsrc{font-family:var(--mono);font-size:.92em;color:var(--tk-str)}
+.katex-display{margin:.7em 0;overflow-x:auto;overflow-y:hidden;padding:2px 0}
+.katex{font-size:1.12em}
+.katex-error,.math-error{color:var(--red)!important}

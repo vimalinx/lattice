@@ -48,8 +48,21 @@ const cmTheme=CV.EditorView.theme({
 
 /* ---- [[links]], ![[embeds]] and #tags, parsed as part of Markdown so code blocks are left alone ------------------- */
 const wikiSyntax={
- defineNodes:[{name:"WikiLink",style:CT.link},{name:"WikiEmbed",style:CT.link},{name:"WikiMark",style:CT.processingInstruction},{name:"HashTag",style:CT.labelName}],
- parseInline:[{name:"WikiLink",before:"Link",parse(cx,next,pos){
+ defineNodes:[{name:"WikiLink",style:CT.link},{name:"WikiEmbed",style:CT.link},{name:"WikiMark",style:CT.processingInstruction},{name:"HashTag",style:CT.labelName},
+  {name:"InlineMath",style:CT.special(CT.string)},{name:"DisplayMath",style:CT.special(CT.string)}],
+ parseInline:[{name:"Math",before:"Escape",parse(cx,next,pos){
+  // $…$ and \(…\) in a line; $$…$$ and \[…\] when they open and close on the same line (longer ones: mathBlocks).
+  const c1=cx.char(pos+1),line=i=>i<cx.end&&cx.char(i)!==10;
+  const close=(from,a,b)=>{for(let i=from;line(i);i++){if(cx.char(i)===92&&a!==92){i++;continue;}if(cx.char(i)===a&&(b==null||cx.char(i+1)===b))return i;}return -1;};
+  if(next===36&&c1===36){const e=close(pos+2,36,36);return e>pos+2?cx.addElement(cx.elt("DisplayMath",pos,e+2)):-1;}
+  if(next===92&&(c1===40||c1===91)){const e=close(pos+2,92,c1===40?41:93);return e>pos+2?cx.addElement(cx.elt(c1===40?"InlineMath":"DisplayMath",pos,e+2)):-1;}
+  if(next!==36||c1===32||c1===9||c1<0||(pos>cx.offset&&/[\w$\\]/.test(String.fromCharCode(cx.char(pos-1)))))return -1;
+  for(let i=pos+1;line(i);i++){
+   const ch=cx.char(i);if(ch===92){i++;continue;}
+   if(ch===36){const prev=cx.char(i-1),after=cx.char(i+1);if(i===pos+1||prev===32||prev===9||(after>=48&&after<=57))return -1;return cx.addElement(cx.elt("InlineMath",pos,i+1));}
+  }
+  return -1;
+ }},{name:"WikiLink",before:"Link",parse(cx,next,pos){
   const embed=next===33;
   if(embed?cx.char(pos+1)!==91||cx.char(pos+2)!==91:next!==91||cx.char(pos+1)!==91)return -1;
   const open=pos+(embed?3:2);
@@ -73,7 +86,7 @@ function wikiParts(inner){const bar=inner.indexOf("|");return {target:(bar<0?inn
 const Refresh=CS.StateEffect.define();
 const HIDE=CV.Decoration.replace({});
 const mark=cls=>CV.Decoration.mark({class:cls});
-const MARKS={em:mark("cm-em"),strong:mark("cm-strong"),strike:mark("cm-strike"),code:mark("cm-icode"),src:mark("cm-linksrc")};
+const MARKS={em:mark("cm-em"),strong:mark("cm-strong"),strike:mark("cm-strike"),code:mark("cm-icode"),src:mark("cm-linksrc"),math:mark("cm-mathsrc")};
 class Bullet extends CV.WidgetType{toDOM(){const s=document.createElement("span");s.className="cm-bullet";s.textContent="•";return s;}eq(){return true;}}
 class Rule extends CV.WidgetType{toDOM(){const s=document.createElement("span");s.className="cm-hr";return s;}eq(){return true;}}
 class Check extends CV.WidgetType{
@@ -116,9 +129,11 @@ function livePreview(opts){
   const line=(pos,cls)=>out.push(CV.Decoration.line({class:cls}).range(doc.lineAt(pos).from));
   const lines=(from,to,cls)=>{for(let p=from;p<=to;){const l=doc.lineAt(p);out.push(CV.Decoration.line({class:cls}).range(l.from));p=l.to+1;}};
   const withSpace=e=>doc.sliceString(e,e+1)===" "?e+1:e;
-  const {from,to}=view.viewport;
+  const {from,to}=view.viewport,blocks=mathBlocks(st);
   CL.syntaxTree(st).iterate({from,to,enter:n=>{
    const name=n.name;let m;
+   // Inside a formula nothing is Markdown: no bold, no hidden marks.
+   if(name!=="Document"&&blocks.some(b=>n.from>=b.from&&n.to<=b.to))return false;
    if((m=/^ATXHeading(\d)$/.exec(name))){line(n.from,"cm-h cm-h"+m[1]);return;}
    if((m=/^SetextHeading(\d)$/.exec(name))){lines(n.from,n.to,"cm-h cm-h"+m[1]);return;}
    switch(name){
@@ -157,6 +172,10 @@ function livePreview(opts){
      if(n.to-2>start)out.push(CV.Decoration.mark({class:cls,attributes:{"data-wiki":target}}).range(start,n.to-2));
      return false;
     }
+    case "InlineMath":case "DisplayMath":{
+     if(near(n.from,n.to)){out.push(MARKS.math.range(n.from,n.to));return false;}
+     out.push(CV.Decoration.replace({widget:new Formula(texOf(doc.sliceString(n.from,n.to)),name==="DisplayMath",n.from+1)}).range(n.from,n.to));return false;
+    }
     case "HashTag":out.push(CV.Decoration.mark({class:"cm-tag",attributes:{"data-tag":doc.sliceString(n.from+1,n.to)}}).range(n.from,n.to));return;
     case "Blockquote":lines(n.from,n.to,"cm-quote");return;
     case "QuoteMark":if(!onLine(n.from))hide(n.from,withSpace(n.to));return;
@@ -182,6 +201,52 @@ function livePreview(opts){
   constructor(view){this.decorations=build(view);}
   update(u){if(u.docChanged||u.viewportChanged||u.selectionSet||u.focusChanged||CL.syntaxTree(u.startState)!==CL.syntaxTree(u.state)||u.transactions.some(t=>t.effects.some(e=>e.is(Refresh))))this.decorations=build(u.view);}
  },{decorations:v=>v.decorations});
+}
+/* Maths renders as maths until the cursor goes into it; a click puts the cursor in its source. */
+class Formula extends CV.WidgetType{
+ constructor(tex,display,at){super();this.tex=tex;this.display=display;this.at=at;}
+ eq(o){return o.tex===this.tex&&o.display===this.display&&o.at===this.at;}
+ toDOM(view){
+  const box=document.createElement(this.display?"div":"span");box.className=this.display?"cm-math-block":"cm-math";box.innerHTML=texHtml(this.tex,this.display);
+  box.addEventListener("mousedown",e=>{if(e.button!==0)return;e.preventDefault();view.focus();view.dispatch({selection:{anchor:this.at}});});
+  return box;
+ }
+ ignoreEvent(){return true;}
+}
+function texOf(src){
+ for(const [a,b] of [["$$","$$"],["\\[","\\]"],["\\(","\\)"],["$","$"]])if(src.startsWith(a)&&src.endsWith(b)&&src.length>=a.length+b.length)return src.slice(a.length,src.length-b.length).trim();
+ return src;
+}
+// $$ (or \[) on a line of its own, down to the line that closes it, outside code: display maths over several lines.
+const blockCache=new WeakMap();
+function mathBlocks(state){
+ if(blockCache.has(state.doc))return blockCache.get(state.doc);
+ const doc=state.doc,tree=CL.syntaxTree(state),out=[];
+ const inCode=pos=>{for(let n=tree.resolveInner(pos,1);n;n=n.parent)if(/^(FencedCode|CodeBlock|InlineCode)$/.test(n.name))return true;return false;};
+ for(let i=1;i<=doc.lines;i++){
+  const l=doc.line(i),t=l.text.trim(),open=t.startsWith("$$")?"$$":t.startsWith("\\[")?"\\[":null;
+  if(!open||t.length>2&&t.endsWith(open==="$$"?"$$":"\\]")&&t!==open)continue;
+  if(inCode(l.from))continue;
+  const shut=open==="$$"?"$$":"\\]";
+  for(let j=i+1;j<=doc.lines&&j<i+200;j++){
+   const e=doc.line(j);
+   if(e.text.trim().endsWith(shut)){out.push({from:l.from,to:e.to,tex:doc.sliceString(l.from,e.to).trim()});i=j;break;}
+  }
+ }
+ blockCache.set(state.doc,out);return out;
+}
+function mathPreview(){
+ const build=state=>{
+  const sel=state.selection.ranges,out=[];
+  for(const b of mathBlocks(state))if(!sel.some(r=>r.from<=b.to&&r.to>=b.from))
+   out.push(CV.Decoration.replace({widget:new Formula(texOf(b.tex),true,Math.min(b.from+3,b.to)),block:true}).range(b.from,b.to));
+  return CV.Decoration.set(out);
+ };
+ return CS.StateField.define({
+  create:build,
+  update(deco,tr){return tr.docChanged||tr.selection||CL.syntaxTree(tr.startState)!==CL.syntaxTree(tr.state)?build(tr.state):deco;},
+  provide:f=>CV.EditorView.decorations.from(f),
+ });
 }
 /* Tables render as tables until the cursor goes into them; a click on a cell puts the cursor in that cell's text.
    They span lines, so they come from a state field (a view plugin may not replace line breaks). */
@@ -387,7 +452,7 @@ function createEditor(host,text,opts){
  if(md){
   ext.push(CV.EditorView.lineWrapping,CA.autocompletion({override:[wikiComplete,tagComplete],icons:false}),dropAndPaste(opts),linkClicks(opts),
    CV.EditorView.contentAttributes.of({spellcheck:"false"}));
-  if(opts.live)ext.push(livePreview(opts),tablePreview(opts));
+  if(opts.live)ext.push(livePreview(opts),tablePreview(opts),mathPreview());
  }else{
   if(opts.gutters!==false)ext.push(CV.lineNumbers(),CL.foldGutter(),CV.highlightActiveLineGutter());
   ext.push(CV.highlightActiveLine(),CA.autocompletion({icons:false}),rainbowBrackets());
