@@ -30,7 +30,7 @@ input,textarea,select{outline:none}
 ::-webkit-scrollbar-thumb{background:#5966765c;border:2px solid transparent;border-radius:8px;background-clip:padding-box}
 code,pre,kbd{font-family:var(--mono)}
 .editor.code,.cell-editor.code,.markdown pre,.out-text,.out-error,.diff,.excerpt{font-size:var(--code-size,12.5px)!important}
-:root[data-density="compact"] .msg{padding:7px 10px;margin-bottom:9px}
+:root[data-density="compact"] .msg{margin-bottom:12px}
 :root[data-density="compact"] .markdown{line-height:1.65}
 :root[data-density="compact"] .side-row{padding-top:2px;padding-bottom:2px}
 :root[data-density="compact"] .tabs{height:29px}
@@ -129,6 +129,7 @@ label.check input{margin:0}
 .tab.ai.active:before{background:var(--ai)}
 .tab.ai svg:first-child{color:var(--ai)}
 .tab-title{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.tab-zoom{font-size:10px;color:var(--subtle);flex:0 0 auto}.tab-zoom:empty{display:none}
 .tab.dirty .tab-title:after{content:" ●";color:var(--amber)}
 .tab-btn{border:0;background:transparent;color:var(--subtle);width:20px;height:20px;display:grid;place-items:center;border-radius:5px;padding:0;opacity:0}
 .tab:hover .tab-btn,.tab.active .tab-btn{opacity:1}
@@ -149,6 +150,15 @@ label.check input{margin:0}
 .menu button span{display:grid}
 .menu small{color:var(--subtle);font-size:11px}
 .menu hr{border:0;border-top:1px solid var(--line-soft);margin:5px 2px}
+.menu{max-height:70vh;overflow:auto;max-width:360px}
+.menu button span{min-width:0}.menu button small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.menu button:disabled{opacity:.45}
+.menu-label{font-size:11px;color:var(--subtle);padding:4px 9px 3px}
+.menu-empty{font-size:12px;color:var(--muted);padding:4px 9px;margin:0;max-width:300px;line-height:1.6}
+.menu-gap{display:inline-block;width:14px}
+.zoom-row{display:flex;align-items:center;gap:6px;padding:2px 6px 4px}
+.zoom-row button{flex:1;justify-content:center;font-weight:600;border:1px solid var(--line)!important}
+.zoom-row b{min-width:52px;text-align:center;font-size:13px}
 #organizer{position:fixed;left:14px;bottom:14px;z-index:40;max-width:520px;padding:9px 12px;border-radius:9px;background:var(--panel-hi);border:1px solid var(--line);box-shadow:var(--shadow);display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px}
 .thinking-dot{width:8px;height:8px;border-radius:50%;background:var(--ai);animation:pulse 1s infinite}
 @keyframes pulse{50%{opacity:.3}}
@@ -177,10 +187,10 @@ label.check input{margin:0}
 .version small{color:var(--subtle)}
 .version-text{white-space:pre-wrap;max-height:58vh;overflow:auto;background:var(--code-bg);padding:12px;border-radius:8px;font-size:12px}
 /* ---- markdown ---- */
-.markdown{line-height:1.85;word-break:break-word}
+.markdown{line-height:var(--line-height,1.8);word-break:break-word}
 .markdown>:first-child{margin-top:0}
 .markdown h1,.markdown h2,.markdown h3,.markdown h4{line-height:1.4;letter-spacing:-.2px}
-.markdown h1{font-size:21px}.markdown h2{font-size:17px;margin:22px 0 10px}.markdown h3{font-size:14.5px;margin:18px 0 8px}.markdown h4{font-size:13px}
+.markdown h1{font-size:1.5em}.markdown h2{font-size:1.25em;margin:1.4em 0 .6em}.markdown h3{font-size:1.08em;margin:1.2em 0 .5em}.markdown h4{font-size:1em}
 .markdown p{margin:0 0 11px}
 .markdown ul,.markdown ol{padding-left:22px;margin:0 0 11px}
 .markdown li{margin:4px 0}
@@ -211,35 +221,55 @@ label.check input{margin:0}
 .out-html{padding:6px 10px;overflow:auto;font-size:12px}
 .out-html table{border-collapse:collapse}.out-html td,.out-html th{border:1px solid var(--line);padding:3px 7px}
 /* ---- chat ---- */
-.chat{flex:1;display:flex;flex-direction:column;min-height:0;background:linear-gradient(var(--ai-glow),transparent 120px),var(--panel)}
-.chat-head{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap;row-gap:4px}
-.agent-badge{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:var(--ai-glow);color:var(--ai)}
-.chat-who{display:flex;align-items:baseline;gap:7px;line-height:1.3;min-width:0;white-space:nowrap}
-.chat-who small{color:var(--subtle);font-size:11px}
-.chat-who .working{color:var(--ai)}
-.topic-chip{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;padding:2px 9px;border-radius:20px;border:1px solid color-mix(in srgb,var(--accent) 35%,transparent);max-width:220px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.topic-chip.quiet{color:var(--subtle);border-color:var(--line-soft)}
-.chat-tools{margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:wrap}
-.chat-scroll{flex:1;overflow:auto;padding:14px 16px 6px;min-height:0}
-.chat-welcome{max-width:520px;margin:9vh auto 0;text-align:center;color:var(--muted);line-height:1.8}
-.chat-welcome h3{color:var(--text);font-size:17px}
-.msg{margin:0 0 14px;padding:10px 13px;border-radius:10px;border:1px solid var(--line-soft);background:var(--panel-hi)}
-.msg.from-me{background:transparent;border-color:color-mix(in srgb,var(--accent) 22%,transparent);margin-left:12%}
-.msg.from-ai{border-left:2px solid color-mix(in srgb,var(--ai) 55%,transparent)}
-.msg.streaming{border-style:dashed}
-.msg-meta{display:flex;gap:8px;font-size:11px;color:var(--subtle);margin-bottom:5px}
-.msg-quote{font-size:12px;color:var(--muted);border-left:2px solid var(--line);padding-left:8px;margin-bottom:6px}
+.chat{flex:1;display:flex;flex-direction:column;min-height:0;position:relative;container:chat / size;background:linear-gradient(var(--ai-glow),transparent 120px),var(--panel)}
+.chat-head{display:flex;align-items:center;gap:8px;padding:6px 10px;min-height:40px}
+.head-title{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.topic-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:3px 9px;border-radius:20px;border:1px solid color-mix(in srgb,var(--accent) 35%,transparent);background:transparent;color:var(--accent);max-width:260px;min-width:0}
+.topic-chip span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.topic-chip:hover{background:var(--accent-glow)}
+.topic-chip.quiet{color:var(--muted);border-color:var(--line-soft)}
+.chat-tools{margin-left:auto;display:flex;gap:4px;align-items:center;flex-wrap:wrap}
+.chat-scroll{flex:1;overflow:auto;padding:10px 20px 8px;min-height:0}
+/* One readable column, measured in characters so it widens with the text size. */
+.chat-scroll>*,.composer>*,.chat-starters{max-width:var(--read-width,42em);margin-left:auto;margin-right:auto}
+.chat-welcome{text-align:center;color:var(--muted);line-height:1.8;padding:0 8px 18px}
+.chat-welcome h3{color:var(--text);font-size:1.6em;font-weight:600;margin:0 0 8px;letter-spacing:-.3px}
+.chat-welcome p{margin:0}
+.msg{margin-top:0;margin-bottom:22px}
+.msg .markdown{line-height:var(--line-height,1.8)}
+.msg.from-me{display:flex;flex-direction:column;align-items:flex-end}
+.bubble{max-width:85%;padding:9px 15px;border-radius:20px;background:var(--surface);overflow-wrap:anywhere}
+.bubble .markdown{line-height:1.7}
+.bubble .markdown p:last-child,.bubble .markdown ul:last-child,.bubble .markdown ol:last-child{margin-bottom:0}
+.msg.streaming .msg-body:after{content:"▍";color:var(--ai);animation:pulse 1s infinite}
+.msg-foot{display:flex;align-items:center;gap:4px;flex-wrap:wrap;min-height:28px;margin-top:2px;font-size:11px;color:var(--subtle);opacity:0;transition:opacity .15s}
+.msg-foot time{margin-right:4px}
+.msg-foot .icon{width:24px;height:24px}
+.msg:hover .msg-foot,.msg:focus-within .msg-foot{opacity:1}
+.msg:last-child .msg-foot,.msg:nth-last-child(2) .msg-foot{opacity:.75}
+.msg-quote{font-size:.86em;color:var(--muted);border-left:2px solid var(--line);padding-left:8px;margin:2px 0 6px}
+.msg-attach{display:flex;gap:5px;flex-wrap:wrap;margin:2px 0 6px}
+.msg-attach a{font-size:11.5px;padding:1px 8px;border-radius:20px;background:var(--panel-hi);color:var(--muted)}
 .msg-note{font-size:11.5px;color:var(--amber);margin-top:5px}
-.msg-tools{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px;opacity:.6}
-.msg:hover .msg-tools{opacity:1}
-.actions{display:grid;gap:4px;margin-top:8px}
-.action{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);padding:4px 8px;border-radius:7px;background:var(--surface)}
+.actions{margin-top:8px;font-size:12px;color:var(--muted)}
+.actions summary{display:flex;align-items:center;gap:7px;cursor:pointer;list-style:none;padding:4px 9px;border-radius:8px;background:var(--surface);width:fit-content;max-width:100%}
+.actions summary::-webkit-details-marker{display:none}
+.actions summary>svg:first-child{color:var(--ai);flex:0 0 auto}
+.actions summary b{font-weight:600;color:var(--text);flex:0 0 auto}
+.actions summary span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0}
+.actions summary>svg:last-child{flex:0 0 auto;transition:transform .15s}
+.actions[open] summary>svg:last-child{transform:rotate(180deg)}
+.actions.live summary{background:transparent;padding-left:0}
+.action-list{display:grid;gap:3px;margin-top:5px}
+.action{display:flex;align-items:center;gap:7px;padding:3px 9px;border-radius:7px}
+.action:hover{background:var(--surface)}
 .action span{flex:1}
 .action svg{color:var(--ai)}
 .action.undone span{text-decoration:line-through;opacity:.6}
+.action-lead{display:flex;gap:6px;margin-top:6px}
 .sources{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;font-size:11.5px;color:var(--subtle)}
 .sources a{padding:1px 8px;border:1px solid var(--line);border-radius:20px}
-.suggestion{margin-top:9px;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.suggestion{margin-top:9px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .suggestion-head{display:flex;align-items:center;gap:7px;padding:6px 10px;background:var(--surface);font-size:12px;flex-wrap:wrap}
 .suggestion-head span{color:var(--muted)}
 .diff{font:12px/1.6 var(--mono);max-height:300px;overflow:auto;white-space:pre-wrap}
@@ -252,12 +282,52 @@ label.check input{margin:0}
 .thinking span:nth-child(2){animation-delay:.2s}.thinking span:nth-child(3){animation-delay:.4s}
 .thinking b{font-weight:500;margin-left:5px}
 .chat-error{color:var(--red);font-size:12.5px;padding:8px 10px;border:1px solid color-mix(in srgb,var(--red) 40%,transparent);border-radius:8px;margin-bottom:10px}
-.composer{border-top:1px solid var(--line-soft);padding:9px 12px 10px}
-.composer textarea{width:100%;resize:none;min-height:52px;max-height:220px;line-height:1.6}
-.composer-bar{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:11.5px;color:var(--subtle)}
-.composer-note{flex:1;min-width:0}
-.sel-chip{display:inline-flex;align-items:center;gap:5px;padding:1px 8px;border-radius:20px;background:var(--accent-glow);color:var(--accent)}
-.sel-chip button{border:0;background:none;color:inherit;padding:0 2px}
+/* The input floats over the end of the conversation, which fades out under it. */
+.composer{position:relative;padding:2px 16px 14px;flex:0 0 auto;container-type:inline-size}
+.composer:before{content:"";position:absolute;left:0;right:0;top:-26px;height:26px;background:linear-gradient(transparent,var(--panel));pointer-events:none;max-width:none}
+.attach-row{display:flex;gap:6px;flex-wrap:wrap;padding:0 6px}
+.attach-row:not(:empty){margin-bottom:6px}
+.capsule{min-width:0;display:grid;grid-template-columns:auto 1fr auto auto;grid-template-areas:"plus text model send";align-items:center;gap:4px;padding:5px 6px;
+ border:1px solid var(--line);background:var(--panel-hi);border-radius:26px;box-shadow:0 6px 24px rgba(0,0,0,.14);transition:border-radius .18s ease,border-color .15s}
+.capsule.multi{grid-template-areas:"text text text text" "plus . model send";border-radius:18px;padding:8px 6px 5px}
+.capsule:focus-within{border-color:color-mix(in srgb,var(--accent) 50%,var(--line))}
+.capsule textarea{grid-area:text;min-width:3em;border:0;background:transparent;padding:6px 6px;resize:none;line-height:1.6;min-height:0;max-height:14em;overflow-y:auto;border-radius:0}
+.capsule.multi textarea{padding:2px 10px 4px}
+.capsule textarea:focus,.capsule textarea:focus-visible{border:0;outline:none}
+.capsule textarea::placeholder{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cap-btn{grid-area:plus;width:34px;height:34px;border-radius:50%;border:0;background:transparent;color:var(--muted);display:grid;place-items:center;padding:0}
+.cap-btn:hover{background:var(--surface);color:var(--text)}
+.model-tag{grid-area:model;display:inline-flex;align-items:center;gap:4px;border:0;background:transparent;color:var(--subtle);font-size:12px;padding:4px 8px;border-radius:20px;white-space:nowrap;max-width:min(190px,28cqw);overflow:hidden;text-overflow:ellipsis}
+.model-tag span{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.model-tag svg{flex:0 0 auto}
+.model-tag:hover{background:var(--surface);color:var(--text)}
+.model-tag.own{color:var(--ai)}
+.model-tag.working{color:var(--ai);animation:pulse 1.6s infinite}
+.send-slot{grid-area:send;display:flex}
+.send-round{width:34px;height:34px;border-radius:50%;border:0;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;padding:0}
+.send-round:hover:not(:disabled){filter:brightness(1.08)}
+.send-round.stop{background:var(--text);color:var(--panel)}
+.btn.pill{border-radius:20px}
+.to-bottom{position:absolute;top:-46px;left:50%;transform:translateX(-50%);width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--panel-hi);color:var(--muted);display:grid;place-items:center;padding:0;box-shadow:var(--shadow);z-index:2}
+.to-bottom svg{transform:rotate(180deg)}
+.to-bottom:hover{color:var(--text)}
+.sel-chip{display:inline-flex;align-items:center;gap:5px;padding:1px 4px 1px 9px;border-radius:20px;background:var(--accent-glow);color:var(--accent);font-size:11.5px}
+.sel-chip.file{background:var(--surface);color:var(--muted)}
+.sel-chip button{border:0;background:none;color:inherit;padding:0 4px}
+/* Nothing said yet: the input sits in the middle, with places to start under it. */
+.chat-starters{display:none}
+.chat.blank .chat-scroll{flex:0 1 auto;margin-top:auto;overflow:hidden;padding-bottom:0}
+.chat.blank .composer:before{display:none}
+.chat.blank .chat-starters{display:grid;gap:2px;padding:10px 18px 0;margin-bottom:auto;width:100%;box-sizing:border-box;flex:0 1 auto;min-height:0;overflow:hidden;align-content:start}
+/* A short panel keeps the input in view and lets the welcome go first. */
+@container chat (max-height: 460px){.chat-welcome p{display:none}.chat-welcome h3{font-size:1.25em}.chat.blank{padding-bottom:0}}
+@container chat (max-height: 300px){.chat-welcome{display:none}.chat-starters .starter:nth-child(n+3){display:none}}
+.chat.blank .chat-starters:empty{padding:0}
+.chat.blank{padding-bottom:6vh}
+.starter{display:flex;align-items:center;gap:11px;text-align:left;border:0;background:transparent;color:var(--muted);padding:9px 12px;border-radius:10px;min-width:0}
+.starter span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.starter svg{flex:0 0 auto;color:var(--subtle)}
+.starter:hover{background:var(--surface);color:var(--text)}
 /* ---- display blocks ---- */
 .lblock{margin:10px 0;border:1px solid var(--line);border-radius:9px;padding:10px 12px;background:var(--panel)}
 .block-pending{color:var(--subtle);font-size:12px}
@@ -316,7 +386,8 @@ label.check input{margin:0}
 .editor.prose{font-size:13.5px;line-height:1.9}
 .md-split{flex:1;min-height:0;display:flex}
 .md-split>div{flex:1;min-width:0;overflow:auto;display:flex}
-.md-preview{padding:12px 18px;display:block!important;border-left:1px solid var(--line-soft)}
+.md-preview{padding:12px 22px;display:block!important;border-left:1px solid var(--line-soft)}
+.md-preview>*{max-width:var(--read-width,42em);margin-left:auto!important;margin-right:auto!important}
 .md-split.mode-edit .md-preview,.md-split.mode-preview .md-edit{display:none!important}
 .md-split.mode-preview .md-preview{border-left:0}
 .doc-head{display:flex;align-items:center;gap:10px;padding:10px 14px 4px;flex-wrap:wrap}
@@ -477,3 +548,6 @@ details.api summary span{font-size:11.5px}
 .map,.settings-shell{container-type:inline-size}
 @container (max-width:560px){.map-route{display:none}}
 @container (max-width:620px){.settings-nav{flex-basis:46px}.settings-nav button span{display:none}.settings-nav button{justify-content:center;padding:8px}}
+.zoom-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px 14px}
+.zoom-grid label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0}
+.zoom-grid .unit{display:flex;align-items:center;gap:5px}.zoom-grid input{width:68px}

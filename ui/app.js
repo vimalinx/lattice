@@ -19,10 +19,14 @@ function renderStatus(){
 }
 function renderTop(){renderStatus();renderActivity();}
 /* Interface preferences live in the machine's config; appearance applies at once. */
+// Reading width in characters of body text, so headings and paragraphs share one column and it widens with the text.
+const READ_WIDTH={narrow:34,medium:42,wide:54,none:0};
 function applyUi(){
  const u=S.ui,root=document.documentElement;
  root.dataset.theme=u.theme==="light"?"light":"dark";root.dataset.density=u.density||"comfortable";
- root.style.setProperty("--font-size",(Number(u.font_size)||13.5)+"px");root.style.setProperty("--code-size",(Number(u.code_font_size)||12.5)+"px");
+ root.style.setProperty("--font-size",(Number(u.font_size)||14.5)+"px");root.style.setProperty("--code-size",(Number(u.code_font_size)||13)+"px");
+ root.style.setProperty("--line-height",String(Number(u.line_height)||1.8));const chars=READ_WIDTH[u.read_width]??READ_WIDTH.medium;root.style.setProperty("--read-width",chars?Math.round(chars*(Number(u.font_size)||14.5))+"px":"none");
+ Object.keys(Dock.panels).forEach(applyZoom);
  renderActivity();
 }
 let uiTimer=null;
@@ -42,6 +46,28 @@ function newMenu(anchor){
  closeMenus();document.body.appendChild(menu);
 }
 function closeMenus(){all(".menu").forEach(m=>m.remove());}
+/* A small menu next to what opened it (above it for things at the bottom), kept inside the window. */
+function popMenu(anchor,html,opts={}){
+ closeMenus();
+ const r=anchor.getBoundingClientRect?anchor.getBoundingClientRect():{left:anchor.x,right:anchor.x,top:anchor.y,bottom:anchor.y};
+ const menu=h('<div class="menu">'+html+'</div>');document.body.appendChild(menu);
+ const w=menu.offsetWidth,ht=menu.offsetHeight;
+ const x=Math.max(8,Math.min(r.left,innerWidth-w-8)),y=opts.above?r.top-ht-6:r.bottom+6;
+ menu.style.left=x+"px";menu.style.top=Math.max(8,Math.min(y<8?r.bottom+6:y,innerHeight-ht-8))+"px";
+ return menu;
+}
+function tabMenu(pid,at){
+ const p=Dock.panels[pid];if(!p)return;
+ const floating=Dock.layout.floats.some(f=>f.stack.tabs.includes(pid));
+ popMenu(at,'<div class="menu-label">这个窗口的大小'+(p.zoom?"（单独调过）":"")+'</div><div class="zoom-row">'+
+  '<button data-action="zoom-step" data-pid="'+pid+'" data-dir="-1" title="缩小 · Ctrl -">A−</button><b>'+Math.round(zoomOf(p)*100)+'%</b>'+
+  '<button data-action="zoom-step" data-pid="'+pid+'" data-dir="1" title="放大 · Ctrl =">A+</button></div>'+
+  (p.zoom?'<button data-action="zoom-step" data-pid="'+pid+'" data-dir="0">'+svg("undo",14)+'<span>恢复成这种面板的默认（'+Math.round(zoomDefault(p)*100)+'%）</span></button>':"")+'<hr/>'+
+  (floating?"":'<button data-action="dock-float" data-pid="'+pid+'">'+svg("float",14)+'<span>浮出</span></button>')+
+  '<button data-action="dock-close" data-pid="'+pid+'">'+svg("close",14)+'<span>关闭</span></button>');
+ Dock.tabMenuAt={pid,at};
+}
+function panelHere(){const a=document.activeElement?.closest?.(".panel");return a?.dataset.pid||(Dock.panels[Dock.focus]?Dock.focus:null);}
 async function newScratch(kind){
  const stamp=new Date().toLocaleString("zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}).replace(/[\/: ]/g,"");
  let path;
@@ -81,7 +107,7 @@ let screenTimer=null;
 function reportScreen(){clearTimeout(screenTimer);screenTimer=setTimeout(()=>safe(sendScreen),1200);}
 function screenOf(pid){const p=Dock.panels[pid],t=Dock.types[p?.type];return t?.screen?{panel:pid,type:p.type,title:panelTitle(pid),...t.screen(p,Dock.els[pid])}:{panel:pid,type:p?.type};}
 function sendScreen(){
- const stacks=[];eachStack((s,f)=>stacks.push({tabs:s.tabs.map(pid=>({id:pid,title:panelTitle(pid),type:Dock.panels[pid].type})),showing:s.active,floating:!!f}));
+ const stacks=[];eachStack((s,f)=>stacks.push({tabs:s.tabs.map(pid=>({id:pid,title:panelTitle(pid),type:Dock.panels[pid].type,zoom:Math.round(zoomOf(Dock.panels[pid])*100)+"%"})),showing:s.active,floating:!!f}));
  const shown=[];eachStack(s=>{if(s.active)shown.push(s.active);});
  const mine=shown.filter(pid=>sideOf(pid)==="mine").map(screenOf),ai=shown.filter(pid=>sideOf(pid)==="ai").map(screenOf);
  const state={layout:{stacks,focused:Dock.focus||null,nesting:layoutShape(Dock.layout.root)},ai:{panels:ai},mine:{files:mine.filter(x=>x.type==="file"),other:mine.filter(x=>x.type!=="file")},
@@ -156,7 +182,7 @@ async function onAction(a){
  case "open-map":return openPanel({type:"map",topic:S.data.active_topic||null});
  case "open-journal":return openPanel({type:"journal"});
  case "open-review":return openPanel({type:"review"},{reuse:false});
- case "open-settings":return openPanel({type:"settings"});
+ case "open-settings":{const page=a.dataset.page,had=findPanel({type:"settings"}),id=openPanel({type:"settings",...(page?{page}:{})});if(had&&page)renderSettings(Dock.els[id],page);return;}
  case "open-file":return openFile(a.dataset.path||a.dataset.id,{line:a.dataset.line?Number(a.dataset.line):null,highlight:a.dataset.highlight||null});
  case "open-doc":{const d=(S.data.docs||[]).find(x=>x.id===a.dataset.id);if(d)return openFile(d.path);return toast("找不到这个文档，它可能已经被删除","error");}
  case "open-dir":Side.open.add(a.dataset.path);return showSection("files");
@@ -171,6 +197,18 @@ async function onAction(a){
  case "import-md":{const r=await rpc("import_markdown",{},0);if(r){toast("导入了 "+r.count+" 篇");sideChanged(["notes/x"]);refreshState();}return;}
  case "export":{const r=await rpc("export",{},0);if(r)toast("已导出到 "+r);return;}
  case "chat-send":return chatSend(pid);
+ case "chat-starter":return chatSend(pid,a.dataset.say);
+ case "chat-bottom":{const s=Dock.els[pid]?.querySelector(".chat-scroll");if(s)s.scrollTo({top:s.scrollHeight,behavior:"smooth"});return;}
+ case "chat-topic-menu":return topicMenu(pid,a);
+ case "chat-attach":return attachMenu(pid,a);
+ case "chat-attach-add":{const st=Chat[pid];if(st&&!st.attach.some(x=>x.path===a.dataset.path))st.attach.push({path:a.dataset.path});updateComposer(pid);return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
+ case "chat-attach-remove":Chat[pid]?.attach.splice(Number(a.dataset.index),1);return updateComposer(pid);
+ case "chat-model":return modelMenu(pid,a);
+ case "chat-model-set":return setChatModel(pid,a.dataset.api,a.dataset.model);
+ case "chat-model-other":{const m=chatModel(pid),name=prompt("模型名（用 "+((S.config?.apis||[]).find(x=>x.id===m.api)?.label||m.api)+" 这个连接）：",m.model);if(name&&name.trim())setChatModel(pid,m.api,name.trim());return;}
+ case "msg-copy":{const m=Chat[pid]?.data?.messages.find(x=>String(x.id)===a.dataset.mid);if(m){await navigator.clipboard.writeText(m.content);toast("已复制");}return;}
+ case "zoom-step":{const dir=Number(a.dataset.dir);stepZoom(pid,dir||0);if(dir&&Dock.tabMenuAt?.pid===pid)tabMenu(pid,Dock.tabMenuAt.at);return;}
+ case "zoom-reset-all":Object.keys(Dock.panels).forEach(x=>{if(Dock.panels[x].zoom)setZoom(x,null);});return toast("所有窗口都回到了各自面板的默认大小");
  case "chat-cancel":return rpc("cancel",{thread:Chat[pid].thread});
  case "chat-task":return chatSend(pid,"",{task:a.dataset.task});
  case "chat-new":{if(!confirm("开一段新会话？之前的对话还在，可以在学习库的 threads/ 里找到，也能被搜索到。"))return;await rpc("thread_new",{agent:Dock.panels[pid].agent,topic:S.data.active_topic||""});return loadChat(pid,false);}
@@ -253,7 +291,7 @@ function initInteractions(){
  document.addEventListener("input",e=>{
   const t=e.target;
   if(t.id==="palette-q")return paletteFilter(t.value);
-  if(t.dataset.composer){if(Chat[t.dataset.composer])Chat[t.dataset.composer].input=t.value;return;}
+  if(t.dataset.composer){if(Chat[t.dataset.composer])Chat[t.dataset.composer].input=t.value;fitComposer(t.dataset.composer);return;}
   if(t.dataset.sideInput&&sideInput(t))return;
   if(fileInput(t))reportScreen();
  });
@@ -279,6 +317,7 @@ function initInteractions(){
    if(send){e.preventDefault();if(t.dataset.composer)safe(()=>chatSend(t.dataset.composer));else t.closest(".lblock")?.querySelector('[data-action="quiz-answer"]')?.click();}
    return;
   }
+  if(mod&&!e.altKey&&["=","+","-","0"].includes(e.key)){const pid=panelHere();if(pid){e.preventDefault();stepZoom(pid,e.key==="0"?0:e.key==="-"?-1:1);}return;}
   if(fileKey(e))return;
   if(mod&&e.key.toLowerCase()==="k"){e.preventDefault();palette();return;}
   if(mod&&e.key.toLowerCase()==="s"){e.preventDefault();safe(async()=>{await flushAll();toast("已保存");});return;}
@@ -287,6 +326,14 @@ function initInteractions(){
   if(mod&&e.key.toLowerCase()==="b"){e.preventDefault();showSection(null,!S.ui.side.open);return;}
   if(mod&&e.key.toLowerCase()==="w"&&Dock.focus){e.preventDefault();safe(()=>closePanel(Dock.focus));return;}
  });
+ // Ctrl + wheel sizes the window under the mouse, not the whole program.
+ let wheel=0;
+ document.addEventListener("wheel",e=>{
+  if(!e.ctrlKey)return;e.preventDefault();e.stopPropagation();
+  const pid=e.target.closest?.(".panel")?.dataset.pid;if(!pid)return;
+  wheel+=e.deltaY;if(Math.abs(wheel)<60)return;stepZoom(pid,wheel<0?1:-1);wheel=0;
+ },{passive:false,capture:true});
+ document.addEventListener("contextmenu",e=>{const tab=e.target.closest?.(".tab");if(!tab)return;e.preventDefault();tabMenu(tab.dataset.pid,{x:e.clientX,y:e.clientY});});
  document.addEventListener("mouseup",e=>setTimeout(()=>onSelect(e),0));
  document.addEventListener("scroll",()=>{hidePop();reportScreen();},true);
  document.addEventListener("focusin",()=>reportScreen());

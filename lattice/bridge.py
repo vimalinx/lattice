@@ -813,10 +813,10 @@ class Bridge(QObject):
         name = self.lattice.topic(topic)["title"] if topic else None
         return {"thread": self.lattice.thread_new(agent, topic, AGENT_NAMES[agent] + (" · " + name if name else ""))["id"]}
 
-    def rpc_send(self, agent, message="", thread=None, topic=None, selection="", task="", note="", answer=None):
-        return self.send(agent, message, thread, topic, selection, task, note, answer)
+    def rpc_send(self, agent, message="", thread=None, topic=None, selection="", task="", note="", answer=None, attach=None, model=None):
+        return self.send(agent, message, thread, topic, selection, task, note, answer, attach=attach, model=model)
 
-    def send(self, agent, message="", thread=None, topic=None, selection="", task="", note="", answer=None, extra=""):
+    def send(self, agent, message="", thread=None, topic=None, selection="", task="", note="", answer=None, extra="", attach=None, model=None):
         l = self.lattice
         definition = agents.load(self.root, agent)
         practice = None
@@ -837,16 +837,19 @@ class Bridge(QObject):
             raise ValueError("请输入想说的话")
         if thread in self.busy:
             raise ValueError("这段对话正在回答；等它说完或先停止")
-        conn = self.config.agent(agent)
+        conn = self.config.agent(agent, use=model)
         if not conn["api_key"]:
             raise ValueError(f"请先在设置里给{AGENT_NAMES[agent]}填写 {conn['label']} 的 API Key")
         history = l.messages(thread)[-definition["history"]:] if definition["history"] else []
-        meta = {"agent": agent, **({"selection": selection} if selection else {}), **({"task": task} if task else {}), **({"answer": answer} if answer else {})}
+        attach = [str(x)[:500] for x in (attach or []) if str(x).strip()][:12]
+        meta = {"agent": agent, **({"selection": selection} if selection else {}), **({"task": task} if task else {}), **({"answer": answer} if answer else {}),
+                **({"attach": attach} if attach else {})}
         l.append_message(thread, "user", message, meta)
         l.record("answered" if answer else "asked", {"text": message[:600], "agent": agent, **({"question": answer.get("question", "")[:400]} if answer else {}),
                                                     **({"screen": note[:300]} if note else {})}, "me", [thread, *([topic] if topic else [])])
         user = agents.task_prompt(message, task) + extra
-        notes = "；".join(x for x in (note.strip(), ("选中了这段内容：\n" + selection.strip()[:5000]) if selection.strip() else "") if x)
+        notes = "；".join(x for x in (note.strip(), ("附上了这些文件，需要时用 read 读：" + "、".join(attach)) if attach else "",
+                                      ("选中了这段内容：\n" + selection.strip()[:5000]) if selection.strip() else "") if x)
         if notes:
             user += "\n\n（界面附注：" + notes + "）"
         where = f"这段对话属于主题「{l.topic(topic)['title']}」（topic:{topic}）。" if topic else "这是默认对话，不属于任何主题。"

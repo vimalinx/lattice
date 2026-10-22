@@ -63,7 +63,9 @@ DEFAULTS = {
     # Seconds the learner pauses before their edits are committed.
     "commit_idle": 30,
     # Everything about the interface: appearance, the sidebar, saved layouts.
-    "ui": {"theme": "dark", "font_size": 13.5, "code_font_size": 12.5, "density": "comfortable", "send_key": "enter",
+    # zoom: each kind of panel's default size ("chat:tutor", "file", ...); a window can still set its own.
+    "ui": {"theme": "dark", "font_size": 14.5, "code_font_size": 13, "line_height": 1.8, "read_width": "medium", "zoom": {"chat:tutor": 1.1},
+           "density": "comfortable", "send_key": "enter",
            "selection_popup": True, "side": {"open": True, "width": 270, "section": "topics", "order": [], "hidden": []},
            "presets": {}, "default_preset": None},
 }
@@ -119,10 +121,13 @@ class Config:
         env = APIS.get(api, {}).get("env")
         return config["apis"].get(api, {}).get("api_key") or (os.environ.get(env, "") if env else "")
 
-    def agent(self, name, config=None):
-        """Everything one agent's API lane needs to send a request, key included."""
+    def agent(self, name, config=None, use=None):
+        """Everything one agent's API lane needs to send a request, key included. `use` swaps in another
+        connection and model for one request (a window can pick its own model)."""
         config = config or self.read()
         lane = config["agents"][name]
+        if isinstance(use, dict) and use.get("model"):
+            lane = {**lane, "model": str(use["model"]).strip()[:200], **({"api": use["api"]} if use.get("api") in APIS else {})}
         api = lane["api"] if lane["api"] in APIS else "commandcode"
         temperature = lane.get("temperature")
         return {**config["apis"][api], "api": api, "label": APIS[api]["label"], "api_key": self.key(api, config), "model": lane["model"],

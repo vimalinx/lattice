@@ -22,7 +22,8 @@ async function applyLayout(saved){
  const next=JSON.parse(JSON.stringify(saved));
  for(const pid of Object.keys(Dock.panels)){
   const keep=next.panels[pid]&&panelKey(next.panels[pid])===panelKey(Dock.panels[pid]);
-  if(!keep){const t=Dock.types[Dock.panels[pid].type];const node=Dock.els[pid];delete Dock.panels[pid];delete Dock.els[pid];if(t?.unmount)safe(()=>t.unmount({},node));node?.remove();}
+  if(keep){Dock.panels[pid]=next.panels[pid];applyZoom(pid);}
+  else{const t=Dock.types[Dock.panels[pid].type];const node=Dock.els[pid];delete Dock.panels[pid];delete Dock.els[pid];if(t?.unmount)safe(()=>t.unmount({},node));node?.remove();}
  }
  Dock.layout=next.layout;Dock.layout.floats=Dock.layout.floats||[];
  for(const [pid,params] of Object.entries(next.panels))if(!Dock.panels[pid]){Dock.panels[pid]=params;mountPanel(pid);}
@@ -114,7 +115,7 @@ async function closePanel(pid){
 function mountPanel(pid){
  const p=Dock.panels[pid],type=Dock.types[p.type];
  const node=document.createElement("div");node.className="panel panel-"+p.type;node.dataset.pid=pid;
- Dock.els[pid]=node;
+ Dock.els[pid]=node;applyZoom(pid);
  if(type)safe(()=>type.mount(p,node,pid));else node.innerHTML=emptyState("info","这个面板打不开","面板类型 "+p.type+" 不存在。");
 }
 function float(pid){
@@ -123,10 +124,26 @@ function float(pid){
  Dock.layout.floats.push({id:newId("f"),x:Math.round(rect.width*.25),y:70,w:Math.round(Math.max(480,Math.min(760,rect.width*.5))),h:Math.round(rect.height*.7),stack:stackNode([pid])});
  tidy();renderDock();saveLayout();
 }
+/* Size: each kind of panel has a default in the settings; a window can set its own, kept in the layout. */
+function zoomKind(p){return p.type==="chat"?"chat:"+(p.agent||"tutor"):p.type;}
+function zoomDefault(p){return Number(S.ui.zoom?.[zoomKind(p)])||1;}
+function zoomOf(p){return Number(p.zoom)||zoomDefault(p);}
+function applyZoom(pid){const node=Dock.els[pid],p=Dock.panels[pid];if(node&&p)node.style.zoom=zoomOf(p);}
+function setZoom(pid,value){
+ const p=Dock.panels[pid];if(!p)return;
+ const z=value==null?null:Math.round(Math.min(2.5,Math.max(.6,Number(value)))*20)/20;
+ if(z==null||Math.abs(z-zoomDefault(p))<.001)delete p.zoom;else p.zoom=z;
+ applyZoom(pid);refreshTab(pid);
+ const t=Dock.types[p.type],node=Dock.els[pid];if(t?.shown&&node?.isConnected)t.shown(p,node);
+ saveLayout();
+}
+function stepZoom(pid,dir){const p=Dock.panels[pid];if(p)setZoom(pid,dir?zoomOf(p)+dir*.1:null);}
+function zoomBadge(pid){const p=Dock.panels[pid];return p?.zoom?Math.round(p.zoom*100)+"%":"";}
 function panelTitle(pid){const p=Dock.panels[pid];return Dock.types[p.type]?.title(p,Dock.els[pid])||p.type;}
 function refreshTab(pid){
  const tab=el('.tab[data-pid="'+pid+'"] .tab-title');if(!tab)return;
  const p=Dock.panels[pid];tab.textContent=panelTitle(pid);
+ const badge=tab.parentElement.querySelector(".tab-zoom");if(badge)badge.textContent=zoomBadge(pid);
  tab.parentElement.classList.toggle("dirty",!!Dock.types[p.type]?.dirty?.(p,Dock.els[pid]));
 }
 
@@ -156,7 +173,7 @@ function stackEl(s,floating=null){
  s.tabs.forEach(pid=>{
   const p=Dock.panels[pid],type=Dock.types[p?.type]||{};
   bar.appendChild(h('<div class="tab'+(pid===s.active?" active":"")+(type.side==="ai"?" ai":"")+'" draggable="true" data-pid="'+pid+'" title="'+esc(panelTitle(pid))+'">'+
-   svg(typeof type.icon==="function"?type.icon(p):type.icon||"file",13)+'<span class="tab-title">'+esc(panelTitle(pid))+'</span>'+
+   svg(typeof type.icon==="function"?type.icon(p):type.icon||"file",13)+'<span class="tab-title">'+esc(panelTitle(pid))+'</span><small class="tab-zoom" title="这个窗口单独调过大小；右键标签可以恢复">'+zoomBadge(pid)+'</small>'+
    (floating?"":'<button class="tab-btn" data-action="dock-float" data-pid="'+pid+'" title="浮出">'+svg("float",12)+'</button>')+
    '<button class="tab-btn" data-action="dock-close" data-pid="'+pid+'" title="关闭">'+svg("close",12)+'</button></div>'));
  });
@@ -341,8 +358,13 @@ async function runUiOps(ops){
    }else if(op.do==="sidebar"){
     if(op.section&&!SIDE_SECTIONS[op.section])throw new Error("左栏没有这个分区："+op.section);
     showSection(op.section,op.open!==false);results.push({ok:true});
+   }else if(op.do==="set"&&op.key==="zoom"){
+    const pid=resolvePanel(op.panel);if(!pid)throw new Error("zoom 要给 panel：面板 id 或标题");
+    if(op.value!=null&&!(Number(op.value)>0))throw new Error("zoom 的 value 是倍数，比如 1.2");
+    setZoom(pid,op.value==null?null:Number(op.value));results.push({ok:true,panel:pid,zoom:zoomOf(Dock.panels[pid])});
    }else if(op.do==="set"){
-    if(!["theme","font_size","code_font_size","density"].includes(op.key))throw new Error("只能改 theme、font_size、code_font_size、density");
+    const keys=["theme","font_size","code_font_size","line_height","read_width","density"];
+    if(!keys.includes(op.key))throw new Error("只能改 "+keys.join("、")+"，或者给 panel 改 zoom");
     S.ui[op.key]=op.value;applyUi();saveUi();results.push({ok:true});
    }else throw new Error("不认识的操作："+op.do);
   }catch(e){results.push({ok:false,error:e.message});}
