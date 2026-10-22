@@ -19,9 +19,10 @@ const Side={entries:{},open:new Set(["code","notebooks","data"]),query:"",hits:n
 function renderActivity(){
  const bar=el("#activity");if(!bar)return;
  bar.innerHTML='<div class="act-logo" title="Lattice">'+logo()+'</div>'+
-  '<button class="act" data-action="new-menu" title="打开 / 新建">'+svg("plus",19)+'</button>'+
   visibleSpaces().map((sp,i)=>'<button class="act space'+(sp.id===Dock.space?" on":"")+'" data-action="space" data-space="'+esc(sp.id)+'" title="'+esc(sp.name)+(i<9?" · Ctrl "+(i+1):"")+'（右键改）">'+svg(sp.icon||"layout",19)+
    ((sp.side||[]).includes("cards")&&S.data.due?'<i class="badge">'+S.data.due+'</i>':"")+'</button>').join("")+
+  // After the workspaces, so it does not read as one of them.
+  '<button class="act act-new" data-action="new-menu" title="新建、打开面板、新工作区">'+svg("plus",19)+'</button>'+
   '<span class="grow"></span>'+
   SIDE_LAUNCH.map(([i,t,a])=>'<button class="act" data-action="'+a+'" title="'+esc(t)+'">'+svg(i,18)+'</button>').join("")+
   '<button class="act" data-action="theme" title="切换明暗">'+svg(S.ui.theme==="dark"?"sun":"moon",17)+'</button>'+

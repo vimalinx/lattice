@@ -54,6 +54,7 @@ function newMenu(anchor){
  const r=anchor.getBoundingClientRect();
  const menu=h('<div class="menu" style="left:'+(r.right+6)+'px;top:'+r.top+'px">'+NEW_ITEMS.map(([t,a,i,d,x],k)=>(k===4||k===6?'<hr/>':'')+'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+(d?'<small>'+esc(d)+'</small>':"")+'</span></button>').join("")+'</div>');
  closeMenus();document.body.appendChild(menu);
+ menu.style.top=Math.max(8,Math.min(r.top,innerHeight-menu.offsetHeight-8))+"px";
 }
 function closeMenus(){all(".menu").forEach(m=>m.remove());}
 /* A small menu next to what opened it (above it for things at the bottom), kept inside the window. */

@@ -714,3 +714,5 @@ details.api summary span{font-size:11.5px}
 .card-view .cm-host.editor .cm-content,.topic-view .cm-host.editor .cm-content{max-width:none;margin:0;padding:10px 14px 24px!important}
 .cm-rb0,.cm-rb0 *{color:var(--rb0)!important}.cm-rb1,.cm-rb1 *{color:var(--rb1)!important}.cm-rb2,.cm-rb2 *{color:var(--rb2)!important}
 .cm-rb-bad,.cm-rb-bad *{color:var(--red)!important;text-decoration:underline wavy var(--red)}
+.act.act-new{margin-top:4px;color:var(--subtle);border:1px dashed var(--line)}
+.act.act-new:hover{border-color:var(--accent);color:var(--accent)}
