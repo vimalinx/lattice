@@ -83,16 +83,21 @@ function splitBeside(target,zone,newStack){
 /* ---- opening and closing ----------------------------------------------------------------------- */
 function panelKey(p){return p.type+":"+(p.path||p.thread||p.agent||"")+(p.type==="chat"&&!p.thread?":follow":"");}
 function findPanel(params){const key=panelKey(params);return Object.keys(Dock.panels).find(pid=>panelKey(Dock.panels[pid])===key)||null;}
+// A conversation on show is never covered by a new tab: the AI that opened something would hide itself.
+function covers(s){return !!(s?.active&&Dock.panels[s.active]?.type==="chat");}
 function targetStack(side){
  // Opened from a group's own +: into that group, whatever kind of window it is.
  if(Dock.into){const s=Dock.into.until>Date.now()&&findStack(Dock.into.stack);Dock.into=null;if(s)return s;}
  const remembered=findStack(Dock.lastStack[side]);
- if(remembered&&(remembered.tabs.length?remembered.tabs.some(pid=>sideOf(pid)===side&&hosts(pid)):remembered.keep))return remembered;
+ if(remembered&&!covers(remembered)&&(remembered.tabs.length?remembered.tabs.some(pid=>sideOf(pid)===side&&hosts(pid)):remembered.keep))return remembered;
  let found=null;
  if(side==="mine")eachStack(s=>{if(!found&&s.keep&&!s.tabs.length)found=s;});
- eachStack(s=>{if(!found&&s.tabs.some(pid=>sideOf(pid)===side&&hosts(pid)))found=s;});
- if(side==="mine")eachStack(s=>{if(!found&&s.keep)found=s;});
+ eachStack(s=>{if(!found&&!covers(s)&&s.tabs.some(pid=>sideOf(pid)===side&&hosts(pid)))found=s;});
+ if(side==="mine")eachStack(s=>{if(!found&&s.keep&&!covers(s))found=s;});
  if(found)return found;
+ // Every place of this kind is showing a conversation: open a new group beside it instead.
+ let near=null;eachStack((s,f)=>{if(!near&&!f&&s.tabs.some(pid=>sideOf(pid)===side))near=s;});
+ if(near&&side==="ai"){const s=stackNode([]);splitBeside(near,"right",s);return s;}
  // No stack of this side yet: open one beside everything, AI on the left, mine on the right.
  const s=stackNode([]),root=Dock.layout.root;
  if(root.t==="stack"&&!root.tabs.length){Dock.layout.root=s;return s;}
@@ -101,6 +106,8 @@ function targetStack(side){
 }
 function openPanel(params,opts={}){
  let pid=opts.reuse===false?null:findPanel(params);
+ // Already a tab behind a conversation that is on show: bring it out to a free group rather than hide the conversation.
+ if(pid&&params.type!=="chat"){const s=stackOf(pid);if(s&&s.active!==pid&&covers(s)){detach(pid);tidy();}}
  // Already open, maybe in another workspace: show the same panel here too (moved into the group asked for, if any).
  if(pid&&Dock.into&&Dock.into.until>Date.now()&&findStack(Dock.into.stack)&&!findStack(Dock.into.stack).tabs.includes(pid)){detach(pid);tidy();}
  if(pid){activate(pid);if(opts.then)opts.then(pid);return pid;}
@@ -361,6 +368,8 @@ function placePanel(pid,where,to){
  const anchor=to&&to!==pid?stackOf(to):null;
  detach(pid);
  const target=anchor||targetStack(sideOf(pid));
+ // Asked to go in as a tab over a conversation that is on show: beside it instead.
+ if((where==="tab"||where==="center")&&covers(target)&&target.active!==pid){splitBeside(target,"right",stackNode([pid]));return;}
  if(where==="tab"||where==="center"){target.tabs.push(pid);target.active=pid;}
  else if(["left","right","top","bottom"].includes(where))splitBeside(target,where,stackNode([pid]));
  else throw new Error("where 应为 tab、left、right、top、bottom 或 float");
