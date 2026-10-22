@@ -326,6 +326,7 @@ label.check input{margin:0}
 .panel[data-composer="line"] .to-bottom{top:-48px}
 .panel[data-composer="line"] .chat.blank .chat-scroll{margin-top:0;flex:1 1 auto}
 .panel[data-composer="line"] .chat.blank .chat-starters{display:none}
+.panel[data-composer="line"] .chat.blank{padding-bottom:0}
 .to-bottom{position:absolute;top:-46px;left:50%;transform:translateX(-50%);width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--panel-hi);color:var(--muted);display:grid;place-items:center;padding:0;box-shadow:var(--shadow);z-index:2}
 .to-bottom svg{transform:rotate(180deg)}
 .to-bottom:hover{color:var(--text)}
@@ -362,10 +363,10 @@ label.check input{margin:0}
 .chat.blank .composer:before{display:none}
 .chat.blank .chat-starters{display:grid;gap:2px;padding:10px 18px 0;margin-bottom:auto;width:100%;box-sizing:border-box;flex:0 1 auto;min-height:0;overflow:hidden;align-content:start}
 /* A short panel keeps the input in view and lets the welcome go first. */
+.chat.blank{padding-bottom:6vh}
 @container chat (max-height: 460px){.chat-welcome p{display:none}.chat-welcome h3{font-size:1.25em}.chat.blank{padding-bottom:0}}
 @container chat (max-height: 300px){.chat-welcome{display:none}.chat-starters .starter:nth-child(n+3){display:none}}
 .chat.blank .chat-starters:empty{padding:0}
-.chat.blank{padding-bottom:6vh}
 .starter{display:flex;align-items:center;gap:11px;text-align:left;border:0;background:transparent;color:var(--muted);padding:9px 12px;border-radius:10px;min-width:0}
 .starter span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .starter svg{flex:0 0 auto;color:var(--subtle)}
