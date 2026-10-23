@@ -786,7 +786,7 @@ class ApiWorker(QThread):
                             got = self.partial
                             usage = self._cut_short(usage)
                             self.partial = ""
-                            wait = (2, 5, 12)[retries - 1]
+                            wait = (1, 3, 8)[retries - 1]
                             self.emit("retrying", attempt=retries, wait=wait, message=clean_error(exc, self.api_key)[:300])
                             await asyncio.sleep(wait)
                             if self.cancelled.is_set():
