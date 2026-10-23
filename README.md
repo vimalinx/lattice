@@ -5,9 +5,13 @@
 ## 启动
 
 ```bash
-cd ~/Projects/Lattice
+git clone https://github.com/vimalinx/lattice.git
+cd lattice
+pip install -r requirements.txt
 python3 run.py
 ```
+
+第一次打开后，在设置的「模型连接」里选一家服务、贴上 API Key 就能开始；学习库默认在 `~/Lattice`，可以在设置里换。
 
 依赖：Python 3.11+、PySide6（含 QtWebEngine）、jupyter_client、ipykernel、httpx、PyYAML、numpy、matplotlib；运行代码和 AI 沙箱另需 `uv` 与 `bubblewrap`。编译型语言按需安装（gcc、rustc、go、node……），缺什么，运行时会直接说缺什么、怎么装。
 
@@ -123,3 +127,7 @@ python3 tests/runtime_smoke_v1.py
 QT_QPA_PLATFORM=offscreen python3 tests/gui_probe_v1.py
 python3 tests/seed_demo.py --launch   # 在 /tmp/lattice-demo 里放一份演示数据并打开
 ```
+
+## 许可
+
+MIT，见 [`LICENSE`](LICENSE)。界面里打包的第三方组件（CodeMirror、KaTeX、marked、DOMPurify、Cytoscape.js、Mermaid）各自的版本和许可证见 [`ui/vendor/THIRD_PARTY.md`](ui/vendor/THIRD_PARTY.md)。
