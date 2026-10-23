@@ -283,8 +283,8 @@ label.check input{margin:0}
 .diff .ctx{color:var(--subtle);padding:0 10px}
 .suggestion-actions{display:flex;gap:6px;padding:6px 10px;justify-content:flex-end}
 .thinking{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:12px;padding:4px 2px 12px}
-.thinking span{width:6px;height:6px;border-radius:50%;background:var(--ai);animation:pulse 1s infinite}
-.thinking span:nth-child(2){animation-delay:.2s}.thinking span:nth-child(3){animation-delay:.4s}
+.thinking>span:not([class]){width:6px;height:6px;border-radius:50%;background:var(--ai);animation:pulse 1s infinite}
+.thinking>span:not([class]):nth-child(2){animation-delay:.2s}.thinking>span:not([class]):nth-child(3){animation-delay:.4s}
 .thinking b{font-weight:500;margin-left:5px}
 .chat-error{color:var(--red);font-size:12.5px;padding:8px 10px;border:1px solid color-mix(in srgb,var(--red) 40%,transparent);border-radius:8px;margin-bottom:10px}
 /* The input floats over the end of the conversation, which fades out under it. */
@@ -1127,3 +1127,5 @@ input[type=checkbox],input[type=radio],input[type=range]{accent-color:var(--acce
 .attach-row .att-row{flex-basis:100%}
 .thinking.working .wait-progress{font-size:11.5px;color:var(--ai);font-variant-numeric:tabular-nums}
 .thinking.working .chip{font-size:10.5px;padding:0 7px}
+.thinking.working .wait-progress{white-space:nowrap}
+.thinking.working .wait-progress{flex-basis:100%;padding-left:34px}.thinking.working .wait-progress:empty{display:none}
