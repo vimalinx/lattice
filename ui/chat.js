@@ -265,11 +265,37 @@ function renderLive(pid){
  const thought=thinkingHtml(st.think,0,{now:st.thinkingNow,secs,open:st.liveOpen??S.ui.thinking==="open"});
  const used=liveSkills(st);
  slot.innerHTML=(st.stream||st.live.length||thought||used.length?'<div class="msg from-ai streaming">'+skillsUsed(used)+thought+'<div class="markdown msg-body">'+r.html+'</div>'+actionChips(st.live.filter(a=>!String(a.ref||"").startsWith("skill:")),[],true)+'</div>':"")+
-  (busy&&!st.stream&&!st.thinkingNow?'<div class="thinking"><span></span><span></span><span></span><b>'+esc(st.waiting||"正在想…")+'</b></div>':"")+
+  waitingHtml(st,busy)+
   (st.error?'<div class="chat-error">'+esc(st.error)+(busy?"":button(svg("refresh",12)+" 重试","chat-retry",'data-pid="'+pid+'"',"ghost xs"))+'</div>':
    // A question left without any answer (the reply failed before a word came back, or the program was closed meanwhile).
    !busy&&st.data?.messages?.at(-1)?.role==="user"&&st.data.messages.at(-1).id!=="pending"?'<div class="chat-error quiet">这一问还没有得到回答'+button(svg("refresh",12)+" 重新回答","chat-retry",'data-pid="'+pid+'"',"ghost xs")+'</div>':"");
  if(r.blocks.length)mountBlocks(slot,r.blocks,{thread:st.thread,message:0,answers:{},pid,live:true});
+}
+/* What the reply is doing while no words come: a tool at work (with what it works on and for how long), or thinking
+   between steps. Shown under what is written so far, so a long install never looks like the reply has stalled. */
+const WAIT_LABEL={install:"正在安装",run:"正在运行代码",shell:"正在执行命令",web_search:"正在联网搜索",web_fetch:"正在读网页",ui:"正在调整界面",skill_edit:"正在准备修改"};
+function elapsed(ms){const s=Math.floor(ms/1000);return s<60?s+" 秒":Math.floor(s/60)+" 分 "+String(s%60).padStart(2,"0")+" 秒";}
+function waitingHtml(st,busy){
+ if(!busy||st.thinkingNow)return "";
+ const w=st.waiting,quiet=!st.stream||Date.now()-(st.lastChunk||0)>1500;
+ if(!w&&!quiet)return "";
+ const label=w?(WAIT_LABEL[w.name]||"正在用工具 "+w.name):st.stream||st.live.length?"正在想下一步…":"正在想…";
+ const long=w&&w.name==="install"&&Date.now()-w.since>20000?'<small>大的包（比如 torch）可能要几分钟</small>':"";
+ return '<div class="thinking working"><span></span><span></span><span></span><b>'+esc(label)+'</b>'+(w?.detail?'<code>'+esc(shorten(w.detail,90))+'</code>':"")+
+  (w?'<em data-since="'+w.since+'">'+elapsed(Date.now()-w.since)+'</em>':"")+long+'</div>';
+}
+// While a tool works, the time on its line moves, and the "thinking" line appears once words stop coming.
+const liveTicks={};
+function liveTicker(pid){
+ if(liveTicks[pid])return;
+ liveTicks[pid]=setInterval(()=>{
+  const st=Chat[pid],slot=Dock.els[pid]?.querySelector(".live-slot");
+  if(!st?.data?.busy||!slot){clearInterval(liveTicks[pid]);delete liveTicks[pid];return;}
+  // Only the time changes in place; the reply is redrawn just when the line comes or goes (a selection survives).
+  const em=slot.querySelector("em[data-since]");if(em)em.textContent=elapsed(Date.now()-Number(em.dataset.since));
+  const shown=slot.querySelector(".thinking.working"),want=waitingHtml(st,true);
+  if(!!shown!==!!want||(want.includes("<small>")&&!shown?.querySelector("small")))patchLive(pid);
+ },1000);
 }
 const liveFrames={};
 function patchLive(pid){
@@ -368,7 +394,7 @@ async function chatSend(pid,text,extra={}){
   const r=await rpc("send",{agent:p.agent,message,thread:st.thread,selection,task:extra.task||"",note:screenNote(),answer:extra.answer||null,attach,model:p.model||null,skill:skill?.slug||null,effort:p.effort||null});
   st.thread=r.thread;if(extra.selection==null)st.quote="";if(text==null){st.attach=[];st.skill=null;}
   st.data.messages.push({id:"pending",role:"user",content:message||({check:"我写好了，帮我看看我的代码和运行结果。",hint:"我卡住了，给我一点提示，先别直接给答案。",capture:"把我们讨论过的内容整理成知识卡。"})[extra.task]||"",meta:{selection,answer:extra.answer,attach,skill:skill?.slug,skill_title:skill?.title},at:new Date().toISOString()});
-  st.data.busy=true;st.anchored=false;renderChat(pid);anchorQuestion(pid);
+  st.data.busy=true;st.anchored=false;renderChat(pid);anchorQuestion(pid);liveTicker(pid);
  }catch(e){if(text==null&&area){area.value=message;fitComposer(pid);}st.error=e.message;renderLive(pid);throw e;}
 }
 // Answer the last question again, after a stop, a cut-off or a failure.
@@ -377,7 +403,7 @@ async function chatRetry(pid){
  if(st.data.busy)return toast("这段对话正在回答；可以先停止");
  st.error="";st.stream="";st.live=[];st.waiting="";Object.assign(st,freshThinking());
  const asked=[...st.data.messages].reverse().find(m=>m.role==="user")?.meta;st.liveSkill=asked?.skill?{slug:asked.skill,title:asked.skill_title||asked.skill}:null;
- try{await rpc("retry",{thread:st.thread,note:screenNote(),model:p.model||null,effort:p.effort||null});st.data.busy=true;st.anchored=false;renderChat(pid);anchorQuestion(pid);}
+ try{await rpc("retry",{thread:st.thread,note:screenNote(),model:p.model||null,effort:p.effort||null});st.data.busy=true;st.anchored=false;renderChat(pid);anchorQuestion(pid);liveTicker(pid);}
  catch(e){st.error=e.message;renderLive(pid);}
 }
 function chatEvent(evt){
@@ -386,10 +412,10 @@ function chatEvent(evt){
   const st=Chat[pid];
   if(evt.kind==="thinking"){if(!st.thinkingNow){st.thinkingNow=true;st.thinkFrom=Date.now();}st.think+=evt.text;patchLive(pid);continue;}
   if(st.thinkingNow&&["chunk","tool","tool_wait","finished","error"].includes(evt.kind)){st.thinkingNow=false;st.thinkMs+=Date.now()-st.thinkFrom;}
-  if(evt.kind==="chunk"){st.stream+=evt.text;st.waiting="";patchLive(pid);continue;}
+  if(evt.kind==="chunk"){st.stream+=evt.text;st.waiting="";st.lastChunk=Date.now();patchLive(pid);continue;}
   if(evt.kind==="status"){if(st.data){st.data.status=evt.state;st.data.busy=!["ready","offline","error","cancelled"].includes(evt.state)||st.data.busy;}const head=Dock.els[pid]?.querySelector(".chat-head");if(head)head.innerHTML=chatHead(pid);continue;}
-  if(evt.kind==="tool_wait"){st.waiting={ui:"正在调整界面…",shell:"正在命令行里查看…",run:"正在运行代码…",web_search:"正在联网搜索…",web_fetch:"正在读网页…",install:"正在装包…"}[evt.name]||"";patchLive(pid);continue;}
-  if(evt.kind==="tool"){st.waiting="";if(evt.actions?.length){st.live.push(...evt.actions);patchLive(pid);}continue;}
+  if(evt.kind==="tool_wait"){st.waiting={name:evt.name,detail:evt.detail||"",since:Date.now()};patchLive(pid);liveTicker(pid);continue;}
+  if(evt.kind==="tool"){st.waiting="";st.lastChunk=Date.now();if(evt.actions?.length){st.live.push(...evt.actions);patchLive(pid);}continue;}
   if(evt.kind==="error"){st.error=evt.message||"请求失败";patchLive(pid);continue;}
   if(evt.kind==="finished"){
    st.stream="";st.live=[];st.waiting="";st.liveSkill=null;Object.assign(st,freshThinking());

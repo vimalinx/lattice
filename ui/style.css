@@ -1096,3 +1096,7 @@ input[type=checkbox],input[type=radio],input[type=range]{accent-color:var(--acce
 /* diagram labels never cut off: a label a little wider than measured shows past its box instead */
 .mermaid svg foreignObject{overflow:visible}
 .mermaid svg .nodeLabel,.mermaid svg .edgeLabel{line-height:1.5}
+.thinking.working{flex-wrap:wrap;row-gap:2px}
+.thinking.working code{font-size:11.5px;color:var(--muted);background:var(--surface);padding:1px 7px;border-radius:6px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.thinking.working em{font-style:normal;font-size:11.5px;color:var(--subtle);font-variant-numeric:tabular-nums}
+.thinking.working small{flex-basis:100%;padding-left:34px;font-size:11.5px;color:var(--subtle)}

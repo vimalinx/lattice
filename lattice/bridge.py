@@ -1445,13 +1445,22 @@ class Bridge(QObject):
             LOG.info("tool %s failed: %s", name, exc)
             result = {"error": str(exc)}
         if isinstance(result, tools.Later):
-            self.announce({"type": "agent", "kind": "tool_wait", "agent": agent, "thread": thread, "name": name})
+            # A tool that takes a while (installing, running, a command, the web): the reply says what it is doing.
+            self.announce({"type": "agent", "kind": "tool_wait", "agent": agent, "thread": thread, "name": name, "detail": self._tool_detail(name, args)})
             try:
                 result.start(answer)
             except Exception as exc:
                 answer({"error": str(exc)})
         else:
             answer(result)
+
+    @staticmethod
+    def _tool_detail(name, args):
+        """A few words on what a waiting tool is working on: the packages, the command, the search, the page, the file."""
+        a = args if isinstance(args, dict) else {}
+        found = {"install": "、".join(str(p) for p in (a.get("packages") or [])) + (f"（环境 {a['env']}）" if a.get("env") and a.get("env") != "default" else ""),
+                 "shell": a.get("command"), "run": a.get("file"), "web_search": a.get("query"), "web_fetch": a.get("url")}.get(name) or ""
+        return str(found).strip()[:160]
 
     def _finish(self, evt):
         l = self.lattice
