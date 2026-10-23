@@ -320,7 +320,8 @@ def shell(ctx, command, timeout=None, gpu=False):
             if isinstance(result, Exception):
                 return done({"error": str(result)})
             restored = ctx.l.police()
-            changed = [rel for _, rel in ctx.l.vault.changes()]
+            # what the command changed, not what Lattice itself wrote meanwhile and has yet to commit
+            changed = [rel for _, rel in ctx.l.vault.changes() if not ctx.l.vault.ours(rel)]
             ctx.l.index.sync()
             if changed:
                 ctx.act(f"用命令行改了 {len(changed)} 个文件", "file:" + changed[0] if len(changed) == 1 else None)
