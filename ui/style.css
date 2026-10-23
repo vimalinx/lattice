@@ -226,6 +226,29 @@ label.check input{margin:0}
 .out-html{padding:6px 10px;overflow:auto;font-size:12px}
 .out-html table{border-collapse:collapse}.out-html td,.out-html th{border:1px solid var(--line);padding:3px 7px}
 /* ---- chat ---- */
+/* a topic's conversations, beside the conversation */
+.chat-frame{flex:1;display:flex;min-height:0;container:chatframe / inline-size}
+.chat-frame>.chat{min-width:0}
+.chat-sessions{flex:0 0 208px;width:208px;min-width:0;overflow:hidden;display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line-soft);background:var(--panel)}
+.chat-sessions[hidden]{display:none}
+.ss-head{display:flex;align-items:center;gap:2px;padding:10px 6px 6px 12px}
+.ss-head>div{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.35}
+.ss-head b{font-size:12.5px}
+.ss-head small{color:var(--subtle);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ss-list{flex:1;overflow:auto;padding:2px 6px 14px}
+.ss-item{position:relative;display:flex;flex-direction:column;gap:1px;padding:6px 26px 6px 8px;border-radius:7px;cursor:pointer}
+.ss-item:hover{background:var(--surface-hover)}
+.ss-item.on{background:var(--accent-glow);box-shadow:inset 2px 0 0 var(--accent)}
+.ss-title{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ss-item.on .ss-title{font-weight:600}
+.ss-item small{font-size:10.5px;color:var(--subtle);display:flex;align-items:center;gap:4px}
+.ss-busy{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.ss-more{position:absolute;right:3px;top:5px;opacity:0;padding:3px;border:0;border-radius:5px;background:none;color:var(--muted);cursor:pointer}
+.ss-item:hover .ss-more,.ss-more:focus-visible{opacity:1}
+.ss-more:hover{background:var(--surface)}
+.ss-rename{width:100%;font:inherit;font-size:12.5px;padding:1px 4px}
+.ss-archived summary{font-size:11.5px;color:var(--subtle);padding:10px 8px 4px;cursor:pointer}
+@container chatframe (max-width:620px){.chat-sessions{display:none}}
 .chat{flex:1;display:flex;flex-direction:column;min-height:0;position:relative;container:chat / size;background:linear-gradient(var(--ai-glow),transparent 120px),var(--panel)}
 .chat-head{display:flex;align-items:center;gap:8px;padding:6px 10px;min-height:40px}
 .head-title{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}

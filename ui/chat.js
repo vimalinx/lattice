@@ -15,7 +15,7 @@ panelType("chat",{side:"ai",icon:p=>AGENT_ICON[p.agent]||"bot",
  },
  mount(p,node,pid){
   Chat[pid]={input:"",stream:"",live:[],waiting:"",error:"",data:null,cache:{},attach:[],quote:"",opened:new Set(),thoughts:{},...freshThinking()};
-  node.innerHTML='<div class="chat"><div class="chat-head"></div><div class="chat-scroll"><div class="loading">正在打开对话…</div></div><div class="composer"></div><div class="chat-starters"></div></div>';
+  node.innerHTML='<div class="chat-frame"><aside class="chat-sessions" hidden></aside><div class="chat"><div class="chat-head"></div><div class="chat-scroll"><div class="loading">正在打开对话…</div></div><div class="composer"></div><div class="chat-starters"></div></div></div>';
   loadChat(pid);
  },
  unmount(p,node){delete Chat[node.dataset.pid];},
@@ -29,11 +29,62 @@ panelType("chat",{side:"ai",icon:p=>AGENT_ICON[p.agent]||"bot",
  }});
 async function loadChat(pid,keepScroll=true){
  const p=Dock.panels[pid],st=Chat[pid];if(!p||!st)return;
- const data=await safe(()=>rpc("chat",p.thread?{agent:p.agent,thread:p.thread}:{agent:p.agent,topic:S.data.active_topic||""}));
+ // A conversation picked from the topic's list stays open here while that topic is the one being learned.
+ if(p.session&&p.sessionTopic!==(S.data.active_topic||"")){delete p.session;delete p.sessionTopic;}
+ const thread=p.thread||p.session;
+ let data=await safe(()=>rpc("chat",thread?{agent:p.agent,thread}:{agent:p.agent,topic:S.data.active_topic||""}));
+ if(!data&&p.session){delete p.session;data=await safe(()=>rpc("chat",{agent:p.agent,topic:S.data.active_topic||""}));}
  if(!data||!Chat[pid])return;
  if(st.thread&&st.thread!==data.thread){st.cache={};st.stream="";st.live=[];st.error="";st.anchored=false;st.bottom=undefined;}
  st.thread=data.thread;st.data=data;
- renderChat(pid,keepScroll);refreshTab(pid);
+ renderChat(pid,keepScroll);refreshTab(pid);renderSessions(pid);
+}
+/* ---- a topic's conversations, in a column at the conversation's left: open one, start one, rename (double-click),
+   archive or delete. The tutor's panels show it unless closed; the quick answer's when opened. -------------------- */
+const SESSION_AGENTS=new Set(["tutor","flash"]);
+const sessionsOn=pid=>{const p=Dock.panels[pid];return !!p&&SESSION_AGENTS.has(p.agent)&&!p.thread&&(p.sessions??p.agent==="tutor");};
+async function renderSessions(pid){
+ const node=Dock.els[pid],st=Chat[pid],p=Dock.panels[pid],box=node?.querySelector(".chat-sessions");if(!box||!st)return;
+ box.hidden=!sessionsOn(pid);if(box.hidden)return;
+ const topic=st.data?.head?.topic||"",r=await safe(()=>rpc("sessions",{agent:p.agent,topic}));if(!r||!Chat[pid])return;
+ const item=x=>'<div class="ss-item'+(x.id===st.thread?" on":"")+'" data-action="session-open" data-pid="'+pid+'" data-id="'+esc(x.id)+'" data-tip="'+esc(x.last?"最近问："+x.last:"还没有消息")+'">'+
+  '<span class="ss-title" data-session-title="'+esc(x.id)+'">'+esc(x.title)+'</span><small>'+(x.busy?'<i class="ss-busy"></i>':"")+x.messages+' 条 · '+esc(fmtDate(x.updated,true))+'</small>'+
+  '<button class="ss-more" data-action="session-more" data-pid="'+pid+'" data-id="'+esc(x.id)+'" data-archived="'+(x.archived?1:0)+'" title="改名、归档、删除">'+svg("dots",13)+'</button></div>';
+ const live=r.sessions.filter(x=>!x.archived),kept=r.sessions.filter(x=>x.archived);
+ box.innerHTML='<div class="ss-head"><div><b>会话</b><small>'+esc(topic?topicTitle(topic):"默认对话")+'</small></div>'+
+  iconButton("plus","session-new","在这个主题下开新会话",'data-pid="'+pid+'"')+iconButton("sidebar","chat-sessions","收起会话栏",'data-pid="'+pid+'"')+'</div>'+
+  '<div class="ss-list">'+(live.map(item).join("")||'<p class="muted small">还没有会话。</p>')+
+  (kept.length?'<details class="ss-archived"'+(st.archivedOpen?" open":"")+'><summary>已归档 '+kept.length+'</summary>'+kept.map(item).join("")+'</details>':"")+'</div>';
+ box.querySelector(".ss-archived")?.addEventListener("toggle",e=>{st.archivedOpen=e.target.open;});
+}
+function openSession(pid,id){
+ const p=Dock.panels[pid];if(!p)return;
+ p.session=id;p.sessionTopic=S.data.active_topic||"";saveLayout();return loadChat(pid,false);
+}
+// Renaming in place: Enter keeps it, Esc leaves it as it was, an empty name goes back to the first question.
+function renameSession(pid,id){
+ const span=Dock.els[pid]?.querySelector('[data-session-title="'+CSS.escape(id)+'"]');if(!span)return;
+ const input=h('<input class="ss-rename" value="'+esc(span.textContent)+'"/>');span.replaceWith(input);input.focus();input.select();
+ let done=false;const finish=async keep=>{if(done)return;done=true;if(keep)await safe(()=>rpc("session_update",{id,title:input.value}));renderSessions(pid);};
+ input.addEventListener("keydown",e=>{e.stopPropagation();if(e.key==="Enter")finish(true);else if(e.key==="Escape")finish(false);});
+ input.addEventListener("click",e=>e.stopPropagation());input.addEventListener("blur",()=>finish(true));
+}
+document.addEventListener("dblclick",e=>{const t=e.target.closest?.("[data-session-title]");if(!t)return;const it=t.closest(".ss-item");e.preventDefault();renameSession(it.dataset.pid,t.dataset.sessionTitle);});
+async function sessionAction(kind,a){
+ const pid=a.dataset.pid,p=Dock.panels[pid];if(!p)return;
+ if(kind==="chat-sessions"){p.sessions=!sessionsOn(pid);saveLayout();return renderSessions(pid);}
+ if(kind==="session-new"){const r=await rpc("thread_new",{agent:p.agent,topic:Chat[pid]?.data?.head?.topic||S.data.active_topic||""});await openSession(pid,r.thread);return Dock.els[pid]?.querySelector("[data-composer]")?.focus();}
+ if(kind==="session-open")return openSession(pid,a.dataset.id);
+ const id=a.dataset.id,archived=a.dataset.archived==="1";
+ if(kind==="session-more")return popMenu(a,'<button data-action="session-rename" data-pid="'+pid+'" data-id="'+esc(id)+'">'+svg("edit",14)+'<span>改名</span></button>'+
+  '<button data-action="session-archive" data-pid="'+pid+'" data-id="'+esc(id)+'" data-archived="'+(archived?1:0)+'">'+svg("history",14)+'<span>'+(archived?"取消归档":"归档")+'</span></button><hr/>'+
+  '<button class="danger" data-action="session-delete" data-pid="'+pid+'" data-id="'+esc(id)+'">'+svg("trash",14)+'<span>删除</span></button>');
+ if(kind==="session-rename")return renameSession(pid,id);
+ if(kind==="session-archive"){await rpc("session_update",{id,archived:!archived});if(!archived&&Chat[pid]?.thread===id){delete p.session;await loadChat(pid,false);}return renderSessions(pid);}
+ if(kind==="session-delete"){
+  if(!await ask("对话会从会话列表和学习库里删掉，学习库的历史里还能找回。",{title:"删除这段会话？",danger:true,ok:"删除"}))return;
+  await rpc("session_delete",{id});if(Chat[pid]?.thread===id){delete p.session;await loadChat(pid,false);}return renderSessions(pid);
+ }
 }
 function chatPanels(thread){return Object.keys(Chat).filter(pid=>Chat[pid].thread===thread);}
 function followingPanels(){return Object.keys(Chat).filter(pid=>Dock.panels[pid]&&!Dock.panels[pid].thread);}
@@ -140,7 +191,7 @@ function chatHead(pid){
     button(svg("check",13)+" 结束并复盘","practice-end",'data-pid="'+pid+'"',"primary sm"):'<span class="chip">'+(pr.state==="reviewing"?"主会话复盘中":"已复盘")+'</span>')+'</div>';
  }
  const topic=d.head?.topic;
- const tools=iconButton("edit","chat-new","开新会话",'data-pid="'+pid+'"')+
+ const tools=(SESSION_AGENTS.has(p.agent)&&!p.thread&&!sessionsOn(pid)?iconButton("sidebar","chat-sessions","会话列表",'data-pid="'+pid+'"'):"")+iconButton("edit","chat-new","开新会话",'data-pid="'+pid+'"')+
   iconButton("dots","chat-more","显示和更多",'data-pid="'+pid+'"');
  return '<button class="topic-chip'+(topic?"":" quiet")+'" data-action="chat-topic-menu" data-pid="'+pid+'" title="这段对话属于哪个主题">'+svg(topic?"map":"bot",12)+'<span>'+esc(topic?topicTitle(topic):"默认对话")+'</span>'+svg("chevrondown",11)+'</button>'+
   '<div class="chat-tools">'+tools+'</div>';
@@ -452,6 +503,9 @@ function chatEvent(evt){
  }
  if(evt.kind==="finished"&&evt.agent==="organizer"&&!evt.cards_for)organizeFinished(evt);
  if(evt.kind==="finished")refreshState();
+ // The lists of conversations show which one is answering, and a first question names a new one.
+ if(evt.kind==="finished"||evt.kind==="status")for(const pid of Object.keys(Chat))if(Dock.panels[pid]?.agent===evt.agent&&sessionsOn(pid)){
+  clearTimeout(Chat[pid].ssTimer);Chat[pid].ssTimer=setTimeout(()=>renderSessions(pid),300);}
 }
 async function startPractice(pid,mid){
  const st=Chat[pid];

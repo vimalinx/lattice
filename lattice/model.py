@@ -842,12 +842,32 @@ class Lattice:
         """The conversation an agent is having about a topic (None: the default conversation)."""
         # Practice conversations and skill trials are threads of their own, never the conversation itself.
         row = self.index.one("SELECT id FROM threads WHERE agent=? AND topic IS ? AND json_extract(head,'$.practice') IS NULL "
-                             "AND json_extract(head,'$.trial') IS NULL ORDER BY created DESC LIMIT 1",
+                             "AND json_extract(head,'$.trial') IS NULL AND COALESCE(json_extract(head,'$.archived'),0)=0 ORDER BY created DESC LIMIT 1",
                              (agent, topic))
         if row:
             return row["id"]
         name = self.doc(topic, "topic")["title"] if topic else None
         return self.thread_new(agent, topic, ({"tutor": "主会话", "flash": "快答"}.get(agent, agent)) + (" · " + name if name else ""))["id"]
+
+    def sessions(self, agent, topic=None):
+        """An agent's conversations about a topic (None: the default conversation), newest first: a topic can have many,
+        each named by the learner or else by its first question."""
+        rows = self.index.rows("SELECT t.id, t.head, t.created, t.updated, COUNT(m.id) AS n, "
+                               "(SELECT content FROM messages WHERE thread=t.id AND role='user' ORDER BY id LIMIT 1) AS first, "
+                               "(SELECT content FROM messages WHERE thread=t.id AND role='user' ORDER BY id DESC LIMIT 1) AS last, "
+                               "(SELECT content FROM messages WHERE thread=t.id AND role='assistant' ORDER BY id DESC LIMIT 1) AS answer "
+                               "FROM threads t LEFT JOIN messages m ON m.thread=t.id WHERE t.agent=? AND t.topic IS ? "
+                               "AND json_extract(t.head,'$.practice') IS NULL AND json_extract(t.head,'$.trial') IS NULL "
+                               "GROUP BY t.id ORDER BY t.created DESC", (agent, topic))
+        out = []
+        for r in rows:
+            head = json.loads(r["head"])
+            first = re.sub(r"\s+", " ", r["first"] or "").strip()
+            out.append({"id": r["id"], "title": head["title"] if head.get("named") else (first[:28] or "新会话"), "named": bool(head.get("named")),
+                        "archived": bool(head.get("archived")), "created": r["created"], "updated": r["updated"], "messages": r["n"],
+                        "last": re.sub(r"\s+", " ", r["last"] or "").strip()[:120],
+                        "answer": re.sub(r"\s+", " ", re.sub(r"```.*?(```|$)", "", r["answer"] or "", flags=re.S)).strip()[:160]})
+        return out
 
     def thread_head(self, ident):
         row = self.index.one("SELECT head FROM threads WHERE id=?", (ident,))

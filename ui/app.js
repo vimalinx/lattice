@@ -295,7 +295,8 @@ async function onAction(a){
  case "zoom-reset-all":Object.keys(Dock.panels).forEach(x=>{if(Dock.panels[x].zoom)setZoom(x,null);});return toast("所有窗口都回到了各自面板的默认大小");
  case "chat-cancel":return rpc("cancel",{thread:Chat[pid].thread});
  case "chat-task":return chatSend(pid,"",{task:a.dataset.task});
- case "chat-new":{if(!await ask("之前的对话还在，可以在学习库的 threads/ 里找到，也能被搜索到。",{title:"开一段新会话？",ok:"开新会话"}))return;await rpc("thread_new",{agent:Dock.panels[pid].agent,topic:S.data.active_topic||""});return loadChat(pid,false);}
+ case "chat-sessions":case "session-new":case "session-open":case "session-more":case "session-rename":case "session-archive":case "session-delete":return sessionAction(kind,a);
+ case "chat-new":{if(SESSION_AGENTS.has(Dock.panels[pid]?.agent))return sessionAction("session-new",a);if(!await ask("之前的对话还在，可以在学习库的 threads/ 里找到，也能被搜索到。",{title:"开一段新会话？",ok:"开新会话"}))return;await rpc("thread_new",{agent:Dock.panels[pid].agent,topic:S.data.active_topic||""});return loadChat(pid,false);}
  case "practice-start":return startPractice(pid,a.dataset.mid);
  case "practice-end":return endPractice(pid);
  case "message-card":return messageToCard(pid,a.dataset.mid);

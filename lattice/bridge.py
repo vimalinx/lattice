@@ -1366,11 +1366,39 @@ class Bridge(QObject):
 
     def rpc_thread_new(self, agent, topic=None):
         topic = self.lattice.active_topic() if topic is None else (topic or None)
-        old = self.lattice.thread_for(agent, topic)
-        if old in self.busy:
-            raise ValueError("先停止当前的回答，再开新会话")
         name = self.lattice.topic(topic)["title"] if topic else None
         return {"thread": self.lattice.thread_new(agent, topic, AGENT_NAMES[agent] + (" · " + name if name else ""))["id"]}
+
+    # ---- a topic's conversations, managed beside them -----------------------------------------------
+    def rpc_sessions(self, agent, topic=None):
+        topic = self.lattice.active_topic() if topic is None else (topic or None)
+        return {"topic": topic, "sessions": [{**s, "busy": s["id"] in self.busy} for s in self.lattice.sessions(agent, topic)]}
+
+    def rpc_session_update(self, id, title=None, archived=None):
+        head = self.lattice.thread_head(id)
+        if head.get("practice") or head.get("trial"):
+            raise ValueError("练习和试用的对话不在会话列表里")
+        change = {}
+        if title is not None:
+            title = text(title, 80).strip()
+            change.update(title=title or head["title"], named=bool(title))
+        if archived is not None:
+            change["archived"] = bool(archived)
+        self.lattice.thread_update(id, **change)
+        return {"ok": True}
+
+    def rpc_session_delete(self, id):
+        """The learner deletes a conversation; it stays in the vault's history and can be brought back from there."""
+        l, head = self.lattice, self.lattice.thread_head(id)
+        if id in self.busy:
+            raise ValueError("这段对话正在回答；先停止")
+        rel = l.index.one("SELECT path FROM threads WHERE id=?", (id,))["path"]
+        self.commit_mine()
+        l.vault.commit("轨迹与对话", "lattice")
+        l.vault.remove(rel)
+        l.index.unindex(rel)
+        l.vault.commit(f"删除会话「{head.get('title') or id}」", "me")
+        return {"ok": True}
 
     def rpc_send(self, agent, message="", thread=None, topic=None, selection="", task="", note="", answer=None, attach=None, model=None, skill=None, effort=None):
         return self.send(agent, message, thread, topic, selection, task, note, answer, attach=attach, model=model, skill=skill, effort=effort)
@@ -1452,12 +1480,31 @@ class Bridge(QObject):
             user += self._since(thread, topic)
         for rel, content in inline:
             user += f"\n\n（学习者附上的「{rel}」，全文如下）\n```\n{content}\n```"
-        where = f"这段对话属于主题「{l.topic(topic)['title']}」（topic:{topic}）。" if topic else "这是默认对话，不属于任何主题。"
+        where = self._topic_brief(definition["name"], thread, topic) if topic else "这是默认对话，不属于任何主题。"
         context = f"现在是 {tools.today()}。{where}对话 id：{thread}。"
         if practice:
             context += (f"\n\n这次练习：practice:{thread}「{practice['title']}」，练习文件：{practice['file']}。"
                         + (f"\n目标：{practice['goal']}" if practice.get("goal") else "") + "\n\n练习依据的讲解：\n" + practice["seed"])
         return user, agents.system_prompt(self.root, definition, context)
+
+    def _topic_brief(self, agent, thread, topic):
+        """What the topic as a whole is about, for each of its conversations: its question, where the route stands,
+        its archive and, for the tutor, what its other conversations are on."""
+        l, t = self.lattice, self.lattice.topic(topic)
+        lines = [f"这段对话属于主题「{t['title']}」（topic:{topic}），这个主题想弄懂：{t['question'][:300]}"]
+        route = t.get("route") or []
+        if route:
+            now = next((i for i, s in enumerate(route) if s.get("state") == "now"), None)
+            lines.append(f"主干路线 {len(route)} 站" + (f"，现在在第 {now + 1} 站「{route[now]['title']}」" if now is not None else "") + "："
+                         + "；".join(f"{i + 1}.{s['title']}" + ("✓" if s.get("state") == "done" else "") for i, s in enumerate(route)))
+        if t.get("notes", "").strip():
+            lines.append("主题档案（节选）：" + re.sub(r"\s+", " ", t["notes"]).strip()[:1200])
+        if agent == "tutor":
+            others = [x for x in l.sessions("tutor", topic) if x["id"] != thread and not x["archived"] and x["messages"]][:6]
+            if others:
+                lines.append("这个主题下的其他主会话（要细看用 conversation 的 thread 读）：" +
+                             "；".join(f"「{x['title']}」(thread {x['id']}，{x['messages']} 条，最近问：{x['last'][:60]}；最近讲的开头：{x['answer'][:120]})" for x in others))
+        return "\n".join(lines) + "\n"
 
     def _since(self, thread, topic):
         """What the learner did since the tutor last spoke, which says where they are unsure: the questions they put to
