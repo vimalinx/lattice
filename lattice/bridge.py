@@ -640,6 +640,15 @@ class Bridge(QObject):
         self.last_write = time.monotonic()
         return {"path": rel}
 
+    def rpc_attach_text(self, text):
+        """A long piece of text pasted into a message, kept as a file of its own under data/附件/ (shown as a tile,
+        opened and edited like any file) instead of filling the input."""
+        rel = self.lattice.vault.unique("data/附件", "粘贴的文字", ".md")
+        self.lattice.vault.write_text(rel, str(text)[:2_000_000])
+        self.lattice.index.reindex(rel)
+        self.last_write = time.monotonic()
+        return {"path": rel}
+
     def rpc_file_delete(self, path):
         _, rel = self.lattice.resolve(path)
         if rel and rel.endswith(".ipynb"):
@@ -1261,10 +1270,26 @@ class Bridge(QObject):
             # The learner picked a skill for this message: its whole way of working comes with it, so no lookup is needed.
             user += "\n\n（学习者要求这一轮按技能「" + skill["title"] + "」来做。完整做法如下，照着做；说明里提到的附带文件用 skill 工具的 file 读。）\n\n" + skills.instructions(skill)
             l.record("skill", {"skill": skill["slug"], "title": skill["title"], "by": "learner"}, "me", [thread])
-        notes = "；".join(x for x in (note.strip(), ("附上了这些文件，需要时用 read 读：" + "、".join(attach)) if attach else "",
+        # Short text attachments (a long paste among them) come with the message; larger files and the rest are listed
+        # to be read when needed. Images are named, but their content cannot be seen.
+        inline, listed, images = [], [], []
+        for rel in attach or []:
+            suffix = Path(rel).suffix.lower()
+            if suffix in IMAGE_EXT:
+                images.append(rel)
+                continue
+            try:
+                content = l.vault.read_text(rel) if suffix in TEXT_EXT and l.vault.path(rel).stat().st_size <= 60_000 else None
+            except (OSError, UnicodeDecodeError, VaultError):
+                content = None
+            (inline.append((rel, content)) if content is not None and len(content) <= 30_000 else listed.append(rel))
+        notes = "；".join(x for x in (note.strip(), ("附上了这些文件，需要时用 read 读：" + "、".join(listed)) if listed else "",
+                                      ("附上了图片（你看不到图里的内容，需要时请学习者描述）：" + "、".join(images)) if images else "",
                                       ("选中了这段内容：\n" + selection.strip()[:5000]) if selection.strip() else "") if x)
         if notes:
             user += "\n\n（界面附注：" + notes + "）"
+        for rel, content in inline:
+            user += f"\n\n（学习者附上的「{rel}」，全文如下）\n```\n{content}\n```"
         where = f"这段对话属于主题「{l.topic(topic)['title']}」（topic:{topic}）。" if topic else "这是默认对话，不属于任何主题。"
         context = f"现在是 {tools.today()}。{where}对话 id：{thread}。"
         if practice:

@@ -260,6 +260,7 @@ async function onAction(a){
  case "chat-attach-pick":{const picked=await pickPath({mode:"files",title:"附上文件",ok:"附上",hint:"会复制进学习库的 data/附件/，原文件不动"});if(!picked?.length)return;const paths=await rpc("attach_files",{paths:picked},0);const st=Chat[pid];if(!paths?.length||!st)return;
   paths.forEach(x=>{if(!st.attach.some(y=>y.path===x))st.attach.push({path:x});});await refreshState();updateComposer(pid);return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
  case "chat-attach-sel":{const st=Chat[pid];if(st&&Sel.text){st.quote=Sel.text;clearSelection();updateComposer(pid);}return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
+ case "att-open":return openAttachment(a.dataset.path);
  case "chat-attach-remove":Chat[pid]?.attach.splice(Number(a.dataset.index),1);return updateComposer(pid);
  case "chat-effort":{const p=Dock.panels[pid];if(!p)return;if(a.dataset.value)p.effort=a.dataset.value;else delete p.effort;saveLayout();updateComposer(pid);
   if(Menus.reopen)Menus.reopen();return;}

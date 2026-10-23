@@ -167,7 +167,7 @@ function messageEl(pid,m,answers){
   const html=mine?'<div class="msg from-me" data-mid="'+m.id+'"><div class="bubble">'+
     (meta.skill_title?'<div class="msg-skill"'+(meta.skill?' data-skill-open="'+esc(meta.skill)+'" data-tip="看看、改改这个技能"':"")+'>'+svg("store",11)+' 按技能「'+esc(meta.skill_title)+'」</div>':"")+
     (meta.selection?'<div class="msg-quote">'+esc(shorten(meta.selection,180))+'</div>':"")+
-    (meta.attach?.length?'<div class="msg-attach">'+meta.attach.map(x=>'<a data-action="open-file" data-path="'+esc(x)+'">'+svg(fileIcon(x),12)+' '+esc(x.split("/").pop())+'</a>').join("")+'</div>':"")+
+    (meta.attach?.length?messageTiles(meta.attach):"")+
     '<div class="markdown msg-body">'+r.html+'</div></div>'+foot+'</div>'
    :'<div class="msg from-ai" data-mid="'+m.id+'">'+skillsUsed(meta.skills||olderSkills(list,at))+thinkingHtml(meta.thinking,meta.think_seconds)+'<div class="markdown msg-body">'+r.html+'</div>'+
     (redone?'<div class="msg-note">这次没有答完，下面是重新回答的</div>':incomplete?'<div class="msg-note">'+esc(meta.stop_reason==="cancelled"?"已停止 · 保留了部分回答":meta.stop_reason==="max_tokens"?"达到回复长度上限":"没有正常结束 · 只保留了收到的部分")+
@@ -180,6 +180,7 @@ function messageEl(pid,m,answers){
  const thought=node.querySelector("details.thinking-box");if(thought)thought.open=st.thoughts[m.id]??S.ui.thinking==="open";
  if(cached.blocks.length)mountBlocks(node,cached.blocks,{thread:st.thread,message:m.id,answers,pid});
  if(meta.changes?.length)mountInlineChanges(node);
+ if(meta.attach?.length){hydrateVault(node);fillTextTiles(node);}
  return node;
 }
 function messageTools(pid,m){
@@ -327,7 +328,8 @@ function updateComposer(pid){
  area.disabled=ended;
  area.placeholder=ended?"这次练习已经结束":!m.ready?"还没接入模型":(AGENT_HINT[p.agent]||"")+" · "+sendHint();
  node.querySelector(".attach-row").innerHTML=(st.skill?'<span class="sel-chip skill">'+svg("store",11)+' 技能：'+esc(st.skill.title)+'<button data-action="skill-clear" data-pid="'+pid+'" title="不用这个技能">×</button></span>':"")+(st.quote?'<span class="sel-chip" title="'+esc(shorten(st.quote,400))+'">'+svg("quote",11)+' “'+esc(shorten(st.quote.replace(/\s+/g," "),28))+'” · '+st.quote.length+' 字<button data-action="quote-clear" data-pid="'+pid+'" title="不带">×</button></span>':"")+
-  st.attach.map((a,i)=>'<span class="sel-chip file">'+svg(fileIcon(a.path),11)+' '+esc(a.path.split("/").pop())+'<button data-action="chat-attach-remove" data-pid="'+pid+'" data-index="'+i+'" title="不附上">×</button></span>').join("");
+  composerTiles(pid);
+ hydrateVault(node.querySelector(".attach-row"));
  const tag=node.querySelector(".model-tag");
  const lvl=S.config?.effort_levels?.[p.effort||S.config?.agents?.[p.agent]?.effort||""];
  tag.innerHTML='<span>'+esc(modelName(m.model))+(lvl?' · 思考'+esc(lvl):"")+'</span>'+svg("chevrondown",10);tag.hidden=!m.ready;tag.classList.toggle("own",m.own);tag.classList.toggle("working",!!busy);
