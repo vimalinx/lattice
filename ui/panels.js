@@ -258,7 +258,9 @@ const SETTINGS_RENDER={
     '<label class="check"><input type="checkbox" data-agent-blocks="'+name+'"'+(def.blocks?" checked":"")+'/> 能用展示块</label></div>'+
     '<div class="field-label">能用的工具</div><div class="tool-grid">'+d.tools.map(t=>'<label class="check" title="'+esc(t.description)+'"><input type="checkbox" data-agent-tool="'+name+'" value="'+t.name+'"'+(def.tools.includes(t.name)?" checked":"")+'/> '+esc(t.name)+'</label>').join("")+'</div>'+
     '<label>规则 <small>它每一轮都读；改了存进学习库的 agents/'+name+'.md</small><textarea rows="14" data-agent-policy="'+name+'">'+esc(def.policy)+'</textarea></label>'+
-    '<div class="inline">'+(d.overridden?button("恢复默认规则","agent-reset",'data-name="'+name+'"',"ghost sm"):"")+button("测试连接","cfg-test",'data-agent="'+name+'"',"ghost sm")+'</div></details>');
+    '<div class="inline">'+button(svg("history",13)+" 规则的历史","agent-history",'data-name="'+name+'" data-tip="每次改动都在这里，任何一版都能对照着恢复"',"ghost sm")+
+     button(svg("split",13)+" 左右对照着改","agent-revise",'data-name="'+name+'" data-tip="在左右对照里改，审过再批准；还能用两版规则各回答一次来比"',"ghost sm")+
+     (d.overridden?button("恢复默认规则","agent-reset",'data-name="'+name+'"',"ghost sm"):"")+button("测试连接","cfg-test",'data-agent="'+name+'"',"ghost sm")+'</div></details>');
   }
   return '<h3>四个 AI</h3><p class="muted">工具、历史条数和规则改了会存进学习库的 agents/；所有 AI 都还会先读学习库的规矩（AGENTS.md）。连接在「模型连接」里加和改。</p>'+cards.join("")+'<div class="test-result" id="cfg-test-result"></div>'+
    c.apis.map(x=>'<datalist id="models-'+esc(x.id)+'">'+(x.models||[]).map(m=>'<option value="'+esc(m)+'">').join("")+'</datalist>').join("");
@@ -444,6 +446,8 @@ async function settingsAction(kind,a){
    tools:all('[data-agent-tool="'+n+'"]',node).filter(i=>i.checked).map(i=>i.value),policy:q('[data-agent-policy="'+n+'"]').value});
   await saveSettings(node);return toast("已存进学习库的 agents/"+n+".md");
  }
+ case "agent-history":return skillHistory("agent:"+a.dataset.name);
+ case "agent-revise":return rpc("skill_propose",{slug:"agent:"+a.dataset.name,why:"我自己改"});
  case "agent-reset":if(!await ask("改写过的版本留在学习库的历史里。",{title:"删掉你改写的规则，恢复成默认的？",ok:"恢复默认"}))return;await rpc("agent_reset",{name:a.dataset.name});return again();
  case "runner-add":{const ext=node.querySelector("[data-runner-new]").value.trim(),cmd=node.querySelector("[data-runner-new-cmd]").value.trim();if(!ext||!cmd)return;
   S.config=await rpc("settings_save",{config:{runners:{...S.config.runners,[ext.startsWith(".")?ext:"."+ext]:cmd}}});return again();}

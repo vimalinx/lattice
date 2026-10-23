@@ -125,7 +125,7 @@ const BLOCKS={
 function journalRow(e){
  const d=e.data||{},refs=(e.refs||[]).filter(r=>r.includes("/")||r.includes("."));
  const what=d.summary||d.text||d.title||d.query||d.url||(d.files?d.files.map(f=>f.file).join("、"):"")||d.file||d.excerpt||"";
- return '<div class="jrow"><time>'+esc(fmtDate(e.at,true))+'</time><span class="jtype j-'+esc(e.type)+'">'+esc(journalName[e.type]||e.type)+'</span><span class="jwho">'+esc(who(e.actor))+'</span>'+
+ return '<div class="jrow"><time>'+esc(fmtDate(e.at,true))+'</time><span class="jtype j-'+esc(e.type)+'">'+esc((String(e.data?.skill||"").startsWith("agent:")&&rulesJournalName[e.type])||journalName[e.type]||e.type)+'</span><span class="jwho">'+esc(who(e.actor))+'</span>'+
   '<span class="jwhat">'+esc(shorten(what,160))+(d.state?' <small>'+esc(d.state)+'</small>':"")+'</span>'+
   refs.filter(r=>!String(what).includes(r)).slice(0,2).map(r=>'<a class="jref" data-action="open-file" data-path="'+esc(r)+'">'+esc(baseName(r))+'</a>').join("")+'</div>';
 }

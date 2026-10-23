@@ -14,6 +14,7 @@ import shutil
 import shlex
 from pathlib import Path
 
+from . import agents
 from . import skills as skillbook
 from .model import AGENT_RECORDS, LINK_KINDS, readable_outputs, text, title_of
 from .vault import APPEND_ONLY, kind_of, slug, split_frontmatter
@@ -111,7 +112,9 @@ def _guard(ctx, path):
     _, rel = ctx.l.resolve(path)
     if rel is None:
         raise ValueError("挂载的外部目录对你只读；需要改的话用 suggest 提给学习者")
-    if rel.startswith(APPEND_ONLY) or rel.startswith(".lattice/") or rel == "AGENTS.md" or rel.startswith("agents/"):
+    if rel.startswith("agents/"):
+        raise ValueError("AI 的规则不直接改：用 rules_edit 提出修改，学习者在左右对照里看过、批准了才生效")
+    if rel.startswith(APPEND_ONLY) or rel.startswith(".lattice/") or rel == "AGENTS.md":
         raise ValueError("对话、轨迹、规则和 .lattice 只由 Lattice 和学习者维护")
     if rel.startswith("skills/"):
         raise ValueError("技能不直接改：用 skill_edit 提出修改，学习者在左右对照里看过、批准了才生效")
@@ -627,6 +630,29 @@ def skill_edit(ctx, name, why, file="SKILL.md", content=None, edits=None, new=Fa
     change = ctx.bridge.propose_skill_change(slug, title, rel, base, after, text(why, 500), ctx.agent, ctx.thread, asks)
     ctx.turn.changes.append({"change": change, "skill": slug, "title": title, "file": rel, "why": text(why, 500), "new": not base})
     return {"change": change, "note": "已经在学习者那边打开了左右对照，等 TA 审；批准之前技能还是原来的样子，不要当成已经改好了"}
+
+
+@tool("rules_edit", ALL, "提出修改一个 AI 的规则（tutor 主会话、flash 快答、coach 练习教练、organizer 整理）：规则是它每一轮都读的工作方式，开头的属性里有它能用的工具。"
+      "只给 agent 就返回它现在的规则全文，先读再改。和改技能一样不会直接生效：学习者在左右对照里审、可以接着改，批准了才生效，每次修改都留历史，"
+      "还能用改前改后两版规则接着同一段对话各回答一次来对比。content 是改后的全文，或者给 edits（[{old, new}]，每个 old 必须在原文里恰好出现一次）；"
+      "why 用一句话说为什么这样改；questions 给两三个最能看出效果的问题。规则宁短勿长：写清要做到什么，别罗列条条框框。",
+      {"agent": {"type": "string", "enum": list(agents.NAMES)}, "why": S, "content": S, "questions": {"type": "array", "items": S},
+       "edits": {"type": "array", "items": {"type": "object", "properties": {"old": S, "new": S}, "required": ["old", "new"]}}}, ["agent"])
+def rules_edit(ctx, agent, why="", content=None, edits=None, questions=None):
+    name, title, rel = ctx.bridge.rules_of("agent:" + agent)
+    base = agents.source(ctx.l.root, name)
+    if content is None and not edits:
+        return {"agent": name, "title": title, "rules": base, "note": "这是它现在的规则全文；要改就再调用一次，给 content 或 edits，并写上 why"}
+    if not str(why).strip():
+        raise ValueError("写一句 why：为什么这样改")
+    after = text(content, 200_000) if content is not None else skillbook.apply_edits(base, edits)
+    if after.strip() == base.strip():
+        raise ValueError("改完和原来一样")
+    agents.parse(name, after)
+    asks = [text(str(q), 300).strip() for q in (questions or []) if str(q).strip()][:4]
+    change = ctx.bridge.propose_skill_change("agent:" + name, title, rel, base, after, text(why, 500), ctx.agent, ctx.thread, asks)
+    ctx.turn.changes.append({"change": change, "skill": "agent:" + name, "title": title, "file": rel, "why": text(why, 500), "new": False})
+    return {"change": change, "note": "已经在学习者那边打开了左右对照，等 TA 审；批准之前规则还是原来的样子，不要当成已经改好了"}
 
 
 @tool("suggest", {"tutor", "coach"}, "对学习者的一个文件提修改建议：old 是文件里现有的一段原文（必须只出现一次；不给 old 表示把 new 加到文件末尾），new 是改成什么，why 一句话说明。建议显示在你的回复下面，学习者点了才应用。",

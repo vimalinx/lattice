@@ -449,6 +449,22 @@ class Bridge(QObject):
         self.announce({"type": "skill_change", "change": ident, "state": "open", "by": by})
         return ident
 
+    @staticmethod
+    def rules_of(target):
+        """An agent's rules as a target of the same changes as a skill: "agent:<name>" is (name, title, path)."""
+        name = str(target)[6:] if str(target).startswith("agent:") else None
+        if name not in agents.NAMES:
+            return None
+        return name, AGENT_NAMES[name] + "的规则", f"agents/{name}.md"
+
+    def _now_text(self, rel):
+        """A changed file as it is: an agent's rules not rewritten in the vault are the shipped ones."""
+        if self.lattice.vault.path(rel).exists():
+            return self.lattice.vault.read_text(rel)
+        if rel.startswith("agents/") and rel.endswith(".md") and rel[7:-3] in agents.NAMES:
+            return agents.shipped(rel[7:-3])
+        return ""
+
     def rpc_skill_change(self, id):
         l = self.lattice
         entries = l.journal(["skill_proposed", "skill_changed", "skill_change_dismissed", "skill_compare_done", "skill_compared"], ref="skillchange:" + str(id), limit=60)
@@ -461,7 +477,7 @@ class Bridge(QObject):
             raise ValueError("找不到这次修改")
         decided = next((e for e in entries if e["type"] != "skill_proposed"), None)
         d = proposed["data"]
-        current = l.vault.read_text(d["file"]) if l.vault.path(d["file"]).exists() else ""
+        current = self._now_text(d["file"])
         return {**d, "id": id, "at": proposed["at"], "current": current,
                 "state": {"skill_changed": "approved", "skill_change_dismissed": "dismissed"}.get(decided["type"], "open") if decided else "open",
                 **({"decided_at": decided["at"], "final": decided["data"].get("after")} if decided else {}), "compares": compares}
@@ -469,10 +485,15 @@ class Bridge(QObject):
     def rpc_skill_propose(self, slug, content=None, why="", file="SKILL.md"):
         """The learner's own change, e.g. bringing back an older version: reviewed the same way as an agent's.
         Without content it starts from the skill as it is, to be changed by hand on the right."""
-        found = skills.find(self.root, slug)
-        _, _, rel = skills.change_target(self.root, slug, file)
-        base = self.lattice.vault.read_text(rel) if self.lattice.vault.path(rel).exists() else ""
-        return {"change": self.propose_skill_change(found["slug"], found["title"], rel, base, base if content is None else text(content, 200_000), text(why, 500), "me")}
+        rules = self.rules_of(slug)
+        if rules:
+            slug, title, rel = f"agent:{rules[0]}", rules[1], rules[2]
+        else:
+            found = skills.find(self.root, slug)
+            slug, title = found["slug"], found["title"]
+            _, _, rel = skills.change_target(self.root, slug, file)
+        base = self._now_text(rel)
+        return {"change": self.propose_skill_change(slug, title, rel, base, base if content is None else text(content, 200_000), text(why, 500), "me")}
 
     def rpc_skill_change_decide(self, id, decision, content=None):
         l, change = self.lattice, self.rpc_skill_change(id)
@@ -484,13 +505,18 @@ class Bridge(QObject):
             self.announce({"type": "skill_change", "change": id, "state": "dismissed"})
             return {"state": "dismissed"}
         after = text(content if content is not None else change["proposed"], 200_000)
+        rules = self.rules_of(change["skill"])
         if change["file"].endswith("/SKILL.md"):
             skills.check_page(after)
+        elif rules:
+            agents.parse(rules[0], after)
         self.commit_mine()
         l.vault.write_text(change["file"], after)
+        if rules:
+            l.index.reindex(change["file"])
         edited = after != change["proposed"]
         who = {"me": "我"}.get(change["by"], AGENT_NAMES.get(change["by"], change["by"]))
-        l.vault.commit(f"改技能「{change['title']}」：{change['why'] or '（没写原因）'}（{who}提的{'，我改过再批准' if edited else '，我批准'}）"[:200], "me")
+        l.vault.commit(f"改{'' if rules else '技能'}「{change['title']}」：{change['why'] or '（没写原因）'}（{who}提的{'，我改过再批准' if edited else '，我批准'}）"[:200], "me")
         l.record("skill_changed", {"change": id, "skill": change["skill"], "title": change["title"], "file": change["file"], "before": change["current"],
                                    "after": after, "why": change["why"], "by": change["by"], "edited": edited}, "me", refs)
         self.changed([change["file"]])
@@ -520,23 +546,32 @@ class Bridge(QObject):
 
     def rpc_skill_history(self, slug):
         """Every committed version of a skill's SKILL.md, newest first, the one on disk now marked."""
-        rel = f"{skills.FOLDER}/{skills.find(self.root, slug)['slug']}/SKILL.md"
+        rules = self.rules_of(slug)
+        rel = rules[2] if rules else f"{skills.FOLDER}/{skills.find(self.root, slug)['slug']}/SKILL.md"
         vault = self.lattice.vault
         current = vault.read_text(rel) if vault.path(rel).exists() else None
         versions = vault.history(rel)
         for i, v in enumerate(versions):
             v["current"] = i == 0 and vault.at(v["commit"], v["path"]) == current
+        if rules:
+            # The rules Lattice ships are a version too: the one in use while the vault has none of its own.
+            versions.append({"commit": "shipped", "path": rel, "subject": "程序自带的默认规则", "author": "Lattice", "at": "",
+                             "current": current is None, "content": agents.shipped(rules[0])})
         return versions
 
     def rpc_skill_compare(self, slug, a, b, thread=None, message="", change=None):
         """Continue one conversation twice, once with each version of a skill's instructions, without tools and without
         writing anything to the conversation; the learner then picks one side (or edits it) or neither."""
-        l, found = self.lattice, skills.find(self.root, slug)
+        l, rules = self.lattice, self.rules_of(slug)
+        found = None if rules else skills.find(self.root, slug)
         if not thread:
-            row = l.index.one("SELECT id FROM threads WHERE json_extract(head,'$.trial')=? ORDER BY created DESC LIMIT 1", (found["slug"],))
-            thread = row["id"] if row else l.thread_for("tutor", l.active_topic())
+            row = None if rules else l.index.one("SELECT id FROM threads WHERE json_extract(head,'$.trial')=? ORDER BY created DESC LIMIT 1", (found["slug"],))
+            thread = row["id"] if row else l.thread_for(rules[0] if rules else "tutor", l.active_topic())
         head = l.thread_head(thread)
-        agent = head.get("agent") if head.get("agent") in found["agents"] else found["agents"][0]
+        if rules:
+            agent = rules[0]
+        else:
+            agent = head.get("agent") if head.get("agent") in found["agents"] else found["agents"][0]
         definition, msgs = agents.load(self.root, agent), l.messages(thread)
         question = str(message or "").strip()
         if question:
@@ -550,11 +585,15 @@ class Bridge(QObject):
         if not conn["api_key"]:
             raise ValueError(f"请先在设置里给{AGENT_NAMES[agent]}填写 {conn['label']} 的 API Key")
         ident = uid()
-        self.compares[ident] = {"thread": thread, "agent": agent, "question": question, "skill": found["slug"], "change": change}
+        self.compares[ident] = {"thread": thread, "agent": agent, "question": question, "skill": slug if rules else found["slug"], "change": change}
         for side, page in (("a", a), ("b", b)):
-            version = {**found, "body": skills.check_page(page)}
-            user, system = self._compose(definition, thread, head.get("topic"), None, question, "", "", [], "",
-                                         "\n\n（这是在比较一个技能的两个版本：这一轮不调用工具，直接写出回答。）", version)
+            if rules:
+                user, system = self._compose(agents.parse(agent, page), thread, head.get("topic"), None, question, "", "", [], "",
+                                             "\n\n（这一轮不调用工具，直接写出回答。）")
+            else:
+                version = {**found, "body": skills.check_page(page)}
+                user, system = self._compose(definition, thread, head.get("topic"), None, question, "", "", [], "",
+                                             "\n\n（这一轮不调用工具，直接写出回答。）", version)
             messages = [{"role": "system", "content": system}, *({"role": m["role"], "content": m["content"]} for m in history if m["role"] in ("user", "assistant")),
                         {"role": "user", "content": user}]
             key = f"compare:{ident}:{side}"
@@ -1811,6 +1850,7 @@ class Bridge(QObject):
     def rpc_agent_definition(self, name):
         shipped = agents.load(Path("/nonexistent"), name)
         return {"definition": agents.load(self.root, name), "shipped": shipped, "overridden": agents.overridden(self.root, name),
+                "source": agents.source(self.root, name),
                 "tools": [{"name": n, "description": t["description"]} for n, t in tools.TOOLS.items()]}
 
     def rpc_agent_save(self, name, history, tools, policy, blocks=True):

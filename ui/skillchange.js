@@ -24,15 +24,17 @@ function diffSide(doc,editable,onChange){
  else ext.push(CS.EditorState.readOnly.of(true),CV.EditorView.editable.of(false));
  return {doc,extensions:ext};
 }
+// An agent's rules are changed the same way as a skill: their changes name "agent:<name>" and agents/<name>.md.
+const isRules=d=>String(d?.skill||"").startsWith("agent:");
 const changeId=key=>key.startsWith("in:")?key.slice(3):Dock.panels[key]?.change;
 const changeRoot=key=>key.startsWith("in:")?Inline.roots[key]:Dock.els[key]?.querySelector(".sc");
 panelType("skillchange",{side:"mine",icon:"edit",
- title:p=>"改技能"+(Changes[p.pid]?.data?" · "+Changes[p.pid].data.title:""),
+ title:p=>(isRules(Changes[p.pid]?.data)?"改规则":"改技能")+(Changes[p.pid]?.data?" · "+Changes[p.pid].data.title:""),
  mount(p,node,pid){p.pid=pid;Changes[pid]={};node.innerHTML='<div class="sc"><div class="loading">正在打开这次修改…</div></div>';loadChange(pid);},
  unmount(p,node){Changes[node.dataset.pid]?.view?.destroy();delete Changes[node.dataset.pid];},
  screen(p,node){
   const c=Changes[node.dataset.pid],d=c?.data;if(!d)return {view:"改技能",change:p.change};
-  return {view:"改技能（左右对照）",change:p.change,skill:d.skill,file:d.file,state:d.state,by:d.by,why:d.why,
+  return {view:(isRules(d)?"改规则":"改技能")+"（左右对照）",change:p.change,skill:d.skill,file:d.file,state:d.state,by:d.by,why:d.why,
    learner_edited:c.view?c.view.b.state.doc.toString()!==d.proposed:false,changes:c.view?c.view.chunks.length:0};
  }});
 /* A proposal inside the reply that made it: the reply's placeholder gets the review's own element, made once. */
@@ -56,24 +58,24 @@ function renderChange(key){
  const inline=key.startsWith("in:"),k=esc(key);
  c.view?.destroy();c.view=null;
  const keep=root.querySelector(".sc-compares");   // comparisons under an inline review stay as they are
- const open=d.state==="open",stale=open&&d.current!==d.base,file=d.file.split("/").slice(2).join("/"),skillPage=d.file.endsWith("/SKILL.md");
+ const open=d.state==="open",stale=open&&d.current!==d.base,rules=isRules(d),file=rules?d.file:d.file.split("/").slice(2).join("/"),comparable=rules||d.file.endsWith("/SKILL.md");
  root.innerHTML=
-  '<div class="sc-head"><div class="sc-title">'+svg("store",15)+'<b>'+esc(d.title)+'</b><small>'+esc(file)+'</small>'+
+  '<div class="sc-head"><div class="sc-title">'+svg(rules?"bot":"store",15)+'<b>'+esc(d.title)+'</b><small>'+esc(file)+'</small>'+
    (d.base?"":'<span class="chip ai">新技能</span>')+'<span class="grow"></span>'+
    (open?'<span class="chip ai">等你审</span>':d.state==="approved"?'<span class="chip on">已批准'+(d.final!==d.proposed?"（你改过）":"")+'</span>':'<span class="chip">没采用</span>')+
    (inline?iconButton("float","sc-window","在窗口里打开",'data-pid="'+k+'"'):"")+'</div>'+
    '<div class="sc-why">'+esc(changeBy(d))+'提的 · '+esc(fmtDate(d.at,true))+(d.why?'：'+esc(d.why):"")+'</div>'+
-   (d.questions?.length&&skillPage?'<div class="sc-try"><span>'+svg("split",12)+' 拿这些问题对比两版：</span>'+
-    d.questions.map((q,i)=>'<button class="chip toggle" data-action="sc-try-q" data-pid="'+k+'" data-q="'+i+'" data-tip="用左右两版技能各回答一次">'+esc(q)+'</button>').join("")+'</div>':"")+'</div>'+
-  (stale?'<div class="sc-warn">'+svg("info",13)+'<span>这个技能在提出这次修改之后又被改过了，左边是提出时的样子。</span>'+button("左边换成现在的","sc-rebase",'data-pid="'+k+'"',"ghost xs")+'</div>':"")+
+   (d.questions?.length&&comparable?'<div class="sc-try"><span>'+svg("split",12)+' 拿这些问题对比两版：</span>'+
+    d.questions.map((q,i)=>'<button class="chip toggle" data-action="sc-try-q" data-pid="'+k+'" data-q="'+i+'" data-tip="用左右两版'+(rules?"规则":"技能")+'各回答一次">'+esc(q)+'</button>').join("")+'</div>':"")+'</div>'+
+  (stale?'<div class="sc-warn">'+svg("info",13)+'<span>'+(rules?"这份规则":"这个技能")+'在提出这次修改之后又被改过了，左边是提出时的样子。</span>'+button("左边换成现在的","sc-rebase",'data-pid="'+k+'"',"ghost xs")+'</div>':"")+
   '<div class="sc-cols"><div><b>原来</b><small>'+(open?"只读":"")+'</small></div><div><b>'+(open?'改成</b><small>可以直接改；每处修改旁的箭头把左边那一段拿回来</small>':d.state==="approved"?"改成了</b>":"提议的样子</b>")+
    (open?'<span class="grow"></span>'+button("全部用原文","sc-all-left",'data-pid="'+k+'" data-tip="右边换成左边的全文，再自己改"',"ghost xs")+button("换回提议的","sc-reset",'data-pid="'+k+'" data-tip="丢掉你在右边的改动"',"ghost xs"):"")+'</div></div>'+
   '<div class="sc-merge"></div>'+
   '<div class="sc-foot"><span class="sc-stat"></span><span class="grow"></span>'+
    button(svg("history",13)+" 历史","sc-history",'data-pid="'+k+'"',"ghost sm")+
-   (skillPage?button(svg("split",13)+" 两版对比试用","sc-compare",'data-pid="'+k+'" data-tip="接着这段对话，用原来和改过的技能各回答一次，挑一个"',"ghost sm"):"")+
+   (comparable?button(svg("split",13)+" 两版对比试用","sc-compare",'data-pid="'+k+'" data-tip="接着这段对话，用原来和改过的'+(rules?"规则":"技能")+'各回答一次，挑一个"',"ghost sm"):"")+
    (open?button("不改了","sc-dismiss",'data-pid="'+k+'"',"ghost sm")+button(svg("check",13)+" 批准","sc-approve",'data-pid="'+k+'"',"primary sm"):
-    button(svg("document",13)+" 打开文件","open-file",'data-path="'+esc(d.file)+'"',"ghost sm"))+'</div>'+
+    (rules&&d.state!=="approved"?"":button(svg("document",13)+" 打开文件","open-file",'data-path="'+esc(d.file)+'"',"ghost sm")))+'</div>'+
   (inline?'<div class="sc-compares"></div>':"");
  if(inline){
   const box=root.querySelector(".sc-compares");if(keep)box.replaceWith(keep);
@@ -98,14 +100,14 @@ async function changeAction(kind,a){
  if(kind==="sc-window")return wideWindow(openPanel({type:"skillchange",change:d.id}));
  if(kind==="sc-all-left"){right.dispatch({changes:{from:0,to:right.state.doc.length,insert:d.base}});return right.focus();}
  if(kind==="sc-reset"){if(right.state.doc.toString()!==d.proposed&&!await ask("右边你改的会丢掉。",{title:"换回提议的样子？",ok:"换回"}))return;right.dispatch({changes:{from:0,to:right.state.doc.length,insert:d.proposed}});return;}
- if(kind==="sc-rebase"){if(!await ask("左边会换成技能现在的样子，右边不动；对照的就是现在的版本和右边。",{title:"左边换成现在的？",ok:"换"}))return;d.base=d.current;return renderChange(key);}
+ if(kind==="sc-rebase"){if(!await ask("左边会换成"+(isRules(d)?"规则":"技能")+"现在的样子，右边不动；对照的就是现在的版本和右边。",{title:"左边换成现在的？",ok:"换"}))return;d.base=d.current;return renderChange(key);}
  if(kind==="sc-history")return skillHistory(d.skill);
  if(kind==="sc-compare")return startCompare(key,d,rightText(),null);
  if(kind==="sc-try-q")return startCompare(key,d,rightText(),d.questions[+a.dataset.q]);
- if(kind==="sc-dismiss"){if(!await ask("技能保持原来的样子，这次修改留在历史里。",{title:"不采用这次修改？",ok:"不改了"}))return;await rpc("skill_change_decide",{id:d.id,decision:"dismissed"});return;}
+ if(kind==="sc-dismiss"){if(!await ask((isRules(d)?"规则":"技能")+"保持原来的样子，这次修改留在历史里。",{title:"不采用这次修改？",ok:"不改了"}))return;await rpc("skill_change_decide",{id:d.id,decision:"dismissed"});return;}
  if(kind==="sc-approve"){
   const content=right.state.doc.toString();
-  if(d.current!==d.base&&!await ask("技能在这次修改提出之后又被改过；批准会用右边的内容替换现在的版本（现在的留在历史里）。",{title:"还是批准？",ok:"批准",danger:true}))return;
+  if(d.current!==d.base&&!await ask((isRules(d)?"规则":"技能")+"在这次修改提出之后又被改过；批准会用右边的内容替换现在的版本（现在的留在历史里）。",{title:"还是批准？",ok:"批准",danger:true}))return;
   const r=await rpc("skill_change_decide",{id:d.id,decision:"approved",content});
   toast(r.edited?"已批准你改过的版本":"已批准");skillsChanged();
  }
@@ -129,14 +131,16 @@ function skillChangeEvent(evt){
 }
 /* A skill's history: every committed version of its SKILL.md with the reason; any one can be compared with now and
    brought back, which goes through the same review. */
+let historyShown=[];
 async function skillHistory(slug){
- const versions=await rpc("skill_history",{slug});
- modal(modalHead("技能的历史 · "+slug)+'<p class="muted">每次修改都是一条记录（批准时写了谁提的、为什么改）。点「和现在对照」会打开左右对照：左边是现在，右边是那个版本，批准就恢复成它。</p>'+
-  (versions.length?'<div class="sc-history">'+versions.map((v,i)=>'<div class="version"><div><b>'+esc(v.subject)+'</b><small>'+esc(fmtDate(v.at,true))+' · '+esc(v.author)+(v.current?" · 现在的版本":"")+'</small></div>'+
-   (v.current?"":button("和现在对照","sc-restore",'data-slug="'+esc(slug)+'" data-commit="'+esc(v.commit)+'" data-when="'+esc(fmtDate(v.at,true))+'"',"ghost xs"))+'</div>').join("")+'</div>':'<p>还没有历史。</p>'),"large");
+ const versions=historyShown=await rpc("skill_history",{slug}),rules=slug.startsWith("agent:");
+ modal(modalHead((rules?"规则的历史 · "+who(slug.slice(6)):"技能的历史 · "+slug))+'<p class="muted">每次修改都是一条记录（批准时写了谁提的、为什么改）。点「和现在对照」会打开左右对照：左边是现在，右边是那个版本，批准就恢复成它。</p>'+
+  (versions.length?'<div class="sc-history">'+versions.map((v,i)=>'<div class="version"><div><b>'+esc(v.subject)+'</b><small>'+(v.at?esc(fmtDate(v.at,true))+' · ':'')+esc(v.author)+(v.current?" · 现在的版本":"")+'</small></div>'+
+   (v.current?"":button("和现在对照","sc-restore",'data-slug="'+esc(slug)+'" data-commit="'+esc(v.commit)+'" data-path="'+esc(v.path)+'" data-when="'+esc(v.at?fmtDate(v.at,true):v.subject)+'"',"ghost xs"))+'</div>').join("")+'</div>':'<p>还没有历史。</p>'),"large");
 }
 async function restoreVersion(a){
- const v=await rpc("file_version",{path:"skills/"+a.dataset.slug+"/SKILL.md",commit:a.dataset.commit});
+ const shown=historyShown.find(x=>x.commit===a.dataset.commit&&x.content!=null);
+ const v=shown||await rpc("file_version",{path:a.dataset.path||"skills/"+a.dataset.slug+"/SKILL.md",commit:a.dataset.commit});
  closeModal();
  await rpc("skill_propose",{slug:a.dataset.slug,content:v.content||"",why:"恢复成 "+a.dataset.when+" 的版本"});
 }

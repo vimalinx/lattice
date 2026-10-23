@@ -34,15 +34,34 @@ PRACTICE_TASKS = {
 
 
 def load(vault_root, name):
+    return parse(name, source(vault_root, name))
+
+
+def source(vault_root, name):
+    """The rules file an agent works by now: the learner's version in the vault, or else the shipped one."""
     if name not in NAMES:
         raise ValueError("未知的 AI：" + str(name))
     own = Path(vault_root) / "agents" / f"{name}.md"
-    source = (own if own.is_file() else HERE / f"{name}.md").read_text(encoding="utf-8")
-    attrs, policy = split_frontmatter(source)
+    return (own if own.is_file() else HERE / f"{name}.md").read_text(encoding="utf-8")
+
+
+def shipped(name):
+    return source(Path("/nonexistent"), name)
+
+
+def parse(name, text):
+    """An agent's definition from the text of a rules file; a file whose attributes cannot be read is refused."""
+    try:
+        attrs, policy = split_frontmatter(text)
+    except ValueError as exc:
+        raise ValueError("规则文件开头的属性写坏了：" + str(exc)) from None
+    if not isinstance(attrs.get("tools", []), list):
+        raise ValueError("规则文件开头的 tools 要是一个列表")
     tools = list(attrs.get("tools") or [])
-    # Every agent can read the skills it is given, and propose changes to them, whatever its own tool list says.
+    # Every agent can read the skills it is given, and propose changes to them and to the agents' rules, whatever its
+    # own tool list says.
     return {"name": name, "title": attrs.get("title", name), "history": int(attrs.get("history", 12)),
-            "blocks": bool(attrs.get("blocks", True)), "tools": tools + [t for t in ("skill", "skill_edit") if t not in tools], "policy": policy.strip()}
+            "blocks": bool(attrs.get("blocks", True)), "tools": tools + [t for t in ("skill", "skill_edit", "rules_edit") if t not in tools], "policy": policy.strip()}
 
 
 def system_prompt(vault_root, agent, extra=""):
