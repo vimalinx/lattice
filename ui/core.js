@@ -100,9 +100,11 @@ marked.use({extensions:[{name:"strongCjk",level:"inline",start(src){const i=src.
   if(/[\u3000-\u303f\uff00-\uffef\u4e00-\u9fff]/.test(m[0]))return {type:"strong",raw:m[0],text:m[1],tokens:this.lexer.inlineTokens(m[1])};}}]});
 // A diagram drawn once is kept by its source: a reply being written redraws many times a second, and drawing the
 // diagram again each time made it flip between its source text and the picture, and the page jump with it.
-const mermaidDrawn=new Map();
-marked.use({renderer:{code(t){if((t.lang||"").trim().toLowerCase()==="mermaid"){const svg=mermaidDrawn.get(t.text);
- return svg?'<div class="mermaid" data-processed="true">'+svg+'</div>':'<div class="mermaid">'+esc(t.text)+'</div>';}return false;}}});
+// The picture goes in after sanitizing, as maths does: DOMPurify drops the foreignObject the labels are drawn in.
+const mermaidDrawn=new Map(),mermaidSvgs=[];
+marked.use({renderer:{code(t){if((t.lang||"").trim().toLowerCase()==="mermaid"){const i=mermaidDrawn.get(t.text);
+ return i!=null?'<div class="mermaid" data-processed="true">\uE002'+i+'\uE003</div>':'<div class="mermaid">'+esc(t.text)+'</div>';}return false;}}});
+function keepMermaid(src,svg){if(mermaidSvgs.length>200){mermaidDrawn.clear();mermaidSvgs.length=0;}mermaidDrawn.set(src,mermaidSvgs.push(svg)-1);}
 let _mmTimer=null,_mmSeq=0,_mmInited=false,_mmTries=0;
 function scheduleMermaid(){clearTimeout(_mmTimer);_mmTries=0;_mmTimer=setTimeout(runMermaid,60);}
 async function runMermaid(){
@@ -119,10 +121,10 @@ async function runMermaid(){
    continue;
   }
   n.dataset.processed="true";const src=n.textContent;
-  try{const out=await mermaid.render("mm"+(++_mmSeq),src,n);n.innerHTML=out.svg;if(mermaidDrawn.size>200)mermaidDrawn.clear();mermaidDrawn.set(src,out.svg);
+  try{const out=await mermaid.render("mm"+(++_mmSeq),src,n);n.innerHTML=out.svg;keepMermaid(src,out.svg);
    // the same diagram elsewhere on screen (the reply redrawn meanwhile) takes the picture too
    for(const other of all(".mermaid:not([data-processed='true'])"))if(other.textContent===src){other.dataset.processed="true";other.innerHTML=out.svg;}}
-  catch(_){const bad='<pre class="mermaid-error">'+esc(src)+'</pre><small class="muted">图表语法未能解析</small>';n.innerHTML=bad;mermaidDrawn.set(src,bad);}
+  catch(_){const bad='<pre class="mermaid-error">'+esc(src)+'</pre><small class="muted">图表语法未能解析</small>';n.innerHTML=bad;keepMermaid(src,bad);}
  }
 }
 /* Maths, drawn by KaTeX (ui/vendor/katex): $…$ and \(…\) in a line, $$…$$ and \[…\] on their own. A $ that opens
@@ -156,7 +158,8 @@ function markdown(text){
  try{
   // A table scrolls inside its own frame when it is wider than the text.
   const out=DOMPurify.sanitize(marked.parse(linked,{breaks:true,gfm:true}),{ADD_ATTR:["data-wiki","data-tag","data-vault-src","data-embed"]}).replace(/<table>/g,'<div class="table-wrap"><table>').replace(/<\/table>/g,"</table></div>")
-   .replace(/\uE000(\d+)\uE001/g,(_,i)=>maths[+i]?texHtml(maths[+i].tex.trim(),maths[+i].display):"");
+   .replace(/\uE000(\d+)\uE001/g,(_,i)=>maths[+i]?texHtml(maths[+i].tex.trim(),maths[+i].display):"")
+   .replace(/\uE002(\d+)\uE003/g,(_,i)=>mermaidSvgs[+i]||"");
   if(out.includes('class="mermaid"'))scheduleMermaid();
   // Code fences coloured like the editor (editor.js); a language still loading is coloured when it arrives.
   return typeof highlightBlocks==="function"?highlightBlocks(out):out;}
