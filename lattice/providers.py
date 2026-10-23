@@ -45,6 +45,23 @@ EFFORT_STYLES = {"standard": "reasoning_effort（none / low / medium / high / ma
 BUDGET = {"low": 1024, "medium": 4096, "high": 16384, "max": 32768}
 
 
+# Asked of the model when a reply broke off (a dropped connection, a service briefly down) or reached its length:
+# it goes on from where it stopped, and the learner reads one reply.
+CONTINUE = "（刚才的回答在这里断了。从断开的地方接着往下写，不要重复已经写过的内容，也不要提断开这件事。）"
+
+
+def retryable(exc):
+    """A failure worth trying again a few seconds later: the network, a service briefly unavailable or overloaded.
+    A refused key or a malformed request is not."""
+    if isinstance(exc, httpx.TransportError):
+        return True
+    message = str(exc)
+    if re.search(r"HTTP (400|401|403|404|413|422)\b", message):
+        return False
+    return bool(re.search(r"HTTP (408|409|425|429|5\d\d)\b|temporarily|unavailable|overloaded|rate.?limit|try again|retry later|upstream|"
+                          r"数据流在完成标记前断开|流返回错误", message, re.I))
+
+
 def effort_body(style, level):
     """The request fields for a thinking level in a connection's style."""
     if level not in EFFORT_LEVELS or style == "none":
@@ -749,6 +766,7 @@ class ApiWorker(QThread):
                 # when nothing reached the learner yet, one silent retry is safe.
                 for attempt in range(2):
                     messages, body, stop_reason, thought, rounds = list(self.messages), "", "end_turn", False, 0
+                    continuing, retries, extended = False, 0, False
                     self.emit("status", state="connecting")
                     while True:
                         # include_usage makes a stream end with the request's token counts; extra_body can turn it off.
@@ -757,18 +775,46 @@ class ApiWorker(QThread):
                                    "stream": True, "max_tokens": config["max_tokens"], "temperature": config["temperature"],
                                    **({"tools": self.tools} if self.tools else {})}
                         self.asked = payload
-                        content, reasoning, calls, finish, part_usage = await self._stream(client, headers, payload, bool(body))
+                        try:
+                            content, reasoning, calls, finish, part_usage = await self._stream(client, headers, payload, bool(body) and not continuing)
+                        except (httpx.HTTPError, ValueError) as exc:
+                            # Tried again after a short wait, up to three times; what was already written stays, and the
+                            # model is asked to go on from there.
+                            if self.cancelled.is_set() or retries >= 3 or not retryable(exc):
+                                raise
+                            retries += 1
+                            got = self.partial
+                            usage = self._cut_short(usage)
+                            self.partial = ""
+                            wait = (2, 5, 12)[retries - 1]
+                            self.emit("retrying", attempt=retries, wait=wait, message=clean_error(exc, self.api_key)[:300])
+                            await asyncio.sleep(wait)
+                            if self.cancelled.is_set():
+                                raise asyncio.CancelledError() from None
+                            if got.strip():
+                                body += got if body or continuing else got.lstrip("\n")
+                                messages = messages + [{"role": "assistant", "content": got.strip()}, {"role": "user", "content": CONTINUE}]
+                                continuing = True
+                            continue
                         self.asked = None
                         self.partial = ""
                         # Every request of the turn counts (each tool round is one); a service that reports nothing is estimated.
                         used = usage_of(part_usage)
                         usage = add_usage(usage, used or self._estimate(payload, content + reasoning + json.dumps(calls, ensure_ascii=False)), not used)
                         thought = thought or bool(reasoning)
-                        body += ("\n\n" if body and content else "") + content
+                        body += ("\n\n" if body and content and not continuing else "") + content
+                        continuing = False
                         if finish == "cancelled" or self.cancelled.is_set():
                             stop_reason = "cancelled"
                             break
                         if finish == "length":
+                            # Out of room once: it goes on in a second request; a second time it stops there.
+                            if content.strip() and not calls and not extended:
+                                extended = True
+                                self.emit("retrying", attempt=0, wait=0, message="回答写到了长度上限，接着往下写")
+                                messages = messages + [{"role": "assistant", "content": content}, {"role": "user", "content": CONTINUE}]
+                                continuing = True
+                                continue
                             stop_reason = "max_tokens"
                             break
                         if not calls:

@@ -28,11 +28,14 @@ function replyHtml(text,live=false){
 function mountBlocks(root,blocks,ctx){
  all(".lblock",root).forEach(node=>{
   const b=blocks[+node.dataset.block];if(!b)return;
+  // drawn already and kept as it is (a reply still being written puts its finished blocks back)
+  if(node.dataset.drawn===b.type+"\u0000"+b.raw)return;
   if(b.error==="pending"){node.innerHTML='<div class="block-pending">正在生成 '+esc(b.type)+' …</div>';return;}
   const render=BLOCKS[b.type];
   if(b.error||!render){node.innerHTML='<pre class="block-raw">'+esc(b.raw)+'</pre>';return;}
   node.classList.add("block-"+b.type);
   safe(()=>render(b.data||{},node,{...ctx,index:+node.dataset.block}));
+  if(ctx.live)node.dataset.drawn=b.type+"\u0000"+b.raw;
  });
 }
 const BLOCKS={

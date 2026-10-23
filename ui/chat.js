@@ -265,16 +265,25 @@ function renderLive(pid){
  const secs=(st.thinkMs+(st.thinkingNow?Date.now()-st.thinkFrom:0))/1000;
  const thought=thinkingHtml(st.think,0,{now:st.thinkingNow,secs,open:st.liveOpen??S.ui.thinking==="open"});
  const used=liveSkills(st);
+ // Blocks already drawn (a relation graph, an experiment…) stay as they are while the rest of the reply grows.
+ const kept=new Map();for(const n of slot.querySelectorAll(".lblock[data-live-key]"))kept.set(n.dataset.liveKey,n);
  slot.innerHTML=(st.stream||st.live.length||thought||used.length?'<div class="msg from-ai streaming">'+skillsUsed(used)+thought+'<div class="markdown msg-body">'+r.html+'</div>'+actionChips(st.live.filter(a=>!String(a.ref||"").startsWith("skill:")),[],true)+'</div>':"")+
   waitingHtml(st,busy)+
   (st.error?'<div class="chat-error">'+esc(st.error)+(busy?"":button(svg("refresh",12)+" 重试","chat-retry",'data-pid="'+pid+'"',"ghost xs"))+'</div>':
    // A question left without any answer (the reply failed before a word came back, or the program was closed meanwhile).
    !busy&&st.data?.messages?.at(-1)?.role==="user"&&st.data.messages.at(-1).id!=="pending"?'<div class="chat-error quiet">这一问还没有得到回答'+(st.data.failure?.message?'<small class="fail-why">'+esc(st.data.failure.at+" 那次出错："+shorten(st.data.failure.message,240))+(/502|503|forbidden|upstream/i.test(st.data.failure.message)?"。这是服务那边拒绝了，可以换个模型试试":"")+'</small>':"")+button(svg("refresh",12)+" 重新回答","chat-retry",'data-pid="'+pid+'"',"ghost xs")+'</div>':"");
- if(r.blocks.length)mountBlocks(slot,r.blocks,{thread:st.thread,message:0,answers:{},pid,live:true});
+ if(r.blocks.length){
+  for(const node of slot.querySelectorAll(".lblock[data-block]")){
+   const b=r.blocks[+node.dataset.block];if(!b||b.error==="pending")continue;
+   const key=b.type+"\u0000"+b.raw,old=kept.get(key);
+   if(old){old.dataset.block=node.dataset.block;node.replaceWith(old);}else node.dataset.liveKey=key;
+  }
+  mountBlocks(slot,r.blocks,{thread:st.thread,message:0,answers:{},pid,live:true});
+ }
 }
 /* What the reply is doing while no words come: a tool at work (with what it works on and for how long), or thinking
    between steps. Shown under what is written so far, so a long install never looks like the reply has stalled. */
-const WAIT_LABEL={install:"正在安装",run:"正在运行代码",shell:"正在执行命令",web_search:"正在联网搜索",web_fetch:"正在读网页",ui:"正在调整界面",skill_edit:"正在准备修改"};
+const WAIT_LABEL={retry:"服务暂时出错，正在重试",extend:"写到了长度上限，接着往下写",install:"正在安装",run:"正在运行代码",shell:"正在执行命令",web_search:"正在联网搜索",web_fetch:"正在读网页",ui:"正在调整界面",skill_edit:"正在准备修改"};
 function elapsed(ms){const s=Math.floor(ms/1000);return s<60?s+" 秒":Math.floor(s/60)+" 分 "+String(s%60).padStart(2,"0")+" 秒";}
 function waitingHtml(st,busy){
  if(!busy||st.thinkingNow)return "";
@@ -417,6 +426,11 @@ function chatEvent(evt){
   if(evt.kind==="chunk"){st.stream+=evt.text;st.waiting="";st.lastChunk=Date.now();patchLive(pid);continue;}
   if(evt.kind==="status"){if(st.data){st.data.status=evt.state;st.data.busy=!["ready","offline","error","cancelled"].includes(evt.state)||st.data.busy;}const head=Dock.els[pid]?.querySelector(".chat-head");if(head)head.innerHTML=chatHead(pid);continue;}
   if(evt.kind==="tool_wait"){st.waiting={name:evt.name,detail:evt.detail||"",since:Date.now(),gpu:!!evt.gpu};patchLive(pid);liveTicker(pid);continue;}
+  if(evt.kind==="retrying"){
+   // The service failed for a moment (or the reply ran out of room): it is tried again and goes on where it stopped.
+   st.waiting=evt.attempt?{name:"retry",detail:"第 "+evt.attempt+" 次，"+evt.wait+" 秒后",since:Date.now(),progress:shorten(String(evt.message||"").replace(/^API\s*/,""),120)}:{name:"extend",detail:"",since:Date.now()};
+   patchLive(pid);liveTicker(pid);continue;
+  }
   if(evt.kind==="tool_progress"){if(st.waiting){st.waiting.progress=evt.text;const p=Dock.els[pid]?.querySelector(".live-slot .thinking.working .wait-progress");if(p)p.textContent=evt.text;else patchLive(pid);}continue;}
   if(evt.kind==="tool"){st.waiting="";st.lastChunk=Date.now();if(evt.actions?.length){st.live.push(...evt.actions);patchLive(pid);}continue;}
   if(evt.kind==="error"){st.error=evt.message||"请求失败";patchLive(pid);continue;}

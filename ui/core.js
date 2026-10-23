@@ -98,7 +98,11 @@ marked.use({extensions:[{name:"strongCjk",level:"inline",start(src){const i=src.
   const prev=tokens?.length?tokens[tokens.length-1].raw.slice(-1):"",m=/^\*\*(?=\S)([\s\S]*?\S)\*\*/.exec(src);
   if(!m||/[A-Za-z0-9]/.test(prev)||/[A-Za-z0-9]/.test(src[m[0].length]||""))return;
   if(/[\u3000-\u303f\uff00-\uffef\u4e00-\u9fff]/.test(m[0]))return {type:"strong",raw:m[0],text:m[1],tokens:this.lexer.inlineTokens(m[1])};}}]});
-marked.use({renderer:{code(t){if((t.lang||"").trim().toLowerCase()==="mermaid")return '<div class="mermaid">'+esc(t.text)+'</div>';return false;}}});
+// A diagram drawn once is kept by its source: a reply being written redraws many times a second, and drawing the
+// diagram again each time made it flip between its source text and the picture, and the page jump with it.
+const mermaidDrawn=new Map();
+marked.use({renderer:{code(t){if((t.lang||"").trim().toLowerCase()==="mermaid"){const svg=mermaidDrawn.get(t.text);
+ return svg?'<div class="mermaid" data-processed="true">'+svg+'</div>':'<div class="mermaid">'+esc(t.text)+'</div>';}return false;}}});
 let _mmTimer=null,_mmSeq=0,_mmInited=false,_mmTries=0;
 function scheduleMermaid(){clearTimeout(_mmTimer);_mmTries=0;_mmTimer=setTimeout(runMermaid,60);}
 async function runMermaid(){
@@ -115,8 +119,10 @@ async function runMermaid(){
    continue;
   }
   n.dataset.processed="true";const src=n.textContent;
-  try{const out=await mermaid.render("mm"+(++_mmSeq),src,n);n.innerHTML=out.svg;}
-  catch(_){n.innerHTML='<pre class="mermaid-error">'+esc(src)+'</pre><small class="muted">图表语法未能解析</small>';}
+  try{const out=await mermaid.render("mm"+(++_mmSeq),src,n);n.innerHTML=out.svg;if(mermaidDrawn.size>200)mermaidDrawn.clear();mermaidDrawn.set(src,out.svg);
+   // the same diagram elsewhere on screen (the reply redrawn meanwhile) takes the picture too
+   for(const other of all(".mermaid:not([data-processed='true'])"))if(other.textContent===src){other.dataset.processed="true";other.innerHTML=out.svg;}}
+  catch(_){const bad='<pre class="mermaid-error">'+esc(src)+'</pre><small class="muted">图表语法未能解析</small>';n.innerHTML=bad;mermaidDrawn.set(src,bad);}
  }
 }
 /* Maths, drawn by KaTeX (ui/vendor/katex): $…$ and \(…\) in a line, $$…$$ and \[…\] on their own. A $ that opens
