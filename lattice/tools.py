@@ -376,6 +376,8 @@ def web_fetch(ctx, url):
       {"title": S, "question": S, "parent": S, "carry_ids": {"type": "array", "items": I},
        "route": {"type": "array", "items": _obj({"title": S, "ref": S, "why": S}, ["title"])}}, ["title", "question"])
 def create_topic(ctx, title, question, parent=None, carry_ids=(), route=None):
+    if route and not any(isinstance(s, dict) and s.get("state") == "now" for s in route):
+        route = [{**s, "state": "now"} if i == 0 and isinstance(s, dict) else s for i, s in enumerate(route)]   # the station to teach first
     t = ctx.l.topic_save({"title": title, "question": question, "parent": parent or None, **({"route": route} if route else {})}, ctx.agent)
     ctx.turn.focus, ctx.turn.refocus = t["id"], True
     ctx.turn.carry = [int(i) for i in carry_ids][:200]
