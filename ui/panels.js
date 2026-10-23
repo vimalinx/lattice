@@ -270,10 +270,16 @@ const SETTINGS_RENDER={
    '<div class="two"><label>Brave Key <small>'+(c.web.brave_key?"已保存":"未填")+'</small><input type="password" data-cfg-web="brave_key"/></label><label>Tavily Key <small>'+(c.web.tavily_key?"已保存":"未填")+'</small><input type="password" data-cfg-web="tavily_key"/></label></div>';
  },
  async run(c){
-  const env=await rpc("env_info",{name:Settings.env||"default"}).catch(()=>null);
+  const env=await rpc("env_info",{name:Settings.env||"default"}).catch(()=>null),acc=await rpc("accelerator").catch(()=>null);
   const rows=Object.keys({...c.default_runners,...c.runners}).sort().map(ext=>'<div class="runner-row"><code>'+esc(ext)+'</code><input data-runner="'+esc(ext)+'" value="'+esc(c.runners[ext]??"")+'" placeholder="'+esc(c.default_runners[ext]||"")+'"/></div>').join("");
   return '<h3>运行</h3><label class="check"><input type="checkbox" data-cfg="agent_auto_run"'+(c.agent_auto_run?" checked":"")+'/> 允许 AI 自己运行代码和命令 <small>都在沙箱里：看不到家目录，不联网</small></label>'+
-   '<label class="check"><input type="checkbox" data-cfg="gpu"'+(c.gpu!==false?" checked":"")+'/> 允许用 NVIDIA 显卡 <small>AI 需要时（训练、CUDA）和你运行导入了 torch / jax 之类的 Python 时，经 nvidia-run 唤醒显卡，跑完就回到休眠；实验笔记的内核可以单独切到显卡，空闲 15 分钟自动关掉</small></label>'+
+   '<label class="check"><input type="checkbox" data-cfg="gpu"'+(c.gpu!==false?" checked":"")+'/> 允许用显卡计算 <small>AI 需要时（训练、CUDA）和你运行导入了 torch / jax 之类的 Python 时用；实验笔记的内核可以单独切到显卡，空闲 15 分钟自动关掉</small></label>'+
+   (acc?'<div class="accel-box"><div class="field-label">这台电脑 <small>自动识别，不会唤醒显卡；AI 装 torch 之类的库时按这个选版本</small></div>'+
+    (acc.accelerators.length?acc.accelerators.map(a=>'<div class="accel-row'+(a.kind===acc.preferred?" on":"")+'">'+svg(a.kind===acc.preferred?"check":"spark",13)+'<b>'+esc(a.name)+'</b>'+
+     (a.driver?'<span class="chip">驱动 '+esc(a.driver)+'</span>':"")+(a.cuda_max?'<span class="chip">CUDA ≤ '+esc(a.cuda_max)+'</span>':"")+(a.kind===acc.preferred?'<span class="chip on">用这块算</span>':"")+'</div>').join(""):'<p class="muted">没有找到能用来计算的显卡，代码都在 CPU 上跑。</p>')+
+    '<div class="muted small">启动方式：'+esc(acc.launcher)+' · 学习库的 Python '+esc(acc.python)+'</div>'+
+    '<label>显卡运行的启动方式 <small>auto：有 nvidia-run 就用它（跑完让显卡休眠），否则直接运行；none：直接运行；也可以写一条命令的开头，比如 prime-run</small>'+
+    '<input data-cfg="gpu_launcher" value="'+esc(acc.setting)+'" placeholder="auto"/></label></div>':"")+
    '<label class="check"><input type="checkbox" data-cfg="auto_install"'+(c.auto_install?" checked":"")+'/> 运行时缺 Python 包就自动装进环境，再跑一次 <small>关掉以后，运行结果里会给一个「装上再运行」的按钮</small></label>'+
    '<div class="three"><label>实验笔记单格时限（秒）<input type="number" data-cfg="kernel_timeout" value="'+esc(c.kernel_timeout)+'"/></label><label>运行文件时限（秒）<input type="number" data-cfg="run_timeout" value="'+esc(c.run_timeout)+'"/></label><label>AI 命令时限（秒）<input type="number" data-cfg="shell_timeout" value="'+esc(c.shell_timeout)+'"/></label></div>'+
    '<div class="field-label">运行器 <small>每种扩展名用什么命令运行。留空用默认（灰字）；可用 {file} {dir} {stem} {out} {python}</small></div><div class="runners">'+rows+'</div>'+

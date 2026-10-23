@@ -1,8 +1,9 @@
 """The agents' sandbox: bubblewrap with the vault writable, mounted folders read-only and no network.
 
-A run that asks for the NVIDIA GPU also gets its device nodes, and is wrapped in nvidia-run: the GPU wakes for that
-run only and goes back to sleep when it ends. Such a run is stopped gently (the whole process group is asked to end,
-and only killed if it will not), so nvidia-run always gets to put the GPU back to sleep.
+A run that asks for the GPU also gets the device nodes of the accelerator found here (see accel.py), and is wrapped in
+this machine's launcher when it has one (nvidia-run wakes the GPU for that run only and puts it back to sleep). Runs are
+stopped gently (the whole process group is asked to end, and only killed if it will not), so a launcher always gets to
+clean up.
 
 Everything an agent runs goes through here: shell commands, files it runs and
 notebook kernels. The rest of the home directory, system configuration and
@@ -29,20 +30,10 @@ PROTECTED = (".git", ".lattice", "threads", "journal", "AGENTS.md", "agents")
 MPL = Path(__file__).with_name("mpl")
 
 
-def nvidia_run():
-    """The machine's wrapper that wakes the GPU for one command and puts it back to sleep, if there is one."""
-    found = shutil.which("nvidia-run") or str(Path.home() / ".local/bin/nvidia-run")
-    return found if os.access(found, os.X_OK) else None
-
-
-def gpu_present():
-    """Whether runs can use the GPU: the wrapper exists and the driver's device nodes are there (nothing is woken)."""
-    return bool(nvidia_run()) and os.path.exists("/dev/nvidiactl")
-
-
-def on_gpu(command):
-    """A command (a list) run on the GPU, outside the sandbox: the learner's own runs."""
-    return [nvidia_run(), "--", *command]
+def on_gpu(command, gpu):
+    """A command (a list) run on the GPU outside the sandbox (the learner's own runs): in this machine's launcher, if any.
+    gpu is accel.detect()'s description."""
+    return [*(gpu.get("prefix") or []), *command]
 
 
 def stop_group(proc, grace=20, wait=True):
@@ -103,9 +94,9 @@ class Sandbox:
                     paths.add(str(Path(line[7:]).resolve().parent))
         return sorted(p for p in paths if Path(p).exists())
 
-    def argv(self, command, cwd, env=None, writable=(), gpu=False):
-        """bwrap command line running `command` (a list) in `cwd` with `env` added to a clean environment; with gpu,
-        the NVIDIA device nodes are inside and the whole of it runs under nvidia-run."""
+    def argv(self, command, cwd, env=None, writable=(), gpu=None):
+        """bwrap command line running `command` (a list) in `cwd` with `env` added to a clean environment; with gpu
+        (accel.detect()'s description) the accelerator's device nodes are inside and it runs in the machine's launcher."""
         if not self.available():
             raise RuntimeError(self.why_not())
         args = [self.bwrap, "--unshare-all", "--die-with-parent", "--new-session", "--cap-drop", "ALL"]
@@ -122,10 +113,11 @@ class Sandbox:
                 args += ["--ro-bind", "/etc/" + name, "/etc/" + name]
         args += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/tmp/home"]
         if gpu:
-            if not gpu_present():
-                raise RuntimeError("这台电脑上用不了 NVIDIA 显卡（没有 nvidia-run 或驱动的设备）")
-            for node in sorted(glob.glob("/dev/nvidia*")):
-                args += ["--dev-bind", node, node]
+            if not gpu.get("devices"):
+                raise RuntimeError("这台电脑上没有能在沙箱里用的显卡")
+            for node in gpu["devices"]:
+                if os.path.exists(node):
+                    args += ["--dev-bind", node, node]
             args += ["--ro-bind", "/sys", "/sys"]
         for path in self.visible():
             args += ["--ro-bind", path, path]
@@ -148,9 +140,9 @@ class Sandbox:
             base["RUSTUP_HOME"] = str(Path.home() / ".rustup")
         for key, value in {**base, **(env or {})}.items():
             args += ["--setenv", key, str(value)]
-        return ([nvidia_run(), "--"] if gpu else []) + args + ["--", *command]
+        return [*((gpu or {}).get("prefix") or [])] + args + ["--", *command]
 
-    def shell(self, command, timeout=60, limit=24000, cwd=None, env=None, gpu=False):
+    def shell(self, command, timeout=60, limit=24000, cwd=None, env=None, gpu=None):
         """Run one shell command; returns its combined output, exit code and whether it was cut short."""
         started = time.monotonic()
         proc = subprocess.Popen(self.argv(["bash", "-c", command], cwd or self.root, env, gpu=gpu), stdout=subprocess.PIPE,

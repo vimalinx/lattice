@@ -29,7 +29,8 @@ from .model import Lattice, STAGES, outside_code, readable_outputs, text
 from .notebook import NotebookWorker
 from .providers import AGENT_NAMES, ApiWorker, Config
 from .runner import RunWorker, command_for, missing_tool, runner_for, tool_hint
-from .sandbox import MPL, Sandbox, gpu_present, on_gpu
+from . import accel
+from .sandbox import MPL, Sandbox, on_gpu
 from .vault import APPEND_ONLY, VAULT_PATH, VaultError, kind_of, split_frontmatter
 
 LOG = logging.getLogger("lattice")
@@ -863,8 +864,9 @@ class Bridge(QObject):
                 "agent_may_run_code": bool(self.config.read()["agent_auto_run"]), "sandbox": self.sandbox.available(), "today": tools.today(),
                 # Facts about where things run, so an agent does not have to guess why something failed.
                 "where_things_run": {"sandbox_network": False, "install_network": True,
-                                     "gpu": "能用：shell 或 run 带 gpu=true，这次运行时显卡被唤醒、结束就休眠" if self.gpu_ready()
-                                     else ("学习者在设置里关掉了显卡" if gpu_present() else "这台电脑上没有可用的 NVIDIA 显卡（或没有 nvidia-run）"),
+                                     "gpu": ("能用：shell 或 run 带 gpu=true" if self.gpu_ready() else "学习者在设置里关掉了显卡"
+                                             if self.accel()["preferred"] != "cpu" else "这台电脑上没有能用来计算的显卡，只能用 CPU"),
+                                     "accelerator": self.accel_brief(),
                                      "gpu_kernels": [state.get("path") for state in self.kernel_states.values() if state.get("gpu")]}}
 
     # ---- notebooks ------------------------------------------------------------------------------------
@@ -931,7 +933,30 @@ class Bridge(QObject):
 
     def gpu_ready(self):
         """Runs may use the NVIDIA GPU: allowed in the settings, and the wrapper and driver are on this computer."""
-        return bool(self.config.read().get("gpu", True)) and gpu_present()
+        info = self.accel()
+        return bool(self.config.read().get("gpu", True)) and info["preferred"] != "cpu"
+
+    def accel(self):
+        """This computer's accelerator and how runs get it (accel.py), with the launcher from the settings."""
+        return accel.detect(self.config.read().get("gpu_launcher") or "auto")
+
+    def accel_brief(self):
+        info = self.accel()
+        # The Python that code runs with is the vault's environment, which may differ from the program's own.
+        try:
+            python = next((line.split("=", 1)[1].strip() for line in (self.root / ".lattice/venvs/default/pyvenv.cfg").read_text().splitlines()
+                           if line.startswith(("version_info", "version "))), info["python"])
+        except OSError:
+            python = info["python"]
+        return {"preferred": info["preferred"], "launcher": info["launcher"], "python": python, "machine": info["machine"],
+                "accelerators": [{k: v for k, v in a.items() if k != "asleep"} for a in info["accelerators"]], **({"notes": info["notes"]} if info["notes"] else {})}
+
+    def gpu_for_run(self):
+        """What a GPU run needs (device nodes, launcher), or None when runs cannot use one."""
+        return self.accel() if self.gpu_ready() else None
+
+    def rpc_accelerator(self):
+        return {**self.accel_brief(), "allowed": bool(self.config.read().get("gpu", True)), "setting": self.config.read().get("gpu_launcher") or "auto"}
 
     def _kernel_gpu(self, rel):
         try:
@@ -954,8 +979,8 @@ class Bridge(QObject):
     def _kernel(self, nb, mode):
         worker = self.kernels.get(nb["id"])
         _, rel = self.lattice.resolve(nb["path"])
-        gpu = self._kernel_gpu(rel) and self.gpu_ready()
-        if worker and worker.isRunning() and worker.mode == mode and worker.gpu == gpu:
+        gpu = self.gpu_for_run() if self._kernel_gpu(rel) else None
+        if worker and worker.isRunning() and worker.mode == mode and worker.gpu == bool(gpu):
             return worker
         if worker:
             self._stop_kernel(nb["id"])
@@ -970,12 +995,12 @@ class Bridge(QObject):
             extra = {"IPYTHONDIR": "/tmp/ipython", "JUPYTER_RUNTIME_DIR": "/tmp/jupyter", "JUPYTER_DATA_DIR": "/tmp/jupyter-data", "PYTHONUNBUFFERED": "1"}
             wrap = lambda command: self.sandbox.argv(command, cwd, extra, writable=[sockets], gpu=gpu)
         elif gpu:
-            wrap = on_gpu
-        worker = NotebookWorker(nb["id"], cwd, lambda progress: self.envs.ensure(env, progress), self.config.read()["kernel_timeout"], wrap, sockets, gpu)
+            wrap = lambda command: on_gpu(command, gpu)
+        worker = NotebookWorker(nb["id"], cwd, lambda progress: self.envs.ensure(env, progress), self.config.read()["kernel_timeout"], wrap, sockets, bool(gpu))
         worker.mode, worker.path = mode, nb["path"]
         worker.event.connect(self.notebook_event)
         self.kernels[nb["id"]] = worker
-        self.kernel_states[nb["id"]] = {"state": "starting", "mode": mode, "path": nb["path"], "gpu": gpu, "last": time.monotonic()}
+        self.kernel_states[nb["id"]] = {"state": "starting", "mode": mode, "path": nb["path"], "gpu": bool(gpu), "last": time.monotonic()}
         worker.start()
         return worker
 
@@ -1140,7 +1165,7 @@ class Bridge(QObject):
         python = Path(self.envs.ensure("default"))
         env = {"PATH": f"{python.parent}:" + ":".join([*(p for p in self.sandbox.visible() if p.endswith("bin")), "/usr/local/bin", "/usr/bin"]),
                "VIRTUAL_ENV": str(python.parent.parent), "MPLBACKEND": "Agg"}
-        return self.sandbox.shell(command, timeout, env=env, gpu=gpu)
+        return self.sandbox.shell(command, timeout, env=env, gpu=self.gpu_for_run() if gpu else None)
 
     def run_file(self, path, by="me", sandboxed=False, cwd=None, attempt=0, gpu=False, timeout=None):
         l = self.lattice
@@ -1158,6 +1183,8 @@ class Bridge(QObject):
         workdir = Path(cwd or absolute.parent)
         shown = rel or str(absolute)
 
+        accelerated = self.gpu_for_run() if gpu else None
+
         def prepare(progress):
             python = self.python_for(absolute, rel, progress) if "{python}" in template else "python3"
             command = command_for(template, absolute, python, scratch)
@@ -1166,9 +1193,9 @@ class Bridge(QObject):
                 venv = Path(python).parent.parent
                 env = {**figures, "VIRTUAL_ENV": str(venv), "PATH": f"{Path(python).parent}:" + ":".join(
                     [*(p for p in self.sandbox.visible() if p.endswith("bin")), "/usr/local/bin", "/usr/bin"])}
-                return self.sandbox.argv(["bash", "-c", command], workdir, env, writable=[scratch], gpu=gpu), None
+                return self.sandbox.argv(["bash", "-c", command], workdir, env, writable=[scratch], gpu=accelerated), None
             env = {**os.environ, **figures, "PYTHONPATH": os.pathsep.join(x for x in (str(MPL), os.environ.get("PYTHONPATH")) if x)}
-            return (on_gpu(["bash", "-c", command]) if gpu else ["bash", "-c", command]), env
+            return (on_gpu(["bash", "-c", command], accelerated) if accelerated else ["bash", "-c", command]), env
         scratch.mkdir(parents=True, exist_ok=True)
         worker = RunWorker(run_id, None, str(workdir), None, max(self.config.read()["run_timeout"], int(timeout or 0)), scratch, prepare)
         self.runs[run_id] = {"path": shown, "by": by, "sandbox": sandboxed, "gpu": gpu, "worker": worker, "waiters": [], "attempt": attempt,

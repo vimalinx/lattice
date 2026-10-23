@@ -156,7 +156,7 @@ class Envs:
             raise EnvError(("安装超过 %d 分钟，停下了" % (timeout // 60)) if code < 0 else out.strip()[-1500:] or "uv 失败")
         return out
 
-    def install(self, name, packages, binary_only=True, progress=None):
+    def install(self, name, packages, binary_only=True, progress=None, index_url=None, extra_index_url=None):
         """Install packages into an environment and add them to its definition. Returns (added, output).
         Large packages (torch with its CUDA libraries is about 3 GB) are given up to an hour; progress gets how far."""
         packages = [str(p).strip() for p in packages if str(p).strip()]
@@ -165,7 +165,10 @@ class Envs:
         self.ensure(name)
         with self.lock(name):
             # Agents never run a package's own build code on this machine: wheels only.
-            out = self._stream(["pip", "install", "-p", str(self.python(name)), *(["--only-binary", ":all:"] if binary_only else []), *packages], 3600, progress)
+            # A library built for this machine's accelerator comes from its own index (e.g. torch for one CUDA version).
+            indexes = [*(["--index-url", index_url] if index_url else []), *(["--extra-index-url", extra_index_url] if extra_index_url else [])]
+            out = self._stream(["pip", "install", "-p", str(self.python(name)), *(["--only-binary", ":all:"] if binary_only else []), *indexes, *packages],
+                               3600, progress)
             rel = self.definition_rel(name)
             current = self.vault.read_text(rel)
             have = set(self.wanted(name))

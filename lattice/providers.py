@@ -116,6 +116,9 @@ DEFAULTS = {
     "agent_auto_run": True,
     # Runs that ask for it (or the learner's own Python that imports torch, jax…) use the NVIDIA GPU through nvidia-run.
     "gpu": True,
+    # How a GPU run is started here: "auto" (nvidia-run where there is one, else directly), "none", or a command such as
+    # "prime-run" or "nvidia-run --". Machines differ; an agent may set it when it finds what works.
+    "gpu_launcher": "auto",
     # Closing a file the learner just wrote hands it to the organizer.
     "agent_auto_organize": True,
     # A missing Python module is installed into the vault's environment and the run repeated.
@@ -472,6 +475,7 @@ class Config:
         if updated["vault"] and not str(updated["vault"]).startswith(("/", "~")):
             raise ValueError("学习库位置应为绝对路径")
         updated["commit_idle"] = max(5, min(int(updated["commit_idle"]), 3600))
+        updated["gpu_launcher"] = str(updated.get("gpu_launcher") or "auto").strip()[:200] or "auto"
         if not isinstance(updated["ui"], dict):
             raise ValueError("界面设置应为对象")
         for name, lane in updated["agents"].items():

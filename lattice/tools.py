@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import shutil
+import shlex
 from pathlib import Path
 
 from . import skills as skillbook
@@ -689,9 +691,30 @@ def run(ctx, file, cells=None, gpu=False, timeout=None):
     return Later(start)
 
 
+@tool("accelerator", {"tutor", "coach"}, "这台电脑能用来计算的硬件（不会唤醒显卡）：有哪些显卡、驱动、驱动支持到的 CUDA、该装哪种 torch、"
+      "运行时怎么启动显卡（launcher），以及学习者是否允许用显卡。每台电脑都不一样，装 torch 之类的库、要用显卡之前先看它，按它装对应的版本。"
+      "给 launcher 时改这台电脑的启动方式：auto（有 nvidia-run 就用它，否则直接运行）、none（直接运行），或者一条命令的开头（如 prime-run）；"
+      "只在 auto 不合适、你确认另一种在这台电脑上能用时改，并用 why 说明。改了会记在你的回复下面。",
+      {"launcher": S, "why": S})
+def accelerator(ctx, launcher=None, why=""):
+    bridge = ctx.bridge
+    if launcher is not None:
+        value = str(launcher).strip()[:200] or "auto"
+        if value not in ("auto", "none") and not shutil.which(shlex.split(value)[0]) and not (Path.home() / ".local/bin" / shlex.split(value)[0]).exists():
+            raise ValueError("这台电脑上找不到这个命令：" + shlex.split(value)[0])
+        bridge.config.save({"gpu_launcher": value})
+        ctx.act(f"把显卡的启动方式改成「{value}」" + (f"：{text(why, 200)}" if why else ""), None, False)
+    return bridge.rpc_accelerator()
+
+
 @tool("install", {"tutor", "coach"}, "往学习库的 Python 环境装包（只装预编译的 wheel），并写进环境定义 envs/<env>.txt，学习者可以撤销。env 默认 default。"
-      "装包在沙箱外进行，能联网；大的包要等一会儿（torch 连同 CUDA 的库约 3GB，可能要十几分钟），装好之前别下结论说装不上。", {"packages": LIST, "env": S}, ["packages"])
-def install(ctx, packages, env="default"):
+      "装包在沙箱外进行，能联网；大的包要等一会儿（torch 连同 CUDA 的库约 3GB，可能要十几分钟），装好之前别下结论说装不上。"
+      "要按这台电脑的显卡装特定版本（比如某个 CUDA 版本的 torch）时，先用 accelerator 看显卡和驱动，再给 index_url（主索引）或 extra_index_url（额外索引），只能是 https 地址。",
+      {"packages": LIST, "env": S, "index_url": S, "extra_index_url": S}, ["packages"])
+def install(ctx, packages, env="default", index_url=None, extra_index_url=None):
+    for url in (index_url, extra_index_url):
+        if url and not str(url).startswith("https://"):
+            raise ValueError("索引地址只能是 https://")
     bridge = ctx.bridge
 
     def start(done):
@@ -704,7 +727,8 @@ def install(ctx, packages, env="default"):
             ctx.act(f"往环境「{env}」装了 " + "、".join(packages), "file:envs/" + env + ".txt")
             done({"installed": list(packages), "added_to_definition": added, "log": out[-600:]})
         say = bridge.tool_progress(ctx)
-        bridge.background(lambda: bridge.envs.install(env or "default", packages, binary_only=True, progress=say), finish)
+        bridge.background(lambda: bridge.envs.install(env or "default", packages, binary_only=True, progress=say, index_url=index_url or None,
+                                                      extra_index_url=extra_index_url or None), finish)
     return Later(start)
 
 

@@ -1129,3 +1129,8 @@ input[type=checkbox],input[type=radio],input[type=range]{accent-color:var(--acce
 .thinking.working .chip{font-size:10.5px;padding:0 7px}
 .thinking.working .wait-progress{white-space:nowrap}
 .thinking.working .wait-progress{flex-basis:100%;padding-left:34px}.thinking.working .wait-progress:empty{display:none}
+.accel-box{display:grid;gap:6px;margin:6px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.accel-row{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+.accel-row b{color:var(--text);font-weight:550}
+.accel-row.on>svg{color:var(--accent)}
+.accel-box{min-width:0;overflow-wrap:anywhere}.accel-box .field-label{display:block}
