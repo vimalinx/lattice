@@ -237,8 +237,7 @@ function topicView(pid){
   (active?'<span class="chip on">正在学</span>':button(svg("bot",13)+" 在这里接着学","topic-focus",'data-id="'+esc(t.id)+'"',"primary sm"))+iconButton("trash","topic-delete","删除主题",'data-id="'+esc(t.id)+'"')+'</div>'+
   '<label class="field-label">想弄懂的问题<textarea class="grow-area" data-field="question" data-topic-field="question" rows="2">'+esc(t.question)+'</textarea></label>'+
   (t.parent?'<p class="muted">是「<a data-action="open-doc" data-id="'+esc(t.parent)+'">'+esc(topicTitle(t.parent))+'</a>」的分支</p>':"")+
-  '<section class="route"><h4>'+svg("map",14)+' 主干路线 <small>主会话维护，你也可以直接改</small></h4><ol>'+route.map((s,i)=>'<li><span class="route-title">'+
-   (s.ref&&docs.get(s.ref)?'<a data-action="open-doc" data-id="'+esc(s.ref)+'">'+esc(s.title)+'</a>':esc(s.title))+'</span>'+(s.why?'<small>'+esc(s.why)+'</small>':"")+
+  '<section class="route"><h4>'+svg("map",14)+' 主干路线 <small>主会话维护，你也可以直接改</small></h4><ol>'+route.map((s,i)=>'<li'+routeClass(s)+'><span class="route-title">'+routeStep(s,docs)+'</span>'+(s.why?'<small>'+esc(s.why)+'</small>':"")+
    '<span class="route-ops">'+iconButton("arrowup","route-move",'上移','data-pid="'+pid+'" data-i="'+i+'" data-d="-1"')+iconButton("close","route-drop","去掉这一站",'data-pid="'+pid+'" data-i="'+i+'"')+'</span></li>').join("")+'</ol>'+
    '<div class="route-add"><input data-route-add="'+pid+'" placeholder="加一站：写下标题，回车"/></div></section>'+
   '<div class="field-label">主题档案 <small>讲到了哪里、留下的疑问、接下来往哪走。主会话跨天续讲时读它</small></div>'+

@@ -283,7 +283,7 @@ function renderLive(pid){
 }
 /* What the reply is doing while no words come: a tool at work (with what it works on and for how long), or thinking
    between steps. Shown under what is written so far, so a long install never looks like the reply has stalled. */
-const WAIT_LABEL={retry:"服务暂时出错，正在重试",extend:"写到了长度上限，接着往下写",install:"正在安装",run:"正在运行代码",shell:"正在执行命令",web_search:"正在联网搜索",web_fetch:"正在读网页",ui:"正在调整界面",skill_edit:"正在准备修改"};
+const WAIT_LABEL={retry:"服务暂时出错，正在重试",extend:"写到了长度上限，接着往下写",install:"正在安装",run:"正在运行代码",shell:"正在执行命令",web_search:"正在联网搜索",web_fetch:"正在读网页",ui:"正在调整界面",skill_edit:"正在准备修改",route:"正在调整路线",replan:"正在调整路线"};
 function elapsed(ms){const s=Math.floor(ms/1000);return s<60?s+" 秒":Math.floor(s/60)+" 分 "+String(s%60).padStart(2,"0")+" 秒";}
 function waitingHtml(st,busy){
  if(!busy||st.thinkingNow)return "";

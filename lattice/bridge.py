@@ -1403,6 +1403,8 @@ class Bridge(QObject):
                                       ("选中了这段内容：\n" + selection.strip()[:5000]) if selection.strip() else "") if x)
         if notes:
             user += "\n\n（界面附注：" + notes + "）"
+        if definition["name"] == "tutor":
+            user += self._since(thread, topic)
         for rel, content in inline:
             user += f"\n\n（学习者附上的「{rel}」，全文如下）\n```\n{content}\n```"
         where = f"这段对话属于主题「{l.topic(topic)['title']}」（topic:{topic}）。" if topic else "这是默认对话，不属于任何主题。"
@@ -1411,6 +1413,27 @@ class Bridge(QObject):
             context += (f"\n\n这次练习：practice:{thread}「{practice['title']}」，练习文件：{practice['file']}。"
                         + (f"\n目标：{practice['goal']}" if practice.get("goal") else "") + "\n\n练习依据的讲解：\n" + practice["seed"])
         return user, agents.system_prompt(self.root, definition, context)
+
+    def _since(self, thread, topic):
+        """What the learner did since the tutor last spoke, which says where they are unsure: the questions they put to
+        the quick-answer agent beside it, what it handed over, and how the small questions the tutor asked were judged."""
+        l = self.lattice
+        last = l.index.one("SELECT at FROM messages WHERE thread=? AND role='assistant' ORDER BY id DESC LIMIT 1", (thread,))
+        if not last:
+            return ""
+        side = l.index.one("SELECT id FROM threads WHERE agent='flash' AND topic IS ? AND json_extract(head,'$.practice') IS NULL "
+                           "AND json_extract(head,'$.trial') IS NULL ORDER BY created DESC LIMIT 1", (topic,))
+        asked = [e["data"].get("text", "") for e in l.journal("asked", side["id"], last["at"], limit=8)] if side else []
+        judged = l.journal("judged", thread, last["at"], limit=6)
+        handed = [e["data"]["handoff"] for e in l.journal("action", side["id"], last["at"], limit=4) if e["data"].get("handoff")] if side else []
+        parts = []
+        if asked:
+            parts.append("在快答里问了" + "；".join(f"「{q[:160]}」" for q in reversed(asked)))
+        if handed:
+            parts.append("快答判断 TA 缺一整块基础，转交给你：" + "；".join(h[:400] for h in reversed(handed)))
+        if judged:
+            parts.append("答了你出的小题，快答的判断是" + "；".join(f"「{e['data'].get('question', '')[:80]}」：{e['data'].get('text', '')[:240]}" for e in reversed(judged)))
+        return ("\n\n（上次回复之后，学习者" + "。".join(parts) + "。这些说明 TA 现在哪里还不熟。）") if parts else ""
 
     def _history(self, thread, limit, before=None):
         """What the model sees of a conversation. A reply that broke off and was then answered again stays in the record

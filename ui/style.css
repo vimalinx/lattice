@@ -478,6 +478,12 @@ label.check input{margin:0}
 .route-ops{float:right;opacity:0}
 .route li:hover .route-ops{opacity:1}
 .route-add input{width:100%;margin-top:6px}
+.route li.done,.map-route li.done,.home-route li.done{color:var(--subtle)}
+.route li.done>.route-title,.map-route li.done>a{text-decoration:line-through;text-decoration-color:var(--line)}
+.route li.now,.map-route li.now,.home-route li.now{font-weight:600;color:var(--text)}
+.route-now,.route-gap{display:inline-block;margin-left:6px;padding:0 6px;border-radius:999px;font-size:11px;font-weight:500;line-height:1.6;vertical-align:middle}
+.route-now{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent)}
+.route-gap{max-width:16em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px dashed color-mix(in srgb,#e0756d 60%,transparent);color:color-mix(in srgb,#e0756d 85%,var(--text))}
 .topic-lists{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin:12px 14px}
 .list-box{border:1px solid var(--line-soft);border-radius:8px;padding:8px 10px;display:grid;gap:4px;align-content:start}
 .list-box h5{margin:0 0 3px;color:var(--muted);font-size:11.5px}

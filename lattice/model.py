@@ -231,7 +231,16 @@ class Lattice:
                 step["ref"] = str(item["ref"])
             if item.get("why"):
                 step["why"] = text(str(item["why"]), 500)
+            # where the learner is (one station is "now"), and the weak point a station was put in to fill
+            if item.get("state") in ("done", "now"):
+                step["state"] = item["state"]
+            if item.get("gap"):
+                step["gap"] = title_of(str(item["gap"]))
+                if item.get("insight"):
+                    step["insight"] = str(item["insight"])
             route.append(step)
+        if sum(s.get("state") == "now" for s in route) > 1:
+            raise ValueError("路线上只能有一站是 now（现在在讲的）")
         return route
 
     def topic_delete(self, ident):

@@ -400,8 +400,11 @@ def update_topic(ctx, topic=None, notes=None, question=None, state=None):
     return {"id": t["id"], "title": t["title"]}
 
 
-@tool("route", {"tutor"}, "写下或调整一个主题的主干路线：按顺序给出全部关键节点（整条替换）。每一站有 title，可以用 ref 指向已有的卡片、课程或文件，why 说明这一站为什么在这里。",
-      {"topic": S, "steps": {"type": "array", "items": _obj({"title": S, "ref": S, "why": S}, ["title"])}}, ["steps"])
+STEP = _obj({"title": S, "ref": S, "why": S}, ["title"])
+
+
+@tool("route", {"tutor"}, "写下或调整一个主题的主干路线：按顺序给出全部关键节点（整条替换）。每一站有 title，可以用 ref 指向已有的卡片、课程或文件，why 说明这一站为什么在这里。state 标出学习者在哪：讲完的站 done，正在讲的那一站 now（只有一站）；讲完一站往下走时用它挪位置。补薄弱点加进来的站带着 gap（和 insight），调整时原样保留。",
+      {"topic": S, "steps": {"type": "array", "items": _obj({"title": S, "ref": S, "why": S, "state": {"type": "string", "enum": ["done", "now"]}, "gap": S, "insight": S}, ["title"])}}, ["steps"])
 def route(ctx, steps, topic=None):
     ident = topic or ctx.topic
     if not ident:
@@ -412,6 +415,33 @@ def route(ctx, steps, topic=None):
     ctx.l.topic_save({"id": ident, "route": steps}, ctx.agent)
     ctx.act(f"把主干路线定为 {len(steps)} 站", "topic:" + ident)
     return {"topic": ident, "steps": len(steps)}
+
+
+@tool("replan", {"tutor"}, "发现学习者对某块知识不熟、挡住了往下讲时调用：记下这个薄弱点（gap 是这块知识的简短名称，几个字，例如「斜率与导数」；evidence 写清哪里不熟和证据：哪句话、哪道题、哪次运行），把补它的站插进主干路线（默认插在现在这一站前面，before 是第几站），插进去的第一站成为现在要讲的（now）。图上会多出这个薄弱点，路线上这几站标着是为它补的。薄弱点由它记下，不用再调 insight；已经记过的薄弱点给 insight（它的 id），不再新记。补完、学习者用证据表明会了，用 insight 的 resolve 划掉它，再用 route 把位置挪回主干。",
+      {"gap": S, "evidence": S, "steps": {"type": "array", "items": STEP}, "before": I, "insight": S, "topic": S}, ["gap", "evidence"])
+def replan(ctx, gap, evidence, steps=(), before=None, insight=None, topic=None):
+    l, ident = ctx.l, topic or ctx.topic
+    if not ident:
+        raise ValueError("默认对话没有路线：先用 create_topic 建主题，或者只用 insight 记下薄弱点")
+    if len(steps) > 6:
+        raise ValueError("一次最多补 6 站；补得更多说明该开一条分支（create_topic，parent 指向这个主题）")
+    route = [dict(s) for s in l.topic(ident)["route"]]
+    weak = insight or l.insight_add(ident, "weak", gap, evidence, ctx.practice, ctx.agent)
+    here = next((i for i, s in enumerate(route) if s.get("state") == "now"), None)
+    at = max(0, min(len(route), int(before) - 1)) if before else (here if here is not None else len(route))
+    added = [{**{k: v for k, v in step.items() if v}, "gap": gap, "insight": weak} for step in steps]
+    for step in added:
+        if step.get("ref"):
+            step["ref"] = l.resolve_ref(step["ref"])
+    if added:
+        if here is not None:
+            del route[here]["state"]
+        added[0]["state"] = "now"
+        route[at:at] = added
+        l.topic_save({"id": ident, "route": route}, ctx.agent)
+    ctx.act(f"发现「{title_of(gap)}」还不熟" + (f"：在路线第 {at + 1} 站前补了 {len(added)} 站，接下来先讲「{added[0]['title']}」" if added else "，记成薄弱点"), "topic:" + ident)
+    return {"insight": weak, "now": added[0]["title"] if added else None,
+            "route": [f"{i + 1}. {s['title']}" + (f"（{s['state']}）" if s.get("state") else "") + (f" · 补「{s['gap']}」" if s.get("gap") else "") for i, s in enumerate(route)]}
 
 
 @tool("link", {"tutor", "organizer"}, "在知识图上加一条关系。source 是一个文档（主题、卡片、课程、笔记），target 是另一个文档或 file:<路径>；都可以用 id 或标题。kind：prerequisite（source 是 target 的前置）、part_of（source 是 target 的一部分）、related、applies_to、contrasts、explains（source 解释了 target 的什么，岔路接回主干时用）。why 写清理由。",

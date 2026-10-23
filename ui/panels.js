@@ -23,7 +23,7 @@ async function loadMap(pid){
  if(!canvas.clientWidth)return;  // not on screen yet; drawn when the panel is shown
  mountGraph(canvas,g,{topic:p.topic});
  const route=p.topic?g.routes[p.topic]||[]:[],docs=new Map((S.data.docs||[]).map(d=>[d.id,d]));
- node.querySelector(".map-route").innerHTML=p.topic?'<h4>主干路线</h4>'+(route.length?'<ol>'+route.map(s=>'<li>'+(s.ref&&docs.get(s.ref)?'<a data-action="open-doc" data-id="'+esc(s.ref)+'">'+esc(s.title)+'</a>':esc(s.title))+(s.why?'<small>'+esc(s.why)+'</small>':"")+'</li>').join("")+'</ol>':'<p class="muted">还没有路线。</p>')+
+ node.querySelector(".map-route").innerHTML=p.topic?'<h4>主干路线</h4>'+(route.length?'<ol>'+route.map(s=>'<li'+routeClass(s)+'>'+routeStep(s,docs)+(s.why?'<small>'+esc(s.why)+'</small>':"")+'</li>').join("")+'</ol>':'<p class="muted">还没有路线。</p>')+
   button(svg("document",12)+" 打开主题","open-doc",'data-id="'+esc(p.topic)+'"',"ghost xs"):'<h4>图例</h4><p class="legend">⬢ 主题 · ▢ 知识卡（边框色＝理解阶段）· ● 笔记 · ◆ 课程 · ■ 实验笔记和文件 · ▲ 薄弱点</p><p class="muted">选一个主题，就能看到它的主干路线和挂着的岔路。</p>';
 }
 function mapsChanged(){clearTimeout(MapState.timer);MapState.timer=setTimeout(()=>Object.keys(Dock.panels).filter(pid=>Dock.panels[pid].type==="map").forEach(loadMap),800);}
@@ -152,7 +152,7 @@ async function renderHome(node){
  const lately=await safe(()=>rpc("journal",{limit:10}))||[];
  const active=(S.data.practices||[]).filter(x=>x.state==="active");
  box.innerHTML='<section class="home-now">'+(t?'<div class="overline">正在学</div><h2><a data-action="open-doc" data-id="'+esc(t.id)+'">'+esc(t.title)+'</a></h2><p class="muted">'+esc(t.question||"")+'</p>'+
-   ((t.route||[]).length?'<ol class="home-route">'+t.route.slice(0,9).map(s=>'<li>'+(s.ref&&docs.get(s.ref)?'<a data-action="open-doc" data-id="'+esc(s.ref)+'">'+esc(s.title)+'</a>':esc(s.title))+'</li>').join("")+'</ol>':'<p class="muted">还没有主干路线。</p>')
+   ((t.route||[]).length?'<ol class="home-route">'+t.route.slice(0,9).map(s=>'<li'+routeClass(s)+'>'+routeStep(s,docs)+'</li>').join("")+'</ol>':'<p class="muted">还没有主干路线。</p>')
    :'<div class="overline">默认对话</div><h2>想到什么，直接和主会话说。</h2><p class="muted">值得长期深入的内容，主会话会建成主题，并定一条主干路线；你在左栏「主题」里能看到它们。</p>')+'</section>'+
   '<div class="home-grid">'+
   '<section class="home-box"><h4>'+svg("refresh",14)+' 回顾</h4>'+(S.data.due?'<p>'+S.data.due+' 张卡到期。</p>'+button("开始回顾","open-review","","primary sm"):'<p class="muted">现在没有到期的卡。</p>')+'</section>'+

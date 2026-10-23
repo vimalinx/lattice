@@ -66,7 +66,7 @@ const BLOCKS={
   const g=await rpc("graph",{topic:d.topic||null});
   mountGraph(node.firstElementChild,g,{topic:d.topic,focus:d.focus||[],here:d.here,compact:true});
   const route=d.topic&&g.routes[d.topic];
-  node.lastElementChild.textContent=route?.length?"主干路线 "+route.length+" 站"+(d.here?" · 高亮的是你现在的位置":""):"";
+  node.lastElementChild.textContent=route?.length?"主干路线 "+route.length+" 站"+(d.here||route.some(s=>s.state==="now")?" · 高亮的是你现在的位置":""):"";
  },
  chart(d,node){node.innerHTML=chartSvg(d);},
  relations(d,node){
@@ -160,6 +160,13 @@ function chartSvg(d){
   (d.xlabel?'<text x="'+W/2+'" y="'+(H-4)+'" text-anchor="middle" class="axis">'+esc(d.xlabel)+'</text>':"")+(d.ylabel?'<text x="12" y="'+H/2+'" transform="rotate(-90 12 '+H/2+')" text-anchor="middle" class="axis">'+esc(d.ylabel)+'</text>':"")+
   '</svg><div class="chart-legend">'+legend+'</div></div>';
 }
+/* One station of a topic's route, wherever the route is listed: where the learner is, and the weak point a station
+   was put in to fill. */
+function routeStep(s,docs){
+ return (s.ref&&docs.get(s.ref)?'<a data-action="open-doc" data-id="'+esc(s.ref)+'">'+esc(s.title)+'</a>':esc(s.title))+(s.state==="now"?'<span class="route-now">现在</span>':"")+
+  (s.gap?'<span class="route-gap" data-tip="'+esc("发现「"+s.gap+"」还不熟时补上的")+'">补 '+esc(s.gap)+'</span>':"");
+}
+const routeClass=s=>s.state?' class="'+s.state+'"':"";
 /* The knowledge graph, shared by the map panel and graph blocks. A topic's route is drawn as a numbered chain. */
 const GRAPH_STYLE=[
  {selector:"node",style:{"label":"data(label)","color":"#c9d6e4","font-size":11,"font-family":"inherit","text-valign":"bottom","text-margin-y":6,"width":18,"height":18,"background-color":"#5b6675","text-wrap":"ellipsis","text-max-width":"120px"}},
@@ -170,11 +177,14 @@ const GRAPH_STYLE=[
  {selector:"node.notebook,node.file",style:{"shape":"rectangle","background-color":"#e0be88","width":14,"height":14}},
  {selector:"node.insight",style:{"shape":"triangle","background-color":"#f3a09b","width":14,"height":14}},
  {selector:"node.route",style:{"shape":"round-rectangle","background-color":"#173a33","border-width":1.5,"border-color":"#8bdcc5","width":"label","height":"label","padding":"8px","text-valign":"center","text-margin-y":0,"color":"#e7edf2"}},
+ {selector:"node.done",style:{"opacity":.55}},
+ {selector:"node.gap",style:{"border-color":"#f3a09b","border-style":"dashed"}},
  {selector:"node.here",style:{"border-width":4,"border-color":"#ecc994","underlay-color":"#ecc994","underlay-opacity":.25,"underlay-padding":6}},
  {selector:"node.focus",style:{"underlay-color":"#8bdcc5","underlay-opacity":.22,"underlay-padding":5}},
  {selector:"edge",style:{"width":1.4,"line-color":"#4a5b70","curve-style":"bezier","target-arrow-shape":"triangle","target-arrow-color":"#4a5b70","arrow-scale":.8,"label":"data(label)","font-size":9,"color":"#7f8ea1","text-rotation":"autorotate"}},
  {selector:"edge.mentions,edge.related",style:{"line-style":"dashed","target-arrow-shape":"none","opacity":.75}},
  {selector:"edge.trunk",style:{"width":3,"line-color":"#8bdcc5","target-arrow-color":"#8bdcc5"}},
+ {selector:"edge.fills",style:{"line-color":"#f3a09b","target-arrow-color":"#f3a09b","line-style":"dashed","width":1.2}},
  {selector:"edge.explains",style:{"line-color":"#ecc994","target-arrow-color":"#ecc994","line-style":"dashed"}},
  {selector:".faded",style:{"opacity":.15}}];
 function mountGraph(container,g,opt={}){
@@ -184,10 +194,14 @@ function mountGraph(container,g,opt={}){
  g.nodes.forEach(n=>els.push({data:{id:n.id,label:n.title,kind:n.kind,color:stageColor[n.stage]||"#5b6675"},classes:[n.kind,opt.here===n.id?"here":"",(opt.focus||[]).includes(n.id)?"focus":""].join(" ")}));
  g.edges.forEach(e=>els.push({data:{id:e.id,source:e.source,target:e.target,label:opt.compact?"":(linkName[e.kind]||e.kind),why:e.why||""},classes:e.kind}));
  const route=opt.topic&&g.routes[opt.topic]||[];
+ // Where the learner is: the block's own mark, or else the station the tutor marked as now.
+ const here=opt.here||(()=>{const i=route.findIndex(s=>s.state==="now");return i<0?null:route[i].ref&&g.nodes.some(n=>n.id===route[i].ref)?route[i].ref:"route:"+i;})();
  route.forEach((s,i)=>{
-  const id=s.ref&&g.nodes.some(n=>n.id===s.ref)?s.ref:"route:"+i;
-  if(id.startsWith("route:"))els.push({data:{id,label:(i+1)+". "+s.title,kind:"route"},classes:"route"+(opt.here===id?" here":"")});
-  else{const n=els.find(x=>x.data.id===id);if(n)n.data.label=(i+1)+". "+n.data.label;}
+  const id=s.ref&&g.nodes.some(n=>n.id===s.ref)?s.ref:"route:"+i,marks=(s.state==="done"?" done":"")+(s.gap?" gap":"");
+  if(id.startsWith("route:"))els.push({data:{id,label:(i+1)+". "+s.title,kind:"route"},classes:"route"+marks+(here===id?" here":"")});
+  else{const n=els.find(x=>x.data.id===id);if(n){n.data.label=(i+1)+". "+n.data.label;n.classes+=marks+(here===id?" here":"");}}
+  // a station put in for a weak point hangs off it on the map
+  if(s.insight&&g.nodes.some(n=>n.id===s.insight))els.push({data:{id:"fills:"+i,source:s.insight,target:id,label:opt.compact?"":"补"},classes:"fills"});
   if(i){const prev=route[i-1].ref&&g.nodes.some(n=>n.id===route[i-1].ref)?route[i-1].ref:"route:"+(i-1);els.push({data:{id:"trunk:"+i,source:prev,target:id,label:""},classes:"trunk"});}
  });
  const cy=cytoscape({container,elements:els,style:GRAPH_STYLE,wheelSensitivity:.25,minZoom:.2,maxZoom:3,
