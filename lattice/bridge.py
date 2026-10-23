@@ -29,7 +29,7 @@ from .model import Lattice, STAGES, outside_code, readable_outputs, text
 from .notebook import NotebookWorker
 from .providers import AGENT_NAMES, ApiWorker, Config
 from .runner import RunWorker, command_for, missing_tool, runner_for, tool_hint
-from .sandbox import MPL, Sandbox
+from .sandbox import MPL, Sandbox, gpu_present, on_gpu
 from .vault import APPEND_ONLY, VAULT_PATH, VaultError, kind_of, split_frontmatter
 
 LOG = logging.getLogger("lattice")
@@ -74,6 +74,7 @@ def compact(items):
 class Bridge(QObject):
     event = Signal(str)
     _done = Signal(object, object)
+    _progress = Signal(object)   # news from work off the GUI thread (how far an install is), announced on it
 
     def __init__(self, parent=None, root=None, config_path=None, migrate=True):
         super().__init__(parent)
@@ -104,11 +105,16 @@ class Bridge(QObject):
         self.closing = False
         self.state_path = self.root / ".lattice" / "state.json"
         self._done.connect(lambda then, result: then(result))
+        self._progress.connect(self.announce)
         # Outside edits are picked up every couple of seconds; the learner's own edits are
         # committed once they pause, and before any agent action.
         self.sync_timer = QTimer(self)
         self.sync_timer.timeout.connect(self.sync)
         self.sync_timer.start(2000)
+        # A notebook kernel on the GPU that has been idle a while is stopped, so the GPU can go back to sleep.
+        self.gpu_timer = QTimer(self)
+        self.gpu_timer.timeout.connect(self._gpu_idle)
+        self.gpu_timer.start(60000)
         self.commit_timer = QTimer(self)
         self.commit_timer.timeout.connect(lambda: time.monotonic() - self.last_write > self.config.read()["commit_idle"] and self.commit_mine())
         self.commit_timer.start(10000)
@@ -132,6 +138,16 @@ class Bridge(QObject):
     def _scrub(payload):
         # Requests may carry credentials (settings_save); never log them.
         return re.sub(r'"(api_key|key|token|password|secret|brave_key|tavily_key)"\s*:\s*"[^"]*"', r'"\1":"[REDACTED]"', str(payload))[:400]
+
+    def tool_progress(self, ctx):
+        """A callable for work off the GUI thread to say how far a waiting tool is; repeats are dropped."""
+        last = [None]
+
+        def say(text):
+            if text != last[0]:
+                last[0] = text
+                self._progress.emit({"type": "agent", "kind": "tool_progress", "agent": ctx.agent, "thread": ctx.thread, "text": str(text)[:120]})
+        return say
 
     def announce(self, data):
         self.event.emit(compact(data))
@@ -284,7 +300,8 @@ class Bridge(QObject):
         if result["kind"] == "notebook":
             nb = l.notebook(rel or str(absolute))
             return {**result, "notebook": nb, "kernel": self.kernel_states.get(nb["id"], {"state": "offline"}),
-                    "mode": self._kernel_mode(rel) if rel else "mine", "env": self.envs.name_for(absolute)}
+                    "mode": self._kernel_mode(rel) if rel else "mine", "env": self.envs.name_for(absolute),
+                    "gpu": self._kernel_gpu(rel), "gpu_ready": self.gpu_ready()}
         got = l.read_file(rel or str(absolute))
         result.update({k: got[k] for k in ("content", "binary", "truncated") if k in got})
         if result["kind"] == "card":
@@ -843,7 +860,12 @@ class Bridge(QObject):
                 "recent_runs": [{"at": e["at"][:16], "by": e["actor"], **{k: e["data"].get(k) for k in ("file", "cell", "state", "summary")}}
                                 for e in l.journal("ran", limit=4)],
                 "active_practices": [p for p in l.practices() if p["state"] == "active"],
-                "agent_may_run_code": bool(self.config.read()["agent_auto_run"]), "sandbox": self.sandbox.available(), "today": tools.today()}
+                "agent_may_run_code": bool(self.config.read()["agent_auto_run"]), "sandbox": self.sandbox.available(), "today": tools.today(),
+                # Facts about where things run, so an agent does not have to guess why something failed.
+                "where_things_run": {"sandbox_network": False, "install_network": True,
+                                     "gpu": "能用：shell 或 run 带 gpu=true，这次运行时显卡被唤醒、结束就休眠" if self.gpu_ready()
+                                     else ("学习者在设置里关掉了显卡" if gpu_present() else "这台电脑上没有可用的 NVIDIA 显卡（或没有 nvidia-run）"),
+                                     "gpu_kernels": [state.get("path") for state in self.kernel_states.values() if state.get("gpu")]}}
 
     # ---- notebooks ------------------------------------------------------------------------------------
     def rpc_cell_save(self, path, source, kind="code", id=None, after=None):
@@ -882,9 +904,58 @@ class Bridge(QObject):
     def kernel_state(self, ident):
         return self.kernel_states.get(ident, {}).get("state", "offline")
 
+    GPU_IDLE = 15 * 60
+
+    def _gpu_idle(self):
+        if self.closing:
+            return
+        for ident, state in list(self.kernel_states.items()):
+            worker = self.kernels.get(ident)
+            if not worker or not getattr(worker, "gpu", False) or state.get("state") == "busy" or ident in self.batches:
+                continue
+            if time.monotonic() - state.get("last", time.monotonic()) > self.GPU_IDLE:
+                path = state.get("path")
+                self._stop_kernel(ident)
+                self.announce({"type": "notice", "message": f"「{Path(str(path)).name}」用显卡的内核空闲了 15 分钟，先关掉让显卡休眠；再运行会自动重开（之前的变量要重新算）"})
+
+    # Python that imports one of these wants the GPU when the learner runs it.
+    GPU_IMPORT = re.compile(r"^\s*(?:import|from)\s+(?:torch|jax|tensorflow|cupy|triton|tinygrad|pycuda|numba\.cuda)\b", re.M)
+
+    def _wants_gpu(self, absolute):
+        if Path(absolute).suffix != ".py" or not self.gpu_ready():
+            return False
+        try:
+            return bool(self.GPU_IMPORT.search(Path(absolute).read_text(encoding="utf-8", errors="replace")[:400_000]))
+        except OSError:
+            return False
+
+    def gpu_ready(self):
+        """Runs may use the NVIDIA GPU: allowed in the settings, and the wrapper and driver are on this computer."""
+        return bool(self.config.read().get("gpu", True)) and gpu_present()
+
+    def _kernel_gpu(self, rel):
+        try:
+            return bool(((self.lattice.vault.read_json(rel).get("metadata") or {}).get("lattice") or {}).get("gpu")) if rel else False
+        except (OSError, ValueError):
+            return False
+
+    def rpc_kernel_gpu(self, path, on=True):
+        """A notebook's kernel on the GPU (it restarts): for training and anything CUDA. It stops by itself when idle."""
+        _, rel = self.lattice.resolve(path)
+        if on and not self.gpu_ready():
+            raise ValueError("用不了显卡：设置里关掉了，或者这台电脑上没有 nvidia-run / NVIDIA 驱动")
+        nb = self.lattice.vault.read_json(rel)
+        nb.setdefault("metadata", {}).setdefault("lattice", {})["gpu"] = bool(on)
+        self.lattice.vault.write_json(rel, nb)
+        self.lattice.index.reindex(rel)
+        self._stop_kernel(nb["metadata"]["lattice"].get("id"))
+        return bool(on)
+
     def _kernel(self, nb, mode):
         worker = self.kernels.get(nb["id"])
-        if worker and worker.isRunning() and worker.mode == mode:
+        _, rel = self.lattice.resolve(nb["path"])
+        gpu = self._kernel_gpu(rel) and self.gpu_ready()
+        if worker and worker.isRunning() and worker.mode == mode and worker.gpu == gpu:
             return worker
         if worker:
             self._stop_kernel(nb["id"])
@@ -897,18 +968,24 @@ class Bridge(QObject):
         sockets.chmod(0o700)
         if mode == "sandbox":
             extra = {"IPYTHONDIR": "/tmp/ipython", "JUPYTER_RUNTIME_DIR": "/tmp/jupyter", "JUPYTER_DATA_DIR": "/tmp/jupyter-data", "PYTHONUNBUFFERED": "1"}
-            wrap = lambda command: self.sandbox.argv(command, cwd, extra, writable=[sockets])
-        worker = NotebookWorker(nb["id"], cwd, lambda progress: self.envs.ensure(env, progress), self.config.read()["kernel_timeout"], wrap, sockets)
+            wrap = lambda command: self.sandbox.argv(command, cwd, extra, writable=[sockets], gpu=gpu)
+        elif gpu:
+            wrap = on_gpu
+        worker = NotebookWorker(nb["id"], cwd, lambda progress: self.envs.ensure(env, progress), self.config.read()["kernel_timeout"], wrap, sockets, gpu)
         worker.mode, worker.path = mode, nb["path"]
         worker.event.connect(self.notebook_event)
         self.kernels[nb["id"]] = worker
-        self.kernel_states[nb["id"]] = {"state": "starting", "mode": mode, "path": nb["path"]}
+        self.kernel_states[nb["id"]] = {"state": "starting", "mode": mode, "path": nb["path"], "gpu": gpu, "last": time.monotonic()}
         worker.start()
         return worker
 
-    def run_notebook(self, path, cells=None, by="me", attempt=0):
+    def run_notebook(self, path, cells=None, by="me", attempt=0, gpu=False):
         nb = self.lattice.notebook(path)
         _, rel = self.lattice.resolve(path)
+        if gpu and rel and not self._kernel_gpu(rel):
+            # Asked for the GPU: the kernel restarts on it (its variables are gone) and stays on it for this notebook.
+            self.rpc_kernel_gpu(rel, True)
+            nb = self.lattice.notebook(path)
         mode = self._kernel_mode(rel) if rel else "mine"
         if by != "me" and mode != "sandbox":
             raise ValueError("这本实验笔记的内核切到了学习者自己的权限，AI 不能在里面运行；请学习者自己点运行")
@@ -938,6 +1015,7 @@ class Bridge(QObject):
         batch = self.batches.get(ident)
         path = (batch or {}).get("path") or self.kernel_states.get(ident, {}).get("path")
         out = {"type": "kernel", "notebook": ident, "path": path, "kind": kind}
+        self.kernel_states.setdefault(ident, {})["last"] = time.monotonic()
         if kind == "run_started":
             self.kernel_states.setdefault(ident, {}).update(state="busy")
             out.update(cell=evt["cell_id"], state="busy")
@@ -1033,10 +1111,11 @@ class Bridge(QObject):
             scratch = self.root / ".lattice" / "scratch" / ("snippet-" + uid() + ext)
             scratch.parent.mkdir(parents=True, exist_ok=True)
             scratch.write_text(text(code, 400000), encoding="utf-8")
-            return {"run": self.run_file(str(scratch), "me", False, cwd=self.root / "code")}
+            return {"run": self.run_file(str(scratch), "me", False, cwd=self.root / "code", gpu=self._wants_gpu(scratch))}
         if str(path).endswith(".ipynb"):
             return self.run_notebook(path, cells, "me")
-        return {"run": self.run_file(path, "me", False)}
+        absolute, _ = self.lattice.resolve(path)
+        return {"run": self.run_file(path, "me", False, gpu=self._wants_gpu(absolute))}
 
     def rpc_run_stop(self, run):
         info = self.runs.get(run)
@@ -1056,14 +1135,14 @@ class Bridge(QObject):
                 folder = folder.parent
         return self.envs.ensure(self.envs.name_for(absolute if rel else self.root), progress)
 
-    def agent_shell(self, command, timeout):
+    def agent_shell(self, command, timeout, gpu=False):
         """One agent shell command in the sandbox, with the vault's default Python environment on PATH (runs off the GUI thread)."""
         python = Path(self.envs.ensure("default"))
         env = {"PATH": f"{python.parent}:" + ":".join([*(p for p in self.sandbox.visible() if p.endswith("bin")), "/usr/local/bin", "/usr/bin"]),
                "VIRTUAL_ENV": str(python.parent.parent), "MPLBACKEND": "Agg"}
-        return self.sandbox.shell(command, timeout, env=env)
+        return self.sandbox.shell(command, timeout, env=env, gpu=gpu)
 
-    def run_file(self, path, by="me", sandboxed=False, cwd=None, attempt=0):
+    def run_file(self, path, by="me", sandboxed=False, cwd=None, attempt=0, gpu=False, timeout=None):
         l = self.lattice
         absolute, rel = l.resolve(path) if not str(path).startswith(str(self.root / ".lattice" / "scratch")) else (Path(path), None)
         template = runner_for(absolute, self.config.read()["runners"])
@@ -1087,12 +1166,12 @@ class Bridge(QObject):
                 venv = Path(python).parent.parent
                 env = {**figures, "VIRTUAL_ENV": str(venv), "PATH": f"{Path(python).parent}:" + ":".join(
                     [*(p for p in self.sandbox.visible() if p.endswith("bin")), "/usr/local/bin", "/usr/bin"])}
-                return self.sandbox.argv(["bash", "-c", command], workdir, env, writable=[scratch]), None
+                return self.sandbox.argv(["bash", "-c", command], workdir, env, writable=[scratch], gpu=gpu), None
             env = {**os.environ, **figures, "PYTHONPATH": os.pathsep.join(x for x in (str(MPL), os.environ.get("PYTHONPATH")) if x)}
-            return ["bash", "-c", command], env
+            return (on_gpu(["bash", "-c", command]) if gpu else ["bash", "-c", command]), env
         scratch.mkdir(parents=True, exist_ok=True)
-        worker = RunWorker(run_id, None, str(workdir), None, self.config.read()["run_timeout"], scratch, prepare)
-        self.runs[run_id] = {"path": shown, "by": by, "sandbox": sandboxed, "worker": worker, "waiters": [], "attempt": attempt,
+        worker = RunWorker(run_id, None, str(workdir), None, max(self.config.read()["run_timeout"], int(timeout or 0)), scratch, prepare)
+        self.runs[run_id] = {"path": shown, "by": by, "sandbox": sandboxed, "gpu": gpu, "worker": worker, "waiters": [], "attempt": attempt,
                              "cwd": cwd, "snippet": rel is None and str(absolute).startswith(str(self.root / ".lattice"))}
         worker.event.connect(self.run_event)
         worker.start()
@@ -1167,12 +1246,14 @@ class Bridge(QObject):
         commit = self.lattice.vault.commit(f"{'我' if by == 'me' else by}：往环境「{env}」装了 " + "、".join(packages), by)
         self.lattice.action(by, f"往环境「{env}」装了 " + "、".join(packages), f"file:envs/{env}.txt", commit)
 
-    def run_for_agent(self, ctx, path, cells, finish):
+    def run_for_agent(self, ctx, path, cells, finish, gpu=False, timeout=None):
+        if gpu and not self.gpu_ready():
+            raise ValueError("用不了显卡：学习者在设置里关掉了，或者这台电脑上没有 nvidia-run / NVIDIA 驱动")
         if str(path).endswith(".ipynb"):
-            batch = self.run_notebook(path, cells, ctx.agent)
+            batch = self.run_notebook(path, cells, ctx.agent, gpu=gpu)
             self.batches[batch["notebook"]]["waiters"].append(finish)
         else:
-            run = self.run_file(path, ctx.agent, True)
+            run = self.run_file(path, ctx.agent, True, gpu=gpu, timeout=timeout)
             self.runs[run]["waiters"].append(finish)
         ctx.act("运行了 " + str(path).rsplit("/", 1)[-1], "file:" + str(path), False)
 
@@ -1471,7 +1552,8 @@ class Bridge(QObject):
             result = {"error": str(exc)}
         if isinstance(result, tools.Later):
             # A tool that takes a while (installing, running, a command, the web): the reply says what it is doing.
-            self.announce({"type": "agent", "kind": "tool_wait", "agent": agent, "thread": thread, "name": name, "detail": self._tool_detail(name, args)})
+            self.announce({"type": "agent", "kind": "tool_wait", "agent": agent, "thread": thread, "name": name, "detail": self._tool_detail(name, args),
+                           **({"gpu": True} if isinstance(args, dict) and args.get("gpu") else {})})
             try:
                 result.start(answer)
             except Exception as exc:

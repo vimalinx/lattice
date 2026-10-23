@@ -281,9 +281,9 @@ function waitingHtml(st,busy){
  const w=st.waiting,quiet=!st.stream||Date.now()-(st.lastChunk||0)>1500;
  if(!w&&!quiet)return "";
  const label=w?(WAIT_LABEL[w.name]||"正在用工具 "+w.name):st.stream||st.live.length?"正在想下一步…":"正在想…";
- const long=w&&w.name==="install"&&Date.now()-w.since>20000?'<small>大的包（比如 torch）可能要几分钟</small>':"";
- return '<div class="thinking working"><span></span><span></span><span></span><b>'+esc(label)+'</b>'+(w?.detail?'<code>'+esc(shorten(w.detail,90))+'</code>':"")+
-  (w?'<em data-since="'+w.since+'">'+elapsed(Date.now()-w.since)+'</em>':"")+long+'</div>';
+ const long=w&&w.name==="install"&&Date.now()-w.since>20000?'<small>大的包（比如 torch 连同 CUDA 的库约 3GB）可能要十几分钟</small>':"";
+ return '<div class="thinking working"><span></span><span></span><span></span><b>'+esc(label)+'</b>'+(w?.gpu?'<span class="chip ai">用显卡</span>':"")+(w?.detail?'<code>'+esc(shorten(w.detail,90))+'</code>':"")+
+  (w?'<em data-since="'+w.since+'">'+elapsed(Date.now()-w.since)+'</em>':"")+(w?'<span class="wait-progress">'+esc(w.progress||"")+'</span>':"")+long+'</div>';
 }
 // While a tool works, the time on its line moves, and the "thinking" line appears once words stop coming.
 const liveTicks={};
@@ -416,7 +416,8 @@ function chatEvent(evt){
   if(st.thinkingNow&&["chunk","tool","tool_wait","finished","error"].includes(evt.kind)){st.thinkingNow=false;st.thinkMs+=Date.now()-st.thinkFrom;}
   if(evt.kind==="chunk"){st.stream+=evt.text;st.waiting="";st.lastChunk=Date.now();patchLive(pid);continue;}
   if(evt.kind==="status"){if(st.data){st.data.status=evt.state;st.data.busy=!["ready","offline","error","cancelled"].includes(evt.state)||st.data.busy;}const head=Dock.els[pid]?.querySelector(".chat-head");if(head)head.innerHTML=chatHead(pid);continue;}
-  if(evt.kind==="tool_wait"){st.waiting={name:evt.name,detail:evt.detail||"",since:Date.now()};patchLive(pid);liveTicker(pid);continue;}
+  if(evt.kind==="tool_wait"){st.waiting={name:evt.name,detail:evt.detail||"",since:Date.now(),gpu:!!evt.gpu};patchLive(pid);liveTicker(pid);continue;}
+  if(evt.kind==="tool_progress"){if(st.waiting){st.waiting.progress=evt.text;const p=Dock.els[pid]?.querySelector(".live-slot .thinking.working .wait-progress");if(p)p.textContent=evt.text;else patchLive(pid);}continue;}
   if(evt.kind==="tool"){st.waiting="";st.lastChunk=Date.now();if(evt.actions?.length){st.live.push(...evt.actions);patchLive(pid);}continue;}
   if(evt.kind==="error"){st.error=evt.message||"请求失败";patchLive(pid);continue;}
   if(evt.kind==="finished"){

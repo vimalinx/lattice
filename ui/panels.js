@@ -273,6 +273,7 @@ const SETTINGS_RENDER={
   const env=await rpc("env_info",{name:Settings.env||"default"}).catch(()=>null);
   const rows=Object.keys({...c.default_runners,...c.runners}).sort().map(ext=>'<div class="runner-row"><code>'+esc(ext)+'</code><input data-runner="'+esc(ext)+'" value="'+esc(c.runners[ext]??"")+'" placeholder="'+esc(c.default_runners[ext]||"")+'"/></div>').join("");
   return '<h3>运行</h3><label class="check"><input type="checkbox" data-cfg="agent_auto_run"'+(c.agent_auto_run?" checked":"")+'/> 允许 AI 自己运行代码和命令 <small>都在沙箱里：看不到家目录，不联网</small></label>'+
+   '<label class="check"><input type="checkbox" data-cfg="gpu"'+(c.gpu!==false?" checked":"")+'/> 允许用 NVIDIA 显卡 <small>AI 需要时（训练、CUDA）和你运行导入了 torch / jax 之类的 Python 时，经 nvidia-run 唤醒显卡，跑完就回到休眠；实验笔记的内核可以单独切到显卡，空闲 15 分钟自动关掉</small></label>'+
    '<label class="check"><input type="checkbox" data-cfg="auto_install"'+(c.auto_install?" checked":"")+'/> 运行时缺 Python 包就自动装进环境，再跑一次 <small>关掉以后，运行结果里会给一个「装上再运行」的按钮</small></label>'+
    '<div class="three"><label>实验笔记单格时限（秒）<input type="number" data-cfg="kernel_timeout" value="'+esc(c.kernel_timeout)+'"/></label><label>运行文件时限（秒）<input type="number" data-cfg="run_timeout" value="'+esc(c.run_timeout)+'"/></label><label>AI 命令时限（秒）<input type="number" data-cfg="shell_timeout" value="'+esc(c.shell_timeout)+'"/></label></div>'+
    '<div class="field-label">运行器 <small>每种扩展名用什么命令运行。留空用默认（灰字）；可用 {file} {dir} {stem} {out} {python}</small></div><div class="runners">'+rows+'</div>'+

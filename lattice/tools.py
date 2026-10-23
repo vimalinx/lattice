@@ -305,9 +305,10 @@ def due(ctx):
 
 # ---- the shell ------------------------------------------------------------------------------------
 
-@tool("shell", {"tutor", "coach", "organizer"}, "在沙箱里运行一条 bash 命令，工作目录是学习库：用来查看、搜索、分析和按规矩组织文件（ls、rg、cat、head、git log、python…）。学习库可写，挂载的外部目录只读，不联网，看不到家目录的其余部分。Python 用学习库的环境。命令有时限，输出过长会截断。命令改动的文件会作为一次可撤销的操作提交；改到只归学习者的部分会被自动退回。",
-      {"command": S, "timeout": I}, ["command"])
-def shell(ctx, command, timeout=None):
+@tool("shell", {"tutor", "coach", "organizer"}, "在沙箱里运行一条 bash 命令，工作目录是学习库：用来查看、搜索、分析和按规矩组织文件（ls、rg、cat、head、git log、python…）。学习库可写，挂载的外部目录只读，不联网，看不到家目录的其余部分。Python 用学习库的环境。命令有时限，输出过长会截断。命令改动的文件会作为一次可撤销的操作提交；改到只归学习者的部分会被自动退回。"
+      "要用 NVIDIA 显卡（CUDA、torch.cuda…）时 gpu 设为 true：这条命令运行时显卡被唤醒、结束就回到休眠；不需要显卡时别设。",
+      {"command": S, "timeout": I, "gpu": {"type": "boolean"}}, ["command"])
+def shell(ctx, command, timeout=None, gpu=False):
     command = text(command, 20000)
     bridge = ctx.bridge
     limit = max(3, min(int(timeout or bridge.config.read()["shell_timeout"]), 600))
@@ -323,7 +324,9 @@ def shell(ctx, command, timeout=None):
                 ctx.act(f"用命令行改了 {len(changed)} 个文件", "file:" + changed[0] if len(changed) == 1 else None)
                 bridge.changed(changed)
             done({**result, "changed_files": changed[:50], **({"restored": restored} if restored else {})})
-        bridge.background(lambda: bridge.agent_shell(command, limit), finish)
+        if gpu and not bridge.gpu_ready():
+            return done({"error": "用不了显卡：学习者在设置里关掉了，或者这台电脑上没有 nvidia-run / NVIDIA 驱动"})
+        bridge.background(lambda: bridge.agent_shell(command, limit, bool(gpu)), finish)
     return Later(start)
 
 
@@ -659,9 +662,11 @@ def write_cell(ctx, source, kind="code", notebook=None, cell=None, after=None):
     return {"notebook": rel, "cell": ident}
 
 
-@tool("run", {"tutor", "coach"}, "运行一个文件并等它结束，取回真实输出：.py、.ipynb（cells 指定单元格，不给就全部）、.c、.cpp、.rs、.go、.js、.ts、.sh 等。在沙箱里执行（不联网）；缺 Python 包时会自动装上再跑一次。学习者关掉了「允许 AI 运行代码」时会拒绝，这时请学习者自己点运行。",
-      {"file": S, "cells": LIST}, ["file"])
-def run(ctx, file, cells=None):
+@tool("run", {"tutor", "coach"}, "运行一个文件并等它结束，取回真实输出：.py、.ipynb（cells 指定单元格，不给就全部）、.c、.cpp、.rs、.go、.js、.ts、.sh 等。在沙箱里执行（不联网）；缺 Python 包时会自动装上再跑一次。学习者关掉了「允许 AI 运行代码」时会拒绝，这时请学习者自己点运行。"
+      "要用 NVIDIA 显卡（训练、CUDA）时 gpu 设为 true：显卡只在这次运行时被唤醒，结束就回到休眠；实验笔记会换到用显卡的内核（之前的变量没了），"
+      "这个内核空闲 15 分钟后自动关掉。训练这类跑得久的，用 timeout 给够秒数（最多 3600）。",
+      {"file": S, "cells": LIST, "gpu": {"type": "boolean"}, "timeout": I}, ["file"])
+def run(ctx, file, cells=None, gpu=False, timeout=None):
     bridge = ctx.bridge
     if not bridge.config.read()["agent_auto_run"]:
         raise ValueError("学习者关闭了「允许 AI 运行代码」。请学习者自己点运行，再读取输出。")
@@ -678,13 +683,14 @@ def run(ctx, file, cells=None):
                   "output": readable[-12000:], "figures": sum(1 for o in outputs if "image/png" in (o.get("data") or {})),
                   **({"cells": result["cells"]} if result.get("cells") else {}), **({"note": result["note"]} if result.get("note") else {})})
         try:
-            bridge.run_for_agent(ctx, rel or str(absolute), cells, finish)
+            bridge.run_for_agent(ctx, rel or str(absolute), cells, finish, bool(gpu), max(0, min(int(timeout or 0), 3600)) or None)
         except Exception as exc:
             done({"error": str(exc)})
     return Later(start)
 
 
-@tool("install", {"tutor", "coach"}, "往学习库的 Python 环境装包（只装预编译的 wheel），并写进环境定义 envs/<env>.txt，学习者可以撤销。env 默认 default。", {"packages": LIST, "env": S}, ["packages"])
+@tool("install", {"tutor", "coach"}, "往学习库的 Python 环境装包（只装预编译的 wheel），并写进环境定义 envs/<env>.txt，学习者可以撤销。env 默认 default。"
+      "装包在沙箱外进行，能联网；大的包要等一会儿（torch 连同 CUDA 的库约 3GB，可能要十几分钟），装好之前别下结论说装不上。", {"packages": LIST, "env": S}, ["packages"])
 def install(ctx, packages, env="default"):
     bridge = ctx.bridge
 
@@ -697,7 +703,8 @@ def install(ctx, packages, env="default"):
             ctx.l.record("installed", {"env": env, "packages": list(packages), "added": added}, ctx.agent, ["envs/" + env + ".txt"])
             ctx.act(f"往环境「{env}」装了 " + "、".join(packages), "file:envs/" + env + ".txt")
             done({"installed": list(packages), "added_to_definition": added, "log": out[-600:]})
-        bridge.background(lambda: bridge.envs.install(env or "default", packages, binary_only=True), finish)
+        say = bridge.tool_progress(ctx)
+        bridge.background(lambda: bridge.envs.install(env or "default", packages, binary_only=True, progress=say), finish)
     return Later(start)
 
 

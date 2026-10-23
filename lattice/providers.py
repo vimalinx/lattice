@@ -114,6 +114,8 @@ DEFAULTS = {
     "kernel_timeout": 120, "run_timeout": 120, "shell_timeout": 60,
     # Agents run code and shell commands in the sandbox, never with the learner's own permissions.
     "agent_auto_run": True,
+    # Runs that ask for it (or the learner's own Python that imports torch, jax…) use the NVIDIA GPU through nvidia-run.
+    "gpu": True,
     # Closing a file the learner just wrote hands it to the organizer.
     "agent_auto_organize": True,
     # A missing Python module is installed into the vault's environment and the run repeated.
@@ -494,7 +496,7 @@ class Config:
         for key in ("kernel_timeout", "run_timeout"):
             updated[key] = max(3, min(int(updated[key]), 3600))
         updated["shell_timeout"] = max(3, min(int(updated["shell_timeout"]), 600))
-        for key in ("agent_auto_run", "agent_auto_organize", "auto_install"):
+        for key in ("agent_auto_run", "agent_auto_organize", "auto_install", "gpu"):
             updated[key] = bool(updated[key])
         if not isinstance(updated["runners"], dict) or not all(re.fullmatch(r"\.[\w+-]{1,12}", k) and isinstance(v, str) for k, v in updated["runners"].items()):
             raise ValueError("运行器应为「扩展名 → 命令」的对象，例如 {\".lua\": \"lua {file}\"}")

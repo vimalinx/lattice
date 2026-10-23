@@ -1,5 +1,9 @@
 """The agents' sandbox: bubblewrap with the vault writable, mounted folders read-only and no network.
 
+A run that asks for the NVIDIA GPU also gets its device nodes, and is wrapped in nvidia-run: the GPU wakes for that
+run only and goes back to sleep when it ends. Such a run is stopped gently (the whole process group is asked to end,
+and only killed if it will not), so nvidia-run always gets to put the GPU back to sleep.
+
 Everything an agent runs goes through here: shell commands, files it runs and
 notebook kernels. The rest of the home directory, system configuration and
 credentials are not visible. Lattice's own records (conversations, journal,
@@ -12,7 +16,9 @@ import glob
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
+import threading
 import time
 
 # Just enough of /etc for programs to run: libraries, fonts, certificates, time zone, user names.
@@ -21,6 +27,45 @@ ETC = ["ld.so.cache", "ld.so.conf", "ld.so.conf.d", "fonts", "ssl", "ca-certific
 # Inside the vault, these stay read-only for the sandbox.
 PROTECTED = (".git", ".lattice", "threads", "journal", "AGENTS.md", "agents")
 MPL = Path(__file__).with_name("mpl")
+
+
+def nvidia_run():
+    """The machine's wrapper that wakes the GPU for one command and puts it back to sleep, if there is one."""
+    found = shutil.which("nvidia-run") or str(Path.home() / ".local/bin/nvidia-run")
+    return found if os.access(found, os.X_OK) else None
+
+
+def gpu_present():
+    """Whether runs can use the GPU: the wrapper exists and the driver's device nodes are there (nothing is woken)."""
+    return bool(nvidia_run()) and os.path.exists("/dev/nvidiactl")
+
+
+def on_gpu(command):
+    """A command (a list) run on the GPU, outside the sandbox: the learner's own runs."""
+    return [nvidia_run(), "--", *command]
+
+
+def stop_group(proc, grace=20, wait=True):
+    """End a process and everything it started: asked first, killed only if it is still there after `grace` seconds.
+    With wait=False the waiting happens on a thread of its own."""
+    def finish():
+        try:
+            proc.wait(grace)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                proc.kill()
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        proc.terminate()
+    if wait:
+        finish()
+    else:
+        threading.Thread(target=finish, daemon=True).start()
 
 
 class Sandbox:
@@ -58,8 +103,9 @@ class Sandbox:
                     paths.add(str(Path(line[7:]).resolve().parent))
         return sorted(p for p in paths if Path(p).exists())
 
-    def argv(self, command, cwd, env=None, writable=()):
-        """bwrap command line running `command` (a list) in `cwd` with `env` added to a clean environment."""
+    def argv(self, command, cwd, env=None, writable=(), gpu=False):
+        """bwrap command line running `command` (a list) in `cwd` with `env` added to a clean environment; with gpu,
+        the NVIDIA device nodes are inside and the whole of it runs under nvidia-run."""
         if not self.available():
             raise RuntimeError(self.why_not())
         args = [self.bwrap, "--unshare-all", "--die-with-parent", "--new-session", "--cap-drop", "ALL"]
@@ -75,6 +121,12 @@ class Sandbox:
             if os.path.exists("/etc/" + name):
                 args += ["--ro-bind", "/etc/" + name, "/etc/" + name]
         args += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/tmp/home"]
+        if gpu:
+            if not gpu_present():
+                raise RuntimeError("这台电脑上用不了 NVIDIA 显卡（没有 nvidia-run 或驱动的设备）")
+            for node in sorted(glob.glob("/dev/nvidia*")):
+                args += ["--dev-bind", node, node]
+            args += ["--ro-bind", "/sys", "/sys"]
         for path in self.visible():
             args += ["--ro-bind", path, path]
         for p in self.projects():
@@ -96,17 +148,20 @@ class Sandbox:
             base["RUSTUP_HOME"] = str(Path.home() / ".rustup")
         for key, value in {**base, **(env or {})}.items():
             args += ["--setenv", key, str(value)]
-        return args + ["--", *command]
+        return ([nvidia_run(), "--"] if gpu else []) + args + ["--", *command]
 
-    def shell(self, command, timeout=60, limit=24000, cwd=None, env=None):
+    def shell(self, command, timeout=60, limit=24000, cwd=None, env=None, gpu=False):
         """Run one shell command; returns its combined output, exit code and whether it was cut short."""
         started = time.monotonic()
+        proc = subprocess.Popen(self.argv(["bash", "-c", command], cwd or self.root, env, gpu=gpu), stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, start_new_session=True)
         try:
-            proc = subprocess.run(self.argv(["bash", "-c", command], cwd or self.root, env), capture_output=True, timeout=timeout,
-                                  stdin=subprocess.DEVNULL)
-            code, out, timed_out = proc.returncode, proc.stdout + (b"\n" + proc.stderr if proc.stderr else b""), False
-        except subprocess.TimeoutExpired as exc:
-            code, out, timed_out = None, (exc.stdout or b"") + (exc.stderr or b""), True
+            stdout, stderr = proc.communicate(timeout=timeout)
+            code, out, timed_out = proc.returncode, stdout + (b"\n" + stderr if stderr else b""), False
+        except subprocess.TimeoutExpired:
+            stop_group(proc)
+            stdout, stderr = proc.communicate()
+            code, out, timed_out = None, (stdout or b"") + (stderr or b""), True
         text = out.decode("utf-8", "replace")
         cut = len(text) > limit
         if cut:

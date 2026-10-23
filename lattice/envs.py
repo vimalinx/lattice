@@ -123,15 +123,49 @@ class Envs:
                 self._applied_path(name).write_text(json.dumps(wanted), encoding="utf-8")
             return str(self.python(name))
 
-    def install(self, name, packages, binary_only=True):
-        """Install packages into an environment and add them to its definition. Returns (added, output)."""
+    def _stream(self, args, timeout, progress):
+        """uv with its output read as it comes, so a long install can say how far it is."""
+        if not self.uv:
+            raise EnvError("没有找到 uv。安装方法：curl -LsSf https://astral.sh/uv/install.sh | sh，或用系统包管理器安装 uv")
+        proc = subprocess.Popen([self.uv, *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL,
+                                start_new_session=True)
+        timer = threading.Timer(timeout, proc.kill)
+        timer.start()
+        lines, sizes, done = [], {}, set()
+        try:
+            for line in proc.stdout:
+                lines.append(line)
+                found = re.match(r"\s*Downloading (\S+) \(([\d.]+)\s*([KMG]i?B)\)", line)
+                if found:
+                    sizes[found.group(1)] = float(found.group(2)) * {"K": 1 / 1024, "M": 1, "G": 1024}[found.group(3)[0]]
+                elif (found := re.match(r"\s*Downloaded (\S+)", line)):
+                    done.add(found.group(1))
+                elif not re.match(r"\s*(Resolved|Prepared|Installed|Uninstalled|Audited|Building|Built)\b", line):
+                    continue
+                if progress and sizes:
+                    total, got = sum(sizes.values()), sum(v for k, v in sizes.items() if k in done)
+                    amount = f"{got / 1024:.1f}/{total / 1024:.1f} GB" if total > 200 else f"{got:.0f}/{total:.0f} MB"
+                    progress(f"已下载 {len(done & sizes.keys())}/{len(sizes)} 个文件 · {amount}")
+                elif progress and line.strip():
+                    progress(line.strip()[:80])
+            code = proc.wait()
+        finally:
+            timer.cancel()
+        out = "".join(lines)
+        if code != 0:
+            raise EnvError(("安装超过 %d 分钟，停下了" % (timeout // 60)) if code < 0 else out.strip()[-1500:] or "uv 失败")
+        return out
+
+    def install(self, name, packages, binary_only=True, progress=None):
+        """Install packages into an environment and add them to its definition. Returns (added, output).
+        Large packages (torch with its CUDA libraries is about 3 GB) are given up to an hour; progress gets how far."""
         packages = [str(p).strip() for p in packages if str(p).strip()]
         if not packages or len(packages) > 20 or not all(REQUIREMENT.match(p) for p in packages):
             raise EnvError("请给出 1～20 个包名（可以带版本，例如 numpy>=2）")
         self.ensure(name)
         with self.lock(name):
             # Agents never run a package's own build code on this machine: wheels only.
-            out = self._run(["pip", "install", "-p", str(self.python(name)), *(["--only-binary", ":all:"] if binary_only else []), *packages])
+            out = self._stream(["pip", "install", "-p", str(self.python(name)), *(["--only-binary", ":all:"] if binary_only else []), *packages], 3600, progress)
             rel = self.definition_rel(name)
             current = self.vault.read_text(rel)
             have = set(self.wanted(name))

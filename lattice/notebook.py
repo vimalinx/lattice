@@ -24,12 +24,12 @@ MAX_OUTPUT = 8_000_000
 class NotebookWorker(QThread):
     event = Signal(dict)
 
-    def __init__(self, notebook_id, directory, python, timeout=120, wrap=None, sockets=None):
+    def __init__(self, notebook_id, directory, python, timeout=120, wrap=None, sockets=None, gpu=False):
         super().__init__()
         self.notebook_id = notebook_id
         self.directory = Path(directory)
         # python may be a callable: preparing the environment can take a while, so it happens here, off the GUI thread.
-        self.python, self.wrap, self.sockets = python, wrap, sockets
+        self.python, self.wrap, self.sockets, self.gpu = python, wrap, sockets, gpu
         self.timeout = max(3, min(int(timeout), 3600))
         self.commands = queue.Queue()
         self.cancelled = threading.Event()
@@ -77,6 +77,9 @@ class NotebookWorker(QThread):
             options = {"transport": "ipc", "ip": str(Path(self.sockets) / self.epoch[:8]),
                        "connection_file": str(Path(self.sockets) / (self.epoch[:8] + ".json"))}
         self.km = Manager(**options)
+        if self.gpu:
+            # A kernel on the GPU is asked to shut down and given time to, so nvidia-run puts the GPU back to sleep.
+            self.km.shutdown_wait_time = 25
         # Interrupts travel as a message, so they reach a kernel inside the sandbox too.
         self.km._kernel_spec = KernelSpec(argv=[], display_name="Python", language="python", interrupt_mode="message", env={})
         self.km.start_kernel(cwd=str(self.directory))
@@ -100,7 +103,7 @@ class NotebookWorker(QThread):
 
     def _restart(self):
         self.emit("status", state="restarting")
-        self.km.restart_kernel(now=True)
+        self.km.restart_kernel(now=not self.gpu)
         self.client.wait_for_ready(timeout=30)
         self.epoch = uuid.uuid4().hex
         self.cancelled.clear()
@@ -239,7 +242,7 @@ class NotebookWorker(QThread):
                 self.client.stop_channels()
             if self.km:
                 try:
-                    self.km.shutdown_kernel(now=True)
+                    self.km.shutdown_kernel(now=not self.gpu)
                 except Exception:
                     pass
             self.emit("status", state="offline")

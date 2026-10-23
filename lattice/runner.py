@@ -9,17 +9,17 @@ permissions; a run started by an agent goes through the sandbox.
 from __future__ import annotations
 
 import base64
-import os
 from pathlib import Path
 import queue
 import shlex
 import shutil
-import signal
 import subprocess
 import threading
 import time
 
 from PySide6.QtCore import QThread, Signal
+
+from .sandbox import stop_group
 
 RUNNERS = {
     ".py": "{python} -u {file}",
@@ -93,12 +93,10 @@ class RunWorker(QThread):
         self._kill()
 
     def _kill(self):
+        # Asked to end before being killed, so a run on the GPU still puts it back to sleep (see sandbox.stop_group).
         proc = self.proc
         if proc and proc.poll() is None:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                proc.kill()
+            stop_group(proc, wait=False)
 
     def run(self):
         outputs, started, state, code, used = [], time.monotonic(), "completed", None, 0
