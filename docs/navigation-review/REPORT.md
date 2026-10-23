@@ -26,7 +26,7 @@
 
 原分栏脚本 tests/gui_learning_v1.py 的布局断言已不适用，未把它报告为通过，也未新增仓库测试代码。
 
-桌面启动器 /home/vimalinx/.local/bin/lattice-learning 已核对，直接启动 /home/vimalinx/Projects/Lattice/run.py；重新启动应用会加载这些源码。没有关闭正在使用的窗口。
+桌面启动器 ~/.local/bin/lattice-learning 已核对，直接启动仓库里的 run.py；重新启动应用会加载这些源码。没有关闭正在使用的窗口。
 
 修改前六个前端文件的可恢复副本：/tmp/lattice-navigation-before-20261014-145833；manifest.json 记录原文件哈希。
 

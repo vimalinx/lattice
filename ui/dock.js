@@ -257,7 +257,7 @@ function stackEl(s,floating=null){
   node.lastElementChild.appendChild(Dock.els[s.active]);
   // Sizes measured while a panel was detached are wrong; let it fit itself once it is visible, scrolled where it was.
   const p=Dock.panels[s.active],t=Dock.types[p?.type],panel=Dock.els[s.active];
-  requestAnimationFrame(()=>{restoreScroll(panel);if(t?.shown)t.shown(p,panel);});
+  requestAnimationFrame(()=>{restoreScroll(panel);if(t?.shown)t.shown(p,panel);if(panel.querySelector(".mermaid:not([data-processed='true'])"))scheduleMermaid();});
  }
  else if(!s.tabs.length)node.lastElementChild.appendChild(h('<div class="stack-empty">'+emptyState("layout","这里是空的",s.keep?"从左栏打开的东西放在这里，也可以把标签拖进来。":"把标签拖到这里，或者从上面的「＋」打开。")+
   (s.keep?'<button class="ghost xs" data-action="stack-unkeep" data-stack="'+s.id+'">不要这一块</button>':"")+'</div>'));

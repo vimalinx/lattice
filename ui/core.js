@@ -99,14 +99,23 @@ marked.use({extensions:[{name:"strongCjk",level:"inline",start(src){const i=src.
   if(!m||/[A-Za-z0-9]/.test(prev)||/[A-Za-z0-9]/.test(src[m[0].length]||""))return;
   if(/[\u3000-\u303f\uff00-\uffef\u4e00-\u9fff]/.test(m[0]))return {type:"strong",raw:m[0],text:m[1],tokens:this.lexer.inlineTokens(m[1])};}}]});
 marked.use({renderer:{code(t){if((t.lang||"").trim().toLowerCase()==="mermaid")return '<div class="mermaid">'+esc(t.text)+'</div>';return false;}}});
-let _mmTimer=null,_mmSeq=0,_mmInited=false;
-function scheduleMermaid(){clearTimeout(_mmTimer);_mmTimer=setTimeout(runMermaid,60);}
+let _mmTimer=null,_mmSeq=0,_mmInited=false,_mmTries=0;
+function scheduleMermaid(){clearTimeout(_mmTimer);_mmTries=0;_mmTimer=setTimeout(runMermaid,60);}
 async function runMermaid(){
  if(typeof mermaid==="undefined")return;
- if(!_mmInited){_mmInited=true;try{mermaid.initialize({startOnLoad:false,theme:S.ui.theme==="dark"?"dark":"default",securityLevel:"strict",fontFamily:"inherit"});}catch(_){return;}}
+ if(!_mmInited){_mmInited=true;try{mermaid.initialize({startOnLoad:false,theme:S.ui.theme==="dark"?"dark":"default",securityLevel:"strict",fontFamily:"inherit",
+  // Drawn at their own size (a wide one scrolls sideways) rather than shrunk until the labels cannot be read.
+  ...Object.fromEntries(["flowchart","sequence","gantt","class","state","er","journey","mindmap","timeline"].map(k=>[k,{useMaxWidth:false}]))});}catch(_){return;}}
  for(const n of all(".mermaid:not([data-processed='true'])")){
+  // Measured where it is drawn: a window's own zoom and the reading font change how wide the labels come out, and
+  // labels measured elsewhere wrap onto a line their boxes have no room for. Not on the page yet: next time.
+  if(!n.isConnected||!n.offsetParent){
+   // A reply about to be put on the page is tried again shortly; one in a hidden tab waits until the tab shows.
+   if(!n.isConnected&&_mmTries++<10){clearTimeout(_mmTimer);_mmTimer=setTimeout(runMermaid,200);}
+   continue;
+  }
   n.dataset.processed="true";const src=n.textContent;
-  try{const out=await mermaid.render("mm"+(++_mmSeq),src);n.innerHTML=out.svg;}
+  try{const out=await mermaid.render("mm"+(++_mmSeq),src,n);n.innerHTML=out.svg;}
   catch(_){n.innerHTML='<pre class="mermaid-error">'+esc(src)+'</pre><small class="muted">图表语法未能解析</small>';}
  }
 }

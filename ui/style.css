@@ -1093,3 +1093,6 @@ input[type=checkbox],input[type=radio],input[type=range]{accent-color:var(--acce
 .cmp-title{display:flex;align-items:center;gap:8px}
 .cmp-title>span:first-child{display:inline-flex;align-items:center;gap:6px}
 .cmp-inline .cmp-side{background:var(--panel)}
+/* diagram labels never cut off: a label a little wider than measured shows past its box instead */
+.mermaid svg foreignObject{overflow:visible}
+.mermaid svg .nodeLabel,.mermaid svg .edgeLabel{line-height:1.5}

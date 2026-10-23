@@ -1,6 +1,6 @@
 # Lattice Learning V1 · 实测报告
 
-测试日期：2026-10-10。测试机器：vimalinxg16（Arch Linux / Wayland）。
+测试日期：2026-10-10。测试机器：一台 Arch Linux / Wayland 笔记本。
 
 ## 结果
 
