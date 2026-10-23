@@ -179,6 +179,7 @@ function messageEl(pid,m,answers){
  const fold=node.querySelector("details.actions");if(fold)fold.open=st.opened.has(String(m.id));
  const thought=node.querySelector("details.thinking-box");if(thought)thought.open=st.thoughts[m.id]??S.ui.thinking==="open";
  if(cached.blocks.length)mountBlocks(node,cached.blocks,{thread:st.thread,message:m.id,answers,pid});
+ if(meta.changes?.length)mountInlineChanges(node);
  return node;
 }
 function messageTools(pid,m){
@@ -220,11 +221,8 @@ function actionChips(actions,undone=[],live=false){
 }
 // A search result's title can be a PDF's raw bytes read as text; the site's name says more then.
 function sourceTitle(s){const t=String(s.title||"");return !t||(t.match(/[\u0080-\u00ff\ufffd]/g)||[]).length>t.length*.15?hostOf(s.url):t;}
-/* Skill changes an agent proposed in this reply: each opens side by side for review. */
-function changesHtml(list){
- return (list||[]).map(c=>'<div class="suggestion skill-change"><div class="suggestion-head">'+svg("store",13)+' '+(c.new?"提议新建技能":"提议修改技能")+'「'+esc(c.title)+'」'+
-  (c.why?'<span>'+esc(c.why)+'</span>':"")+'</div><div class="suggestion-actions">'+button(svg("split",12)+" 左右对照着审","open-change",'data-change="'+esc(c.change)+'"',"primary xs")+'</div></div>').join("");
-}
+/* Skill changes an agent proposed in this reply: each is reviewed right here, side by side (see skillchange.js). */
+function changesHtml(list){return (list||[]).map(c=>'<div class="sc-slot" data-change="'+esc(c.change)+'"></div>').join("");}
 function sourcesHtml(sources){
  if(!sources?.length)return "";
  return '<div class="sources"><span>'+svg("link",12)+' 来源</span>'+sources.map(s=>'<a data-action="open-web" data-url="'+esc(s.url)+'" title="'+esc(s.url)+'">'+esc(shorten(sourceTitle(s),48))+'</a>').join("")+'</div>';

@@ -120,9 +120,49 @@ def _guard(ctx, path):
 
 # ---- state ------------------------------------------------------------------------------------
 
-@tool("screen", ALL, "学习者此刻的界面：开着哪些面板、哪个在前台、每个文件看到哪一节或哪几格、光标和选中的内容、没保存的草稿、阅读器里开着的网页（哪一页、读到哪一节、顶上那段话）、最近看过的文件和停留时间、正在运行什么和最近一次运行的结果。只有位置和摘要；要看全文用 read、conversation 或 web_fetch。")
+@tool("screen", ALL, "学习者此刻的界面：开着哪些面板、哪个在前台、每个文件看到哪一节或哪几格、光标和选中的内容、没保存的草稿、阅读器里开着的网页（哪一页、读到哪一节、顶上那段话）、最近看过的文件和停留时间、正在运行什么和最近一次运行的结果。只有位置和摘要；要看全文用 read、conversation 或 web_fetch。layout.windows 是每个在显示的窗口的位置和大小（占整个窗口区域的比例，x、y 从左上角算）；around_you 是从你这段对话的窗口看出去，其余每个窗口在哪一边（左边、右下方、浮在上面…）、是不是紧挨着你、多大，挨着的排在前面。学习者说「右边那个」「下面的笔记」时照这个找。")
 def screen(ctx):
-    return ctx.bridge.screen_state()
+    state = ctx.bridge.screen_state()
+    around = _around(ctx, (state.get("layout") or {}).get("windows") or [])
+    return {**state, **({"around_you": around} if around else {})}
+
+
+def _around(ctx, windows):
+    """Where every other window on show is, seen from this conversation's own window: which side, whether they touch,
+    and how big. Positions are shares of the window area (x, y from the top left)."""
+    mine = next((w for w in windows if w.get("type") == "chat" and w.get("thread") == ctx.thread), None) or \
+        next((w for w in windows if w.get("type") == "chat" and w.get("agent") == ctx.agent), None)
+    if not mine:
+        return None
+    eps = 0.01
+    cx, cy = mine["x"] + mine["w"] / 2, mine["y"] + mine["h"] / 2
+    out = []
+    for w in windows:
+        if w is mine:
+            continue
+        sides = []
+        if w["x"] + w["w"] <= mine["x"] + eps:
+            sides.append("左边")
+        elif w["x"] >= mine["x"] + mine["w"] - eps:
+            sides.append("右边")
+        if w["y"] + w["h"] <= mine["y"] + eps:
+            sides.append("上面")
+        elif w["y"] >= mine["y"] + mine["h"] - eps:
+            sides.append("下面")
+        if w.get("floating"):
+            where = "浮在上面" + ("，偏" + ("左" if w["x"] + w["w"] / 2 < cx else "右") if abs(w["x"] + w["w"] / 2 - cx) > .1 else "")
+        elif not sides:
+            where = "和你重叠"
+        else:
+            where = "".join(sides) if len(sides) == 1 else sides[0][0] + sides[1][0] + "方"
+        touch = (abs(w["x"] + w["w"] - mine["x"]) < eps or abs(mine["x"] + mine["w"] - w["x"]) < eps) and w["y"] < mine["y"] + mine["h"] - eps and mine["y"] < w["y"] + w["h"] - eps or \
+                (abs(w["y"] + w["h"] - mine["y"]) < eps or abs(mine["y"] + mine["h"] - w["y"]) < eps) and w["x"] < mine["x"] + mine["w"] - eps and mine["x"] < w["x"] + w["w"] - eps
+        out.append({"id": w["id"], "title": w["title"], "type": w["type"], "where": where, "next_to_you": bool(touch and not w.get("floating")),
+                    "size": f"{round(w['w'] * 100)}% 宽 × {round(w['h'] * 100)}% 高",
+                    "distance": round(((w["x"] + w["w"] / 2 - cx) ** 2 + (w["y"] + w["h"] / 2 - cy) ** 2) ** .5, 2)})
+    out.sort(key=lambda r: (not r["next_to_you"], r["distance"]))
+    return {"you": {"id": mine["id"], "title": mine["title"], "x": mine["x"], "y": mine["y"], "size": f"{round(mine['w'] * 100)}% 宽 × {round(mine['h'] * 100)}% 高"},
+            "others": out}
 
 
 @tool("skill", ALL, "读学习库里装的一个技能的完整做法（技能列表在系统说明的「技能」一节）。name 是技能名；file 给出时读它附带的那个文件（模板、清单、例子）。读到以后照着做。",
@@ -529,10 +569,11 @@ def open_file(ctx, file, line=None, highlight=None, cell=None):
       "学习者在左右对照里看你改了哪里（删的标红、加的标绿），可以接着改、换回原文或者不用，批准了才生效，每次修改都留历史。"
       "name 是技能名；file 默认 SKILL.md，也可以是它附带的文件；给 content 就是改后的全文（SKILL.md 可以只写正文，开头的属性没写的会保留原来的），或者给 edits（[{old, new}]，"
       "每个 old 必须在原文里恰好出现一次）；why 用一句话说为什么这样改。new 为 true 时是新建一个技能：name 是它的名字，"
-      "content 是完整的 SKILL.md（开头的属性要有 name、title、description、category）。",
-      {"name": S, "why": S, "file": S, "content": S, "new": {"type": "boolean"},
+      "content 是完整的 SKILL.md（开头的属性要有 name、title、description、category）。"
+      "questions 给两三个最能看出这次改动效果的问题（学习者真会这样问的话，简短）：学习者点一个，就用改前改后两版技能各回答一次来对比。",
+      {"name": S, "why": S, "file": S, "content": S, "new": {"type": "boolean"}, "questions": {"type": "array", "items": S},
        "edits": {"type": "array", "items": {"type": "object", "properties": {"old": S, "new": S}, "required": ["old", "new"]}}}, ["name", "why"])
-def skill_edit(ctx, name, why, file="SKILL.md", content=None, edits=None, new=False):
+def skill_edit(ctx, name, why, file="SKILL.md", content=None, edits=None, new=False, questions=None):
     slug, title, rel = skillbook.change_target(ctx.l.root, name, file, bool(new))
     base = ctx.l.vault.read_text(rel) if ctx.l.vault.path(rel).exists() else ""
     if content is None and not edits:
@@ -546,7 +587,8 @@ def skill_edit(ctx, name, why, file="SKILL.md", content=None, edits=None, new=Fa
             if after == base:
                 raise ValueError("改完和原来一样")
         skillbook.check_page(after)
-    change = ctx.bridge.propose_skill_change(slug, title, rel, base, after, text(why, 500), ctx.agent, ctx.thread)
+    asks = [text(str(q), 300).strip() for q in (questions or []) if str(q).strip()][:4]
+    change = ctx.bridge.propose_skill_change(slug, title, rel, base, after, text(why, 500), ctx.agent, ctx.thread, asks)
     ctx.turn.changes.append({"change": change, "skill": slug, "title": title, "file": rel, "why": text(why, 500), "new": not base})
     return {"change": change, "note": "已经在学习者那边打开了左右对照，等 TA 审；批准之前技能还是原来的样子，不要当成已经改好了"}
 

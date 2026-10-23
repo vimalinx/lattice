@@ -1074,3 +1074,22 @@ input[type=checkbox],input[type=radio],input[type=range]{accent-color:var(--acce
 .skp-edit .cm-host,.skp-edit .cm-editor{min-height:100%}
 .skp-edit .cm-host.editor.cm-md .cm-content{padding:14px 22px 30vh}
 .skp-state{font-size:12px;color:var(--ai)}
+.sc-try{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:2px}
+.sc-try>span{font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:4px}
+.sc-try .chip{font-size:12px;padding:3px 10px;color:var(--ai);border-color:color-mix(in srgb,var(--ai) 35%,transparent);background:var(--ai-glow);max-width:100%;white-space:normal;text-align:left}
+.sc-try .chip:hover{border-color:var(--ai)}
+/* the review and its comparisons inside a reply */
+.sc-slot{margin:12px 0 4px}
+.sc.sc-inline{height:auto;display:block;border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow:hidden}
+.sc-inline .sc-head{padding:12px 14px 10px}
+.sc-inline .sc-cols{padding:8px 12px 4px}
+.sc-inline .sc-merge{height:min(440px,55vh);margin:0 12px}
+.sc-inline .sc-foot{padding:10px 12px}
+.sc-compares{display:grid;gap:10px;padding:0 12px}
+.sc-compares:not(:empty){padding-bottom:12px}
+.cmp.cmp-inline{height:auto;display:block;border:1px solid var(--line-soft);border-radius:12px;background:var(--panel-hi)}
+.cmp-inline .cmp-head{padding:10px 12px}
+.cmp-inline .cmp-cols{height:min(480px,60vh);padding:10px 12px}
+.cmp-title{display:flex;align-items:center;gap:8px}
+.cmp-title>span:first-child{display:inline-flex;align-items:center;gap:6px}
+.cmp-inline .cmp-side{background:var(--panel)}

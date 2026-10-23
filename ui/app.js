@@ -138,7 +138,14 @@ function sendScreen(){
  const stacks=[];eachStack((s,f)=>stacks.push({tabs:s.tabs.map(pid=>({id:pid,title:panelTitle(pid),type:Dock.panels[pid].type,zoom:Math.round(zoomOf(Dock.panels[pid])*100)+"%"})),showing:s.active,floating:!!f}));
  const shown=[];eachStack(s=>{if(s.active)shown.push(s.active);});
  const mine=shown.filter(pid=>sideOf(pid)==="mine").map(screenOf),ai=shown.filter(pid=>sideOf(pid)==="ai").map(screenOf);
- const state={layout:{stacks,focused:Dock.focus||null,nesting:layoutShape(Dock.layout.root)},ai:{panels:ai},mine:{files:mine.filter(x=>x.type==="file"),other:mine.filter(x=>x.type!=="file")},
+ // Where each window on show sits, as shares of the window area, so an agent can tell what is beside it.
+ const area=el("#dock")?.getBoundingClientRect(),windows=area?.width?shown.map(pid=>{
+  const r=Dock.els[pid]?.getBoundingClientRect();if(!r?.width)return null;const p=Dock.panels[pid];
+  return {id:pid,title:panelTitle(pid),type:p.type,...(p.type==="chat"?{agent:p.agent,thread:Chat[pid]?.thread||p.thread||null}:{}),
+   floating:Dock.layout.floats.some(f=>f.stack.tabs.includes(pid)),
+   x:+((r.left-area.left)/area.width).toFixed(3),y:+((r.top-area.top)/area.height).toFixed(3),w:+(r.width/area.width).toFixed(3),h:+(r.height/area.height).toFixed(3)};
+ }).filter(Boolean):[];
+ const state={layout:{stacks,focused:Dock.focus||null,nesting:layoutShape(Dock.layout.root),windows},ai:{panels:ai},mine:{files:mine.filter(x=>x.type==="file"),other:mine.filter(x=>x.type!=="file")},
   look:{base:S.ui.theme,theme:S.ui.theme_custom||"默认",...(activeTheme()?{vars:activeTheme().vars,font:activeTheme().font||undefined,css:activeTheme().css?activeTheme().css.slice(0,600):undefined}:{}),saved:Object.keys(S.ui.themes||{})},
   workspace:{now:currentSpace().name,sidebar:sideOpen()?(currentSpace().side||[]):"收起",all:visibleSpaces().map(x=>x.name)},theme:S.ui.theme,
   open_but_hidden:stacks.flatMap(s=>s.tabs).filter(t=>!shown.includes(t.id)).map(t=>t.title),recent_files:Dwell.recent.slice(0,20),selection:Sel.text?shorten(Sel.text,600):undefined};
@@ -324,10 +331,10 @@ async function onAction(a){
   return go();
  }
  case "theme-color":return themeColorPick(a);
- case "sc-all-left":case "sc-reset":case "sc-rebase":case "sc-history":case "sc-compare":case "sc-dismiss":case "sc-approve":return changeAction(kind,a);
+ case "sc-window":case "sc-all-left":case "sc-reset":case "sc-rebase":case "sc-history":case "sc-compare":case "sc-try-q":case "sc-dismiss":case "sc-approve":return changeAction(kind,a);
  case "sc-restore":return restoreVersion(a);
  case "open-change":return wideWindow(openPanel({type:"skillchange",change:a.dataset.change}));
- case "cmp-stop":case "cmp-edit":case "cmp-pick":return compareAction(kind,a);
+ case "cmp-stop":case "cmp-window":case "cmp-pick":return compareAction(kind,a);
  case "organizer-dismiss":Organizer.text="";return renderOrganizer();
  case "topic-focus":{await rpc("focus",{topic:a.dataset.id});await refreshState();followingPanels().forEach(x=>loadChat(x));
   let tutor=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="tutor"&&!Dock.panels[x].thread);if(!tutor)openPanel({type:"chat",agent:"tutor"});else activate(tutor);return;}
@@ -446,6 +453,7 @@ function initInteractions(){
  });
  document.addEventListener("mouseup",e=>{if(e.button!==2)setTimeout(()=>onSelect(e),0);});
  document.addEventListener("scroll",()=>{hidePop();reportScreen();},true);
+ addEventListener("resize",reportScreen);
  document.addEventListener("focusin",()=>reportScreen());
  setInterval(trackDwell,2000);
  setInterval(()=>safe(flushAll),25000);

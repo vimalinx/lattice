@@ -423,16 +423,20 @@ class Bridge(QObject):
 
     # ---- changing a skill: proposed (by an agent, or by the learner restoring a version), reviewed side by side,
     # approved or dismissed. Proposals and decisions are journal entries, so every change keeps its history.
-    def propose_skill_change(self, slug, title, rel, base, after, why, by, thread=None):
+    def propose_skill_change(self, slug, title, rel, base, after, why, by, thread=None, questions=()):
         ident = uid()
         self.lattice.record("skill_proposed", {"change": ident, "skill": slug, "title": title, "file": rel, "base": base, "proposed": after,
-                                               "why": why, "by": by, "thread": thread}, by, [rel, "skillchange:" + ident, *([thread] if thread else [])])
+                                               "why": why, "by": by, "thread": thread, "questions": list(questions)}, by, [rel, "skillchange:" + ident, *([thread] if thread else [])])
         self.announce({"type": "skill_change", "change": ident, "state": "open", "by": by})
         return ident
 
     def rpc_skill_change(self, id):
         l = self.lattice
-        entries = l.journal(["skill_proposed", "skill_changed", "skill_change_dismissed"], ref="skillchange:" + str(id), limit=10)
+        entries = l.journal(["skill_proposed", "skill_changed", "skill_change_dismissed", "skill_compare_done", "skill_compared"], ref="skillchange:" + str(id), limit=60)
+        picked = {e["data"].get("compare"): e["data"].get("picked") for e in entries if e["type"] == "skill_compared"}
+        compares = [{"id": e["data"]["compare"], "question": e["data"]["question"], "thread": e["data"].get("thread"), "a": e["data"]["a"], "b": e["data"]["b"],
+                     "picked": picked.get(e["data"]["compare"])} for e in entries if e["type"] == "skill_compare_done"]
+        entries = [e for e in entries if e["type"] in ("skill_proposed", "skill_changed", "skill_change_dismissed")]
         proposed = next((e for e in entries if e["type"] == "skill_proposed"), None)
         if not proposed:
             raise ValueError("找不到这次修改")
@@ -441,7 +445,7 @@ class Bridge(QObject):
         current = l.vault.read_text(d["file"]) if l.vault.path(d["file"]).exists() else ""
         return {**d, "id": id, "at": proposed["at"], "current": current,
                 "state": {"skill_changed": "approved", "skill_change_dismissed": "dismissed"}.get(decided["type"], "open") if decided else "open",
-                **({"decided_at": decided["at"], "final": decided["data"].get("after")} if decided else {})}
+                **({"decided_at": decided["at"], "final": decided["data"].get("after")} if decided else {}), "compares": compares}
 
     def rpc_skill_propose(self, slug, content=None, why="", file="SKILL.md"):
         """The learner's own change, e.g. bringing back an older version: reviewed the same way as an agent's.
@@ -505,7 +509,7 @@ class Bridge(QObject):
             v["current"] = i == 0 and vault.at(v["commit"], v["path"]) == current
         return versions
 
-    def rpc_skill_compare(self, slug, a, b, thread=None, message=""):
+    def rpc_skill_compare(self, slug, a, b, thread=None, message="", change=None):
         """Continue one conversation twice, once with each version of a skill's instructions, without tools and without
         writing anything to the conversation; the learner then picks one side (or edits it) or neither."""
         l, found = self.lattice, skills.find(self.root, slug)
@@ -527,7 +531,7 @@ class Bridge(QObject):
         if not conn["api_key"]:
             raise ValueError(f"请先在设置里给{AGENT_NAMES[agent]}填写 {conn['label']} 的 API Key")
         ident = uid()
-        self.compares[ident] = {"thread": thread, "agent": agent, "question": question, "skill": found["slug"]}
+        self.compares[ident] = {"thread": thread, "agent": agent, "question": question, "skill": found["slug"], "change": change}
         for side, page in (("a", a), ("b", b)):
             version = {**found, "body": skills.check_page(page)}
             user, system = self._compose(definition, thread, head.get("topic"), None, question, "", "", [], "",
@@ -568,7 +572,8 @@ class Bridge(QObject):
         edited = content != (found.get(side) or {}).get("text", "").strip()
         message = l.append_message(found["thread"], "assistant", content, {"agent": found["agent"], "compare": {"id": id, "side": side, "edited": edited},
                                                                           **({"retry": True} if again and last < len(msgs) - 1 else {})})
-        l.record("skill_compared", {"skill": found["skill"], "picked": side, "edited": edited, "question": found["question"][:400]}, "me", [found["thread"]])
+        l.record("skill_compared", {"compare": id, "change": found.get("change"), "skill": found["skill"], "picked": side, "edited": edited, "question": found["question"][:400]},
+                 "me", [found["thread"], "compare:" + str(id), *(["skillchange:" + found["change"]] if found.get("change") else [])])
         self.announce({"type": "agent", "kind": "finished", "agent": found["agent"], "thread": found["thread"], "text": content})
         return {"message": message, "thread": found["thread"]}
 
@@ -1394,8 +1399,14 @@ class Bridge(QObject):
             if evt["kind"] == "finished":
                 self._record_usage(evt.get("agent"), thread, evt.get("usage"))
                 ident, side = thread.split(":")[1:3]
-                if ident in self.compares:
-                    self.compares[ident][side] = {"text": evt.get("text", ""), "done": True, "stop_reason": evt.get("stop_reason")}
+                found = self.compares.get(ident)
+                if found:
+                    found[side] = {"text": evt.get("text", ""), "done": True, "stop_reason": evt.get("stop_reason")}
+                    # Both sides written: kept with the proposal it tried, so its review shows it again later.
+                    if all((found.get(s) or {}).get("done") for s in ("a", "b")):
+                        self.lattice.record("skill_compare_done", {"compare": ident, "change": found.get("change"), "skill": found["skill"], "thread": found["thread"],
+                                                                   "question": found["question"][:2000], "a": found["a"]["text"], "b": found["b"]["text"]},
+                                            "me", ["compare:" + ident, *(["skillchange:" + found["change"]] if found.get("change") else [])])
                 # The thread is still winding down when it reports finishing; it is let go only once it has stopped.
                 self._retire(self.workers.pop(thread, None))
             self.announce(evt)

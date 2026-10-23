@@ -92,7 +92,8 @@ def prompt_section(root, agent):
     lines = "\n".join(f"- {s['name']}（{s['title']}）：{s['description']}" for s in skills)
     return ("# 技能\n学习库里装了下面这些技能，每个是做某一类事的完整做法。学习者的请求正好是某个技能管的事时，先用 skill 读它的完整说明，"
             "再照着做（说明里提到的附带文件用 skill 的 file 读）；学习者点名用某个技能时一定要用。不相干时不用，也不要为了用而用。"
-            "学习者让你改一个技能、或者用下来发现它的做法有问题时，用 skill_edit 提出修改（不要用 write 或 edit），由学习者审过批准。\n" + lines)
+            "学习者让你改一个技能、或者用下来发现它的做法有问题时，用 skill_edit 提出修改（不要用 write 或 edit），由学习者审过批准；"
+            "同时用 questions 给两三个最能看出改动效果的问题，方便学习者点了就对比两版。\n" + lines)
 
 
 def instructions(skill):
