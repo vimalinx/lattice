@@ -16,7 +16,7 @@ from pathlib import Path
 
 from . import agents
 from . import skills as skillbook
-from .model import AGENT_RECORDS, LINK_KINDS, readable_outputs, text, title_of
+from .model import AGENT_RECORDS, CARD_TYPES, LINK_KINDS, readable_outputs, text, title_of
 from .vault import APPEND_ONLY, kind_of, slug, split_frontmatter
 
 ALL = {"tutor", "flash", "coach", "organizer"}
@@ -36,6 +36,7 @@ class Turn:
         self.actions, self.sources, self.suggestions, self.after, self.carry = [], [], [], [], []
         self.changes = []   # proposed skill changes, waiting for the learner
         self.skills = []    # skills this turn followed, shown at the top of the reply
+        self.cards = []     # cards saved or added to
         self.focus = None
         self.refocus = False
 
@@ -463,9 +464,11 @@ def unlink(ctx, id):
     return {"ok": True}
 
 
-@tool("save_knowledge", {"tutor", "organizer"}, "把已经讲过、学习者也回应过的内容存进学习库（直接保存，学习者可以撤销）。lessons 是值得以后回看的完整讲解；cards 一张一个脱离对话也成立的知识点（已有同名卡时内容作为补充附在后面）；notes 是依赖情境的经验；relations 同 link。都归到当前主题下。",
+@tool("save_knowledge", {"tutor", "organizer"}, "把讲过的内容存进学习库（直接保存，学习者可以撤销）。lessons 是值得以后回看的完整讲解；cards 一张一个脱离对话也成立的知识点"
+      "（type：concept 概念「是什么」、principle 原理「为什么成立」、method 方法「怎么做」、idea 思想「看问题的角度」、fact 要记住的事实；"
+      "area 是它所属的领域，几个字，沿用已有卡片的领域名；已有同名卡时内容作为补充附在后面）；notes 是依赖情境的经验；relations 同 link，title 也可以。都归到当前主题下。",
       {"lessons": {"type": "array", "items": _obj({"title": S, "objective": S, "body": S}, ["title", "body"])},
-       "cards": {"type": "array", "items": _obj({"title": S, "body": S, "question": S, "tags": LIST}, ["title", "body"])},
+       "cards": {"type": "array", "items": _obj({"title": S, "body": S, "question": S, "type": {"type": "string", "enum": list(CARD_TYPES)}, "area": S, "tags": LIST}, ["title", "body", "type"])},
        "notes": {"type": "array", "items": _obj({"title": S, "body": S, "folder": S}, ["title", "body"])},
        "relations": {"type": "array", "items": _obj({"source": S, "target": S, "kind": S, "why": S}, ["source", "target", "kind"])}})
 def save_knowledge(ctx, lessons=(), cards=(), notes=(), relations=()):
@@ -480,6 +483,7 @@ def save_knowledge(ctx, lessons=(), cards=(), notes=(), relations=()):
         existed = l.index.one("SELECT id FROM docs WHERE kind='card' AND lower(title)=lower(?)", (title_of(item["title"]),))
         card = l.card_save({**item, "topic": ctx.topic, "stage": "seen"}, ctx.agent)
         done["supplements" if existed else "cards"].append(card["id"])
+        ctx.turn.cards.append({"id": card["id"], "title": card["title"], "type": card.get("type"), "area": card.get("area"), "new": not existed})
     for item in notes:
         rel = l.note_create(item["title"], item["body"], item.get("folder") or "经验", ["AI"], ctx.agent, ctx.topic)
         done["notes"].append(rel)

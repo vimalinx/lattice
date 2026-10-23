@@ -184,6 +184,7 @@ async function onEvent(evt){
  if(evt.type==="agent"&&String(evt.thread||"").startsWith("compare:"))return compareEvent(evt);
  if(evt.type==="agent")return chatEvent(evt);
  if(evt.type==="skill_change"){skillsChanged();return skillChangeEvent(evt);}
+ if(evt.type==="cards"){refreshState();for(const pid of Object.keys(Chat))if(Chat[pid].thread===evt.thread)loadChat(pid);return;}
  if(evt.type==="run")return runEvent(evt);
  if(evt.type==="kernel"){kernelEvent(evt);if(["run_finished","batch_finished"].includes(evt.kind))journalsChanged();return;}
  if(evt.type==="notice"){toast(evt.message);return;}
@@ -219,6 +220,7 @@ async function onAction(a){
  case "side-collapse":return setSideOpen(false);
  case "side-stage":Side.stage=a.dataset.stage;return renderSide();
  case "lib-stage":if(Dock.panels[pid]){Dock.panels[pid].stage=a.dataset.stage;saveLayout();renderLibrary(pid);}return;
+ case "lib-type":if(Dock.panels[pid]){Dock.panels[pid].ctype=a.dataset.ctype;saveLayout();renderLibrary(pid);}return;
  case "open-home":return openPanel({type:"home"});
  case "ui-restore":return restoreUi(a.dataset.snapshot);
  case "new-note":return newScratch("note");

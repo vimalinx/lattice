@@ -140,7 +140,7 @@ function chatHead(pid){
     button(svg("check",13)+" 结束并复盘","practice-end",'data-pid="'+pid+'"',"primary sm"):'<span class="chip">'+(pr.state==="reviewing"?"主会话复盘中":"已复盘")+'</span>')+'</div>';
  }
  const topic=d.head?.topic;
- const tools=(p.agent==="tutor"?iconButton("book","chat-task","提炼知识卡",'data-pid="'+pid+'" data-task="capture"'):"")+iconButton("edit","chat-new","开新会话",'data-pid="'+pid+'"')+
+ const tools=iconButton("edit","chat-new","开新会话",'data-pid="'+pid+'"')+
   iconButton("dots","chat-more","显示和更多",'data-pid="'+pid+'"');
  return '<button class="topic-chip'+(topic?"":" quiet")+'" data-action="chat-topic-menu" data-pid="'+pid+'" title="这段对话属于哪个主题">'+svg(topic?"map":"bot",12)+'<span>'+esc(topic?topicTitle(topic):"默认对话")+'</span>'+svg("chevrondown",11)+'</button>'+
   '<div class="chat-tools">'+tools+'</div>';
@@ -156,7 +156,7 @@ function messageEl(pid,m,answers){
  const st=Chat[pid],p=Dock.panels[pid],meta=m.meta||{},list=st.data.messages,at=list.indexOf(m),next=list[at+1];
  // A reply that broke off: the last one can be answered again; one already answered again says so.
  const redone=m.role==="assistant"&&next?.role==="assistant"&&next.meta?.retry,canRetry=!next&&!st.data.busy;
- const key=m.id+"|"+m.content.length+"|"+redone+"|"+canRetry+"|"+(st.data.undone||[]).length+"|"+JSON.stringify(st.data.decisions||{}).length+"|"+Object.keys(answers).length+"|"+S.ui.thinking;
+ const key=m.id+"|"+m.content.length+"|"+redone+"|"+canRetry+"|"+(st.data.undone||[]).length+"|"+JSON.stringify(st.data.decisions||{}).length+"|"+Object.keys(answers).length+"|"+S.ui.thinking+"|"+(st.data.cards?.[m.id]||[]).length;
  let cached=st.cache[m.id];
  if(!cached||cached.key!==key){
   const mine=m.role==="user";
@@ -172,7 +172,7 @@ function messageEl(pid,m,answers){
    :'<div class="msg from-ai" data-mid="'+m.id+'">'+skillsUsed(meta.skills||olderSkills(list,at))+thinkingHtml(meta.thinking,meta.think_seconds)+'<div class="markdown msg-body">'+r.html+'</div>'+
     (redone?'<div class="msg-note">这次没有答完，下面是重新回答的</div>':incomplete?'<div class="msg-note">'+esc(meta.stop_reason==="cancelled"?"已停止 · 保留了部分回答":meta.stop_reason==="max_tokens"?"达到回复长度上限":"没有正常结束 · 只保留了收到的部分")+
      (canRetry?button(svg("refresh",12)+" 重新回答","chat-retry",'data-pid="'+pid+'"',"ghost xs"):"")+'</div>':"")+
-    actionChips((meta.actions||[]).filter(a=>!String(a.ref||"").startsWith("skill:")),st.data.undone||[])+sourcesHtml(meta.sources)+suggestionsHtml(pid,m)+changesHtml(meta.changes)+foot+'</div>';
+    actionChips((meta.actions||[]).filter(a=>!String(a.ref||"").startsWith("skill:")),st.data.undone||[])+sourcesHtml(meta.sources)+cardsNoted(st.data.cards?.[m.id])+suggestionsHtml(pid,m)+changesHtml(meta.changes)+foot+'</div>';
   cached=st.cache[m.id]={key,html,blocks:r.blocks};
  }
  const node=h(cached.html);
@@ -223,6 +223,13 @@ function actionChips(actions,undone=[],live=false){
 // A search result's title can be a PDF's raw bytes read as text; the site's name says more then.
 function sourceTitle(s){const t=String(s.title||"");return !t||(t.match(/[\u0080-\u00ff\ufffd]/g)||[]).length>t.length*.15?hostOf(s.url):t;}
 /* Skill changes an agent proposed in this reply: each is reviewed right here, side by side (see skillchange.js). */
+// The cards the organizer noted from a reply, by kind; each opens.
+function cardsNoted(list){
+ if(!list?.length)return "";
+ const seen=new Set(),cards=list.filter(c=>!seen.has(c.id)&&seen.add(c.id));
+ return '<div class="cards-noted"><span>'+svg("card",12)+' 记下了</span>'+cards.map(c=>'<a data-action="open-doc" data-id="'+esc(c.id)+'" data-tip="'+esc((c.new?"新卡":"补充到已有的卡")+(c.area?" · "+c.area:""))+'">'+
+  (c.type?'<i class="ct ct-'+esc(c.type)+'">'+esc(cardTypeName[c.type]||c.type)+'</i>':"")+esc(c.title)+(c.new?"":'<small>补充</small>')+'</a>').join("")+'</div>';
+}
 function changesHtml(list){return (list||[]).map(c=>'<div class="sc-slot" data-change="'+esc(c.change)+'"></div>').join("");}
 function sourcesHtml(sources){
  if(!sources?.length)return "";
@@ -443,7 +450,7 @@ function chatEvent(evt){
    }else loadChat(pid);
   }
  }
- if(evt.kind==="finished"&&evt.agent==="organizer")organizeFinished(evt);
+ if(evt.kind==="finished"&&evt.agent==="organizer"&&!evt.cards_for)organizeFinished(evt);
  if(evt.kind==="finished")refreshState();
 }
 async function startPractice(pid,mid){
@@ -526,7 +533,7 @@ function chatMoreMenu(pid,anchor){
   row("代码字号",step("ui-step","code_font_size",-1,"−")+'<b>'+(Number(u.code_font_size)||13)+'</b>'+step("ui-step","code_font_size",1,"+"))+
   row("密度",seg("ui-set","density",u.density||"comfortable",[["comfortable","舒适"],["compact","紧凑"]]))+
   row("明暗",seg("ui-set","theme",u.theme||"dark",[["dark","深色"],["light","浅色"]]))+
-  '<hr/>'+(p.agent==="coach"?"":item("edit","开新会话","chat-new"))+(p.agent==="tutor"?item("book","提炼知识卡","chat-task",'data-task="capture"'):"")+
+  '<hr/>'+(p.agent==="coach"?"":item("edit","开新会话","chat-new"))+(p.agent==="tutor"?item("book","把整段对话补记成卡","chat-task",'data-task="capture"'):"")+
   item("bot","换这个窗口的模型…","chat-model")+item("copy","复制整段对话","chat-copy-all")+
   (()=>{const u=threadUsage(st);return '<button data-action="open-settings" data-page="usage" data-tip="'+esc(u?usageTip(u):"这段对话还没有用量记录")+'">'+svg("bars",14)+'<span>这段对话用了 '+(u?(u.estimated?"≈":"")+tokenNum(u.input+u.output)+" tokens<small>"+tokenNum(u.input)+" 入 · "+tokenNum(u.output)+" 出 · 点开看全部用量</small>":"0 tokens")+'</span></button>';})()+item("document","把这段对话存成笔记","chat-save-note")+
   (st.data?.head?.topic?'<button data-action="open-doc" data-id="'+esc(st.data.head.topic)+'">'+svg("map",14)+'<span>打开主题页</span></button>':"")+

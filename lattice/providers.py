@@ -138,6 +138,7 @@ DEFAULTS = {
     "gpu_launcher": "auto",
     # Closing a file the learner just wrote hands it to the organizer.
     "agent_auto_organize": True,
+    "auto_cards": True,
     # A missing Python module is installed into the vault's environment and the run repeated.
     "auto_install": True,
     "web": {"search": "duckduckgo", "searxng_url": "", "brave_key": "", "tavily_key": ""},
@@ -517,7 +518,7 @@ class Config:
         for key in ("kernel_timeout", "run_timeout"):
             updated[key] = max(3, min(int(updated[key]), 3600))
         updated["shell_timeout"] = max(3, min(int(updated["shell_timeout"]), 600))
-        for key in ("agent_auto_run", "agent_auto_organize", "auto_install", "gpu"):
+        for key in ("agent_auto_run", "agent_auto_organize", "auto_cards", "auto_install", "gpu"):
             updated[key] = bool(updated[key])
         if not isinstance(updated["runners"], dict) or not all(re.fullmatch(r"\.[\w+-]{1,12}", k) and isinstance(v, str) for k, v in updated["runners"].items()):
             raise ValueError("运行器应为「扩展名 → 命令」的对象，例如 {\".lua\": \"lua {file}\"}")

@@ -98,6 +98,7 @@ class Bridge(QObject):
         self.checking = {}
         # Skill comparisons: id -> the conversation they continue and what each side wrote.
         self.compares = {}
+        self.card_jobs, self.card_running = [], {}   # stretches of explanation waiting to be noted as cards
         self.failures = {}   # thread -> why its last turn failed, until the next one goes through
         self.reviews = {}
         self.runs, self.kernels, self.kernel_states, self.batches = {}, {}, {}, {}
@@ -352,7 +353,8 @@ class Bridge(QObject):
         if kind == "card":
             card = l.card(ident)
             l.card_save({"id": ident, "title": fields.get("title", card["title"]), "body": fields.get("body", card["body"]),
-                         "question": fields.get("question", card["question"]), "tags": fields.get("tags", card["tags"])}, "me")
+                         "question": fields.get("question", card["question"]), "tags": fields.get("tags", card["tags"]),
+                         **{k: fields[k] for k in ("type", "area") if k in fields}}, "me")
         elif kind == "topic":
             change = {k: fields[k] for k in ("title", "question", "state") if k in fields}
             if "body" in fields:
@@ -1353,7 +1355,11 @@ class Bridge(QObject):
         # Questions of this conversation answered in another one (the quick-answer side checks them, not the tutor).
         answers = {f"{d['message']}:{d['block']}": d["text"] for d in (e["data"] for e in l.journal("answered", ref=thread, limit=300))
                    if d.get("source") == thread and "message" in d}
-        return {"thread": thread, "head": head, "messages": l.messages(thread), "busy": thread in self.busy, "status": self.status.get(thread),
+        # Cards noted from each reply while learning, newest last.
+        cards = {}
+        for e in reversed(l.journal("carded", ref=thread, limit=300)):
+            cards.setdefault(str(e["data"].get("message")), []).extend(e["data"].get("cards") or [])
+        return {"thread": thread, "head": head, "messages": l.messages(thread), "busy": thread in self.busy, "status": self.status.get(thread), "cards": cards,
                 **({"failure": self.failures[thread]} if thread in self.failures else {}),
                 "undone": sorted(l.undone()), "decisions": decisions, "answers": answers,
                 "practice": l.practice(thread) if head.get("practice") else None}
@@ -1709,7 +1715,17 @@ class Bridge(QObject):
                 evt["moved_to"] = target
             l.focus(target_topic)
             evt["focus"] = target_topic or ""
-        if agent == "organizer" and turn.actions:
+        if agent == "tutor" and reason == "end_turn" and evt.get("message") and len(body.strip()) >= 200 and self.config.read().get("auto_cards", True):
+            home = evt.get("moved_to") or thread
+            if not {"trial", "practice"} & set(l.thread_head(home)):
+                self.card_jobs.append({"thread": home, "message": evt["message"], "topic": evt.get("focus", topic) if turn.refocus else topic})
+        job = self.card_running.pop(thread, None) if agent == "organizer" else None
+        if job:
+            evt["cards_for"] = job["thread"]   # shown under the reply it came from, not as a tidying notice
+        if job and turn.cards:
+            l.record("carded", {"message": job["message"], "cards": turn.cards}, "organizer", [job["thread"], *(c["id"] for c in turn.cards)])
+            self.announce({"type": "cards", "thread": job["thread"], "message": job["message"], "cards": turn.cards})
+        if agent == "organizer" and turn.actions and not job:
             l.record("organized", {"summary": (body.strip().splitlines() or [""])[-1][:400], "actions": [a["summary"] for a in turn.actions]},
                      agent, [a["ref"][5:] for a in turn.actions if (a.get("ref") or "").startswith("file:")][:5] + [thread])
         for job in turn.after:
@@ -1719,19 +1735,47 @@ class Bridge(QObject):
                 errors.append(str(exc))
         if errors:
             evt["errors"] = errors
+        if agent in ("tutor", "organizer") and self.card_jobs:
+            QTimer.singleShot(0, self.next_cards)
 
     # ---- organizing, practices, suggestions, undo -------------------------------------------------------
+    def _organizer(self):
+        """The organizer's one conversation, and its connection; None while it is busy or has no key."""
+        thread = self.lattice.setting("organizer_thread")
+        if not thread or not self.lattice.index.one("SELECT 1 FROM threads WHERE id=?", (thread,)):
+            thread = self.lattice.set_setting("organizer_thread", self.lattice.thread_new("organizer", None, "整理")["id"])
+        return thread, self.config.agent("organizer")
+
+    def next_cards(self):
+        """Cards noted while learning: after a stretch of explanation, the organizer sorts what it taught into cards of
+        their kind and area, joined to the cards already there. One stretch at a time, after any tidying under way."""
+        if not self.card_jobs:
+            return
+        thread, conn = self._organizer()
+        if thread in self.busy or not conn["api_key"]:
+            return
+        job, l = self.card_jobs.pop(0), self.lattice
+        msgs = l.messages(job["thread"])
+        at = next((i for i, m in enumerate(msgs) if m["id"] == job["message"]), None)
+        if at is None:
+            return self.next_cards()
+        asked = next((m["content"] for m in reversed(msgs[:at]) if m["role"] == "user"), "")
+        where = f"主题「{l.topic(job['topic'])['title']}」" if job.get("topic") and l.doc(job["topic"], "topic") else "默认对话"
+        message = (f"主会话在{where}里刚讲完一段。请按「边学边记知识卡」整理这一段。\n\n学习者说：\n{asked[:4000]}\n\n主会话讲的：\n{msgs[at]['content'][:16000]}")
+        self.card_running[thread] = job
+        definition = agents.load(self.root, "organizer")
+        l.append_message(thread, "user", message, {"agent": "organizer", "cards_for": job})
+        system = agents.system_prompt(self.root, definition, f"现在是 {tools.today()}。")
+        self._turn("organizer", thread, job.get("topic"), None, conn, system, [], message, definition["tools"])
+
     def rpc_organize(self, path):
         """Tidy something the learner just wrote, in the background."""
         _, rel = self.lattice.resolve(path)
         if rel is None or rel.startswith(APPEND_ONLY):
             raise ValueError("只整理学习库里自己写的文件")
-        thread = self.lattice.setting("organizer_thread")
-        if not thread or not self.lattice.index.one("SELECT 1 FROM threads WHERE id=?", (thread,)):
-            thread = self.lattice.set_setting("organizer_thread", self.lattice.thread_new("organizer", None, "整理")["id"])
+        thread, conn = self._organizer()
         if thread in self.busy:
             raise ValueError("上一次整理还没结束")
-        conn = self.config.agent("organizer")
         if not conn["api_key"]:
             raise ValueError(f"请先在设置里给整理助手填写 {conn['label']} 的 API Key")
         self.commit_mine()

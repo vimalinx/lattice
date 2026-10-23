@@ -218,12 +218,17 @@ function cardView(pid){
   '<label class="field-label">自测题<input data-field="question" data-card-field="question" value="'+esc(c.question)+'" placeholder="一个要求预测、解释或判断的问题"/></label>'+
   '<div class="mine-box"><div class="mine-title">'+svg("edit",13)+' 我的理解 <small>只有你能写，AI 读得到改不了</small></div>'+mdEditor(pid,c.mine,'class="mine-editor prose" data-field="mine" data-card-mine="'+pid+'"',{live:true,placeholder:"先理解，再用自己的话写下来。"})+'</div>'+
   '<div class="field-label">解释与例子</div>'+mdBody(pid,c.body,'data-field="body" data-card-field="body"')+
+  '<div class="card-sort"><label class="field-label">哪一类<select data-field="type" data-card-field="type">'+opt(c.type||"",[["","没分"],...Object.entries(cardTypeName)])+'</select></label>'+
+   '<label class="field-label">领域 <small>同一领域的卡在卡片库里排在一起</small><input data-field="area" data-card-field="area" data-suggest="card-areas" value="'+esc(c.area||"")+'" placeholder="例如：线性代数、注意力机制"/></label></div>'+cardAreas()+
   '<label class="field-label">标签<input data-field="tags" data-card-field="tags" value="'+esc((c.tags||[]).join(", "))+'"/></label>'+
   '<div class="review-row">'+svg("history",14)+' 回顾 '+c.reviews+' 次'+(due?' · 下次 '+esc(fmtDate(c.due,true)):"")+'<span class="grow"></span>记得多少：'+
   button("忘了","card-rate",'data-rating="again" data-id="'+esc(c.id)+'"',"sm")+button("模糊","card-rate",'data-rating="hard" data-id="'+esc(c.id)+'"',"sm")+button("记得","card-rate",'data-rating="good" data-id="'+esc(c.id)+'"',"sm primary")+'</div>'+
   linksBlock(pid,c.links||[],c.id)+
   '<details class="evidence" open><summary>证据 · 轨迹里和它有关的 '+c.evidence.length+' 条</summary>'+(c.evidence.map(journalRow).join("")||'<p class="muted">还没有。作答、运行、回顾和 AI 的判断都会记在这里。</p>')+'</details></div>';
 }
+
+// The areas cards already have, offered when one is named.
+function cardAreas(){return '<datalist id="card-areas">'+[...new Set((S.data.cards||[]).map(c=>c.area).filter(Boolean))].map(a=>'<option value="'+esc(a)+'">').join("")+'</datalist>';}
 
 /* ---- topics: the archive, the route, and what hangs off it --------------------------------------------- */
 function topicView(pid){

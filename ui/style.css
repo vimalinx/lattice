@@ -274,6 +274,16 @@ label.check input{margin:0}
 .action-lead{display:flex;gap:6px;margin-top:6px}
 .sources{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;font-size:11.5px;color:var(--subtle)}
 .sources a{padding:1px 8px;border:1px solid var(--line);border-radius:20px}
+.card-sort{display:grid;grid-template-columns:minmax(120px,180px) 1fr;gap:12px}
+.card-sort select{width:100%}
+.cards-noted{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;font-size:11.5px;color:var(--subtle)}
+.cards-noted>span{display:inline-flex;align-items:center;gap:4px}
+.cards-noted a{display:inline-flex;align-items:center;gap:5px;padding:1px 8px 1px 3px;border:1px solid var(--line);border-radius:20px;color:var(--muted);cursor:pointer}
+.cards-noted a:hover{border-color:var(--accent);color:var(--text)}
+.cards-noted small{color:var(--subtle)}
+/* a card's kind, wherever cards are listed */
+.ct{font-style:normal;font-size:10.5px;line-height:1.5;padding:0 6px;border-radius:20px;background:color-mix(in srgb,var(--ct) 18%,transparent);color:color-mix(in srgb,var(--ct) 80%,var(--text))}
+.ct-concept{--ct:#6aa7e8}.ct-principle{--ct:#b5a8fa}.ct-method{--ct:#5fc7a6}.ct-idea{--ct:#e8a86a}.ct-fact{--ct:#9aa5b1}
 .suggestion{margin-top:9px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .suggestion-head{display:flex;align-items:center;gap:7px;padding:6px 10px;background:var(--surface);font-size:12px;flex-wrap:wrap}
 .suggestion-head span{color:var(--muted)}
@@ -625,9 +635,15 @@ details.api summary span{font-size:11.5px}
 .lib-list{flex:1;overflow:auto;padding:8px 12px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;align-content:start}
 .lib-count{grid-column:1/-1;margin:2px 0}
 .lib-list>.empty{grid-column:1/-1}
+.lib-area{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin-bottom:6px}
+.lib-area h5{grid-column:1/-1;margin:8px 0 0;font-size:12.5px;display:flex;align-items:baseline;gap:6px;color:var(--muted)}
+.lib-area h5 small{color:var(--subtle);font-weight:400}
+.lib-top .ct{margin-right:2px}
+.type-chips{margin-top:4px}
 .lib-card{display:flex;flex-direction:column;gap:5px;text-align:left;padding:10px 12px;border:1px solid var(--line-soft);border-radius:10px;background:var(--surface);color:var(--text);min-width:0;font:inherit}
 .lib-card:hover{border-color:var(--line);background:var(--surface-hover)}
-.lib-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.lib-top{display:flex;align-items:center;gap:6px}
+.lib-top small{margin-left:auto}
 .lib-top small{color:var(--subtle);font-size:10.5px}
 .lib-top small.due{color:var(--amber);font-weight:600}
 .lib-card b{font-size:13.5px;line-height:1.4}

@@ -21,6 +21,8 @@ from .index import Index, dump, stamp_of, uid
 from .vault import APPEND_ONLY, MD_KINDS, VAULT_PATH, Vault, VaultError, join_frontmatter, kind_of, now, slug, split_frontmatter
 
 STAGES = ("suggested", "seen", "explained", "applied")
+# What kind of knowledge a card holds: what something is, why it holds, how to do it, a way of seeing, a fact to know.
+CARD_TYPES = ("concept", "principle", "method", "idea", "fact")
 LINK_KINDS = {"prerequisite", "part_of", "related", "applies_to", "contrasts", "explains"}
 ACYCLIC = {"prerequisite", "part_of"}
 FOLDER = {kind: folder for folder, kind in MD_KINDS.items()}
@@ -272,7 +274,7 @@ class Lattice:
         body, mine = split_mine(row["body"])
         return {"id": row["id"], "path": row["path"], "title": row["title"], "topic": row["topic"], "body": body, "mine": mine,
                 "stage": a.get("stage", "suggested"), "question": a.get("question", ""), "tags": a.get("tags") or [],
-                "due": stamp_of(a["due"]) if a.get("due") else None, "reviews": int(a.get("reviews") or 0), "by": a.get("by", "me"),
+                "type": a.get("type"), "area": a.get("area"), "due": stamp_of(a["due"]) if a.get("due") else None, "reviews": int(a.get("reviews") or 0), "by": a.get("by", "me"),
                 "created": row["created"], "updated": row["updated"],
                 "links": self.links_of(row["id"]), "evidence": self.journal(ref=row["id"], limit=30)}
 
@@ -283,7 +285,7 @@ class Lattice:
             # The opening words of the explanation, so a list of cards says what each is about.
             excerpt = re.sub(r"\s+", " ", re.sub(r"[#>*`_|]|\[\[|\]\]", "", split_mine(row["body"])[0])).strip()[:140]
             out.append({"id": row["id"], "path": row["path"], "title": row["title"], "topic": row["topic"], "stage": a.get("stage", "suggested"),
-                        "question": a.get("question", ""), "excerpt": excerpt, "due": stamp_of(a["due"]) if a.get("due") else None,
+                        "type": a.get("type"), "area": a.get("area"), "question": a.get("question", ""), "excerpt": excerpt, "due": stamp_of(a["due"]) if a.get("due") else None,
                         "reviews": int(a.get("reviews") or 0), "created": row["created"], "updated": row["updated"]})
         return out
 
@@ -304,6 +306,9 @@ class Lattice:
         tags = data.get("tags", [])
         if not isinstance(tags, list) or len(tags) > 25:
             raise ValueError("标签应为不超过 25 项的列表")
+        if data.get("type") and data["type"] not in CARD_TYPES:
+            raise ValueError("知识卡的类型只能是 " + "、".join(CARD_TYPES))
+        sort = {k: text(str(data[k]), 40).strip() for k in ("type", "area") if data.get(k)}
         if not ident:
             stage = data.get("stage", "suggested")
             if stage not in STAGES:
@@ -313,20 +318,24 @@ class Lattice:
             topic = data.get("topic") or None
             if topic:
                 self.doc(topic, "topic")
-            attrs = {"id": uid(), "kind": "card", "title": name, "by": by, "topic": topic, "stage": stage,
+            attrs = {"id": uid(), "kind": "card", "title": name, "by": by, "topic": topic, "stage": stage, **sort,
                      "tags": [text(x, 60) for x in tags], "question": text(data.get("question", ""), 5000)}
             self._write_doc("cards", attrs, join_mine(text(data.get("body", "")), text(data.get("mine", ""), 20000) if by == "me" else ""))
             return self.card(attrs["id"])
         if by != "me":
+            # An agent adds to a card, and sorts one that was never sorted; it does not resort the learner's.
             addition = text(data.get("body", "")).strip()
-            if addition:
-                self._edit_doc(ident, lambda a, b: (a, join_mine(split_mine(b)[0] + f"\n\n**补充（{by}）**\n\n" + addition, split_mine(b)[1])))
+            self._edit_doc(ident, lambda a, b: ({**a, **{k: v for k, v in sort.items() if not a.get(k)}},
+                                                join_mine(split_mine(b)[0] + f"\n\n**补充（{by}）**\n\n" + addition, split_mine(b)[1]) if addition else b))
             return self.card(ident)
 
         def change(a, b):
             body, mine = split_mine(b)
             a.update(title=name, tags=[text(x, 60) for x in data.get("tags", a.get("tags") or [])],
                      question=text(data.get("question", a.get("question", "")), 5000))
+            for k in ("type", "area"):
+                if k in data:
+                    a[k] = sort.get(k) or None
             if "topic" in data:
                 a["topic"] = data["topic"] or None
             return a, join_mine(text(data.get("body", body)), mine)

@@ -77,20 +77,26 @@ function renderLibrary(pid,full=true){
   '<div class="lib-filters"><select data-lib-topic="'+pid+'">'+opt(p.topic??"*",[["*","全部主题"],["","不属于主题的"],...(S.data.topics||[]).map(t=>[t.id,t.title])])+'</select>'+
   '<select data-lib-sort="'+pid+'">'+opt(p.sort||"due",LIB_SORT)+'</select>'+
   '<label class="check inline-check"><input type="checkbox" data-lib-due="'+pid+'"'+(p.due_only?" checked":"")+'/> 只看到期</label>'+iconButton("plus","new-card","新知识卡")+'</div>'+
-  '<div class="stage-chips">'+[["","全部"],...Object.entries(stageName)].map(([v,t])=>'<button class="'+((p.stage||"")===v?"on":"")+'" data-action="lib-stage" data-pid="'+pid+'" data-stage="'+v+'">'+esc(t)+'</button>').join("")+'</div>';
+  '<div class="stage-chips">'+[["","全部"],...Object.entries(stageName)].map(([v,t])=>'<button class="'+((p.stage||"")===v?"on":"")+'" data-action="lib-stage" data-pid="'+pid+'" data-stage="'+v+'">'+esc(t)+'</button>').join("")+'</div>'+
+  '<div class="stage-chips type-chips">'+[["","所有类型"],...Object.entries(cardTypeName)].map(([v,t])=>'<button class="'+((p.ctype||"")===v?"on":"")+'" data-action="lib-type" data-pid="'+pid+'" data-ctype="'+v+'">'+esc(t)+'</button>').join("")+'</div>';
  const q=(p.query||"").trim().toLowerCase(),order=Object.keys(stageName);
- const cards=(S.data.cards||[]).filter(c=>(!p.stage||c.stage===p.stage)&&(p.topic==null||(c.topic||"")===p.topic)&&(!p.due_only||c.due_now)&&
+ const cards=(S.data.cards||[]).filter(c=>(!p.stage||c.stage===p.stage)&&(!p.ctype||c.type===p.ctype)&&(p.topic==null||(c.topic||"")===p.topic)&&(!p.due_only||c.due_now)&&
   (!q||(c.title+" "+(c.question||"")+" "+(c.excerpt||"")).toLowerCase().includes(q)));
  const sort={due:(a,b)=>cardDueAt(a)-cardDueAt(b),updated:(a,b)=>String(b.updated).localeCompare(String(a.updated)),
   stage:(a,b)=>order.indexOf(a.stage)-order.indexOf(b.stage)||a.title.localeCompare(b.title,"zh"),title:(a,b)=>a.title.localeCompare(b.title,"zh")}[p.sort||"due"];
  cards.sort(sort);
  const every=S.data.cards||[];
  node.querySelector(".lib-list").innerHTML='<p class="lib-count muted small">'+cards.length+' 张'+(cards.length!==every.length?"（共 "+every.length+" 张）":"")+(S.data.due?' · '+S.data.due+' 张到期':"")+'</p>'+
-  (cards.map(c=>'<button class="lib-card" data-action="open-file" data-path="'+esc(c.path)+'">'+
-   '<span class="lib-top"><span class="stage stage-'+esc(c.stage)+'">'+esc(stageName[c.stage]||c.stage)+'</span><small class="'+(c.due_now?"due":"")+'">'+esc(dueText(c))+'</small></span>'+
+  (libraryGroups(cards).map(([area,list])=>'<div class="lib-area"><h5>'+esc(area||"没分领域")+'<small>'+list.length+'</small></h5>'+list.map(c=>'<button class="lib-card" data-action="open-file" data-path="'+esc(c.path)+'">'+
+   '<span class="lib-top">'+(c.type?'<i class="ct ct-'+esc(c.type)+'">'+esc(cardTypeName[c.type]||c.type)+'</i>':"")+'<span class="stage stage-'+esc(c.stage)+'">'+esc(stageName[c.stage]||c.stage)+'</span><small class="'+(c.due_now?"due":"")+'">'+esc(dueText(c))+'</small></span>'+
    '<b>'+esc(c.title)+'</b>'+((c.question||c.excerpt)?'<span class="lib-text">'+esc(c.question||c.excerpt)+'</span>':"")+
-   '<small class="lib-foot">'+esc(c.topic?topicTitle(c.topic):"不属于主题")+(c.reviews?" · 回顾过 "+c.reviews+" 次":"")+'</small></button>').join("")||
+   '<small class="lib-foot">'+esc(c.topic?topicTitle(c.topic):"不属于主题")+(c.reviews?" · 回顾过 "+c.reviews+" 次":"")+'</small></button>').join("")+'</div>').join("")||
    emptyState("card",every.length?"没有符合的卡片":"还没有知识卡",every.length?"换个筛选试试。":"和主会话学着学着，它会把讲清楚的知识点存成卡；也可以在左栏点「＋」自己记一张。"));
+}
+// Cards sorted by area, the biggest area first and the cards without one last; inside an area the chosen order holds.
+function libraryGroups(cards){
+ const groups=new Map();for(const c of cards){const k=c.area||"";if(!groups.has(k))groups.set(k,[]);groups.get(k).push(c);}
+ return [...groups].sort((a,b)=>(!a[0])-(!b[0])||b[1].length-a[1].length||a[0].localeCompare(b[0],"zh"));
 }
 function libraryInput(t){
  const pid=t.dataset.libQuery||t.dataset.libTopic||t.dataset.libSort||t.dataset.libDue,p=Dock.panels[pid];if(!p)return false;
@@ -228,6 +234,7 @@ const SETTINGS_RENDER={
    '<h3>交互</h3><label>发送消息<select data-ui="send_key">'+opt(u.send_key,[["enter","Enter 发送，Shift + Enter 换行"],["ctrl","Ctrl + Enter 发送，Enter 换行"]])+'</select></label>'+
    '<label class="check"><input type="checkbox" data-ui="selection_popup"'+(u.selection_popup?" checked":"")+'/> 选中文字时出现「问快答 / 问主会话」</label>'+
    '<label class="check"><input type="checkbox" data-cfg="agent_auto_organize"'+(c.agent_auto_organize?" checked":"")+'/> 关掉随手写的记录或代码后，自动交给 AI 整理</label>'+
+   '<label class="check"><input type="checkbox" data-cfg="auto_cards"'+(c.auto_cards?" checked":"")+'/> 边学边记知识卡：主会话每讲完一段，整理助手在后台把讲到的概念、原理、方法和思想记成分好类、连好关系的卡</label>'+
    '<label>停下多少秒后提交我的编辑<input type="number" min="5" max="3600" data-cfg="commit_idle" value="'+esc(c.commit_idle)+'"/></label>';
  },
  layout(){

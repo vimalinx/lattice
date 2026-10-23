@@ -246,6 +246,8 @@ function outputHtml(outputs){
  }).join("");
 }
 const stageName={suggested:"待探索",seen:"接触过",explained:"能解释",applied:"能应用"};
+// What kind of knowledge a card holds (lattice/model.py CARD_TYPES).
+const cardTypeName={concept:"概念",principle:"原理",method:"方法",idea:"思想",fact:"事实"};
 const stageColor={suggested:"#5b6675",seen:"#e0be88",explained:"#b5a8fa",applied:"#83e2c7"};
 const linkName={prerequisite:"是前置",part_of:"是一部分",related:"有关联",applies_to:"应用于",contrasts:"对比",explains:"解释了",branch_of:"分支自",mentions:"提到"};
 const kindName={topic:"主题",card:"知识卡",lesson:"课程",note:"笔记",insight:"薄弱点",notebook:"实验笔记",file:"文件"};
