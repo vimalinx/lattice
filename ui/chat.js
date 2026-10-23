@@ -303,7 +303,8 @@ function updateComposer(pid){
  node.querySelector(".attach-row").innerHTML=(st.skill?'<span class="sel-chip skill">'+svg("store",11)+' 技能：'+esc(st.skill.title)+'<button data-action="skill-clear" data-pid="'+pid+'" title="不用这个技能">×</button></span>':"")+(st.quote?'<span class="sel-chip" title="'+esc(shorten(st.quote,400))+'">'+svg("quote",11)+' “'+esc(shorten(st.quote.replace(/\s+/g," "),28))+'” · '+st.quote.length+' 字<button data-action="quote-clear" data-pid="'+pid+'" title="不带">×</button></span>':"")+
   st.attach.map((a,i)=>'<span class="sel-chip file">'+svg(fileIcon(a.path),11)+' '+esc(a.path.split("/").pop())+'<button data-action="chat-attach-remove" data-pid="'+pid+'" data-index="'+i+'" title="不附上">×</button></span>').join("");
  const tag=node.querySelector(".model-tag");
- tag.innerHTML='<span>'+esc(modelName(m.model))+'</span>'+svg("chevrondown",10);tag.hidden=!m.ready;tag.classList.toggle("own",m.own);tag.classList.toggle("working",!!busy);
+ const lvl=S.config?.effort_levels?.[p.effort||S.config?.agents?.[p.agent]?.effort||""];
+ tag.innerHTML='<span>'+esc(modelName(m.model))+(lvl?' · 思考'+esc(lvl):"")+'</span>'+svg("chevrondown",10);tag.hidden=!m.ready;tag.classList.toggle("own",m.own);tag.classList.toggle("working",!!busy);
  node.querySelector(".send-slot").innerHTML=busy?'<button class="send-round stop" data-action="chat-cancel" data-pid="'+pid+'" title="停止">'+svg("stop",13)+'</button>':
   !m.ready?button("去设置","open-settings",'data-page="agents"',"primary sm pill"):'<button class="send-round" data-action="chat-send" data-pid="'+pid+'" title="发送"'+(ended?" disabled":"")+'>'+svg("arrowup",16)+'</button>';
  fitComposer(pid);
@@ -336,10 +337,16 @@ function modelMenu(pid,anchor){
  const own=S.config?.agents?.[p.agent];if(own)add(own.api,own.model,agentTitle(p.agent)+"的默认");
  Object.entries(S.config?.agents||{}).forEach(([name,a])=>add(a.api,a.model,agentTitle(name)+"在用"));
  apis.filter(a=>a.has_key).forEach(a=>add(a.id,a.default_model||a.model,""));
- popMenu(anchor,'<div class="menu-label">只改这个窗口，存在布局里</div>'+items.join("")+'<hr/>'+
+ // How hard it thinks: this window's own level, or the agent's default from the settings.
+ const conn=apis.find(x=>x.id===m.api),levels=S.config?.effort_levels||{},style=conn?.effort_style||"standard",dflt=S.config?.agents?.[p.agent]?.effort||"";
+ const effort=style==="none"?'<div class="menu-row"><span>思考强度</span><small>这个连接不支持调</small></div>':
+  '<div class="menu-row"><span>思考强度</span><div class="seg">'+[["","默认"],...Object.entries(levels)].map(([v,t])=>'<button class="'+((p.effort||"")===v?"on":"")+'" data-action="chat-effort" data-pid="'+pid+'" data-value="'+v+'"'+
+   (v?"":' data-tip="'+esc(agentTitle(p.agent)+"在设置里的默认："+(levels[dflt]||"服务默认"))+'"')+'>'+t+'</button>').join("")+'</div></div>';
+ popMenu(anchor,'<div class="menu-label">只改这个窗口，存在布局里</div>'+items.join("")+'<hr/>'+effort+'<hr/>'+
   '<button data-action="chat-model-other" data-pid="'+pid+'">'+svg("edit",14)+'<span>填写别的模型名…</span></button>'+
   (m.own?'<button data-action="chat-model-set" data-pid="'+pid+'" data-api="" data-model="">'+svg("undo",14)+'<span>恢复成'+esc(agentTitle(p.agent))+'的默认</span></button>':"")+
   '<button data-action="open-settings" data-page="agents">'+svg("sliders",14)+'<span>模型和连接设置</span></button>',{above:true});
+ Menus.reopen=()=>{if(anchor.isConnected)modelMenu(pid,anchor);};
 }
 function setChatModel(pid,api,model){
  const p=Dock.panels[pid],own=S.config?.agents?.[p.agent];if(!p)return;
@@ -358,7 +365,7 @@ async function chatSend(pid,text,extra={}){
  st.error="";st.stream="";st.live=[];st.waiting="";Object.assign(st,freshThinking());
  try{
   const skill=text==null?st.skill:null;st.liveSkill=skill?{slug:skill.slug,title:skill.title}:null;
-  const r=await rpc("send",{agent:p.agent,message,thread:st.thread,selection,task:extra.task||"",note:screenNote(),answer:extra.answer||null,attach,model:p.model||null,skill:skill?.slug||null});
+  const r=await rpc("send",{agent:p.agent,message,thread:st.thread,selection,task:extra.task||"",note:screenNote(),answer:extra.answer||null,attach,model:p.model||null,skill:skill?.slug||null,effort:p.effort||null});
   st.thread=r.thread;if(extra.selection==null)st.quote="";if(text==null){st.attach=[];st.skill=null;}
   st.data.messages.push({id:"pending",role:"user",content:message||({check:"我写好了，帮我看看我的代码和运行结果。",hint:"我卡住了，给我一点提示，先别直接给答案。",capture:"把我们讨论过的内容整理成知识卡。"})[extra.task]||"",meta:{selection,answer:extra.answer,attach,skill:skill?.slug,skill_title:skill?.title},at:new Date().toISOString()});
   st.data.busy=true;st.anchored=false;renderChat(pid);anchorQuestion(pid);
@@ -370,7 +377,7 @@ async function chatRetry(pid){
  if(st.data.busy)return toast("这段对话正在回答；可以先停止");
  st.error="";st.stream="";st.live=[];st.waiting="";Object.assign(st,freshThinking());
  const asked=[...st.data.messages].reverse().find(m=>m.role==="user")?.meta;st.liveSkill=asked?.skill?{slug:asked.skill,title:asked.skill_title||asked.skill}:null;
- try{await rpc("retry",{thread:st.thread,note:screenNote(),model:p.model||null});st.data.busy=true;st.anchored=false;renderChat(pid);anchorQuestion(pid);}
+ try{await rpc("retry",{thread:st.thread,note:screenNote(),model:p.model||null,effort:p.effort||null});st.data.busy=true;st.anchored=false;renderChat(pid);anchorQuestion(pid);}
  catch(e){st.error=e.message;renderLive(pid);}
 }
 function chatEvent(evt){

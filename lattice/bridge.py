@@ -1203,10 +1203,11 @@ class Bridge(QObject):
         name = self.lattice.topic(topic)["title"] if topic else None
         return {"thread": self.lattice.thread_new(agent, topic, AGENT_NAMES[agent] + (" · " + name if name else ""))["id"]}
 
-    def rpc_send(self, agent, message="", thread=None, topic=None, selection="", task="", note="", answer=None, attach=None, model=None, skill=None):
-        return self.send(agent, message, thread, topic, selection, task, note, answer, attach=attach, model=model, skill=skill)
+    def rpc_send(self, agent, message="", thread=None, topic=None, selection="", task="", note="", answer=None, attach=None, model=None, skill=None, effort=None):
+        return self.send(agent, message, thread, topic, selection, task, note, answer, attach=attach, model=model, skill=skill, effort=effort)
 
-    def send(self, agent, message="", thread=None, topic=None, selection="", task="", note="", answer=None, extra="", attach=None, model=None, skill=None):
+    def send(self, agent, message="", thread=None, topic=None, selection="", task="", note="", answer=None, extra="", attach=None, model=None, skill=None,
+             effort=None):
         l = self.lattice
         definition = agents.load(self.root, agent)
         practice = None
@@ -1227,7 +1228,7 @@ class Bridge(QObject):
             raise ValueError("请输入想说的话")
         if thread in self.busy:
             raise ValueError("这段对话正在回答；等它说完或先停止")
-        conn = self.config.agent(agent, use=model)
+        conn = self.config.agent(agent, use=model, effort=effort)
         if not conn["api_key"]:
             raise ValueError(f"请先在设置里给{AGENT_NAMES[agent]}填写 {conn['label']} 的 API Key")
         history = self._history(thread, definition["history"])
@@ -1282,7 +1283,7 @@ class Bridge(QObject):
                                                       and msgs[i + 1]["role"] == "assistant" and msgs[i + 1]["meta"].get("retry"))]
         return kept[-limit:]
 
-    def rpc_retry(self, thread, note="", model=None):
+    def rpc_retry(self, thread, note="", model=None, effort=None):
         """Answer the last question again after its reply was stopped, cut off or failed, without asking it twice."""
         l = self.lattice
         if thread in self.busy:
@@ -1299,7 +1300,7 @@ class Bridge(QObject):
             raise ValueError("这次练习已经结束")
         topic = practice["topic"] if practice else head.get("topic")
         definition = agents.load(self.root, agent)
-        conn = self.config.agent(agent, use=model)
+        conn = self.config.agent(agent, use=model, effort=effort)
         if not conn["api_key"]:
             raise ValueError(f"请先在设置里给{AGENT_NAMES[agent]}填写 {conn['label']} 的 API Key")
         picked = None

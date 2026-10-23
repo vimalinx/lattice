@@ -261,6 +261,8 @@ async function onAction(a){
   paths.forEach(x=>{if(!st.attach.some(y=>y.path===x))st.attach.push({path:x});});await refreshState();updateComposer(pid);return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
  case "chat-attach-sel":{const st=Chat[pid];if(st&&Sel.text){st.quote=Sel.text;clearSelection();updateComposer(pid);}return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
  case "chat-attach-remove":Chat[pid]?.attach.splice(Number(a.dataset.index),1);return updateComposer(pid);
+ case "chat-effort":{const p=Dock.panels[pid];if(!p)return;if(a.dataset.value)p.effort=a.dataset.value;else delete p.effort;saveLayout();updateComposer(pid);
+  if(Menus.reopen)Menus.reopen();return;}
  case "chat-model":return modelMenu(pid,a.closest(".menu")?Dock.els[pid]?.querySelector(".model-tag")||a:a);
  case "chat-model-set":return setChatModel(pid,a.dataset.api,a.dataset.model);
  case "chat-model-other":{const m=chatModel(pid),name=await askText("模型名",m.model,{hint:"用「"+((S.config?.apis||[]).find(x=>x.id===m.api)?.label||m.api)+"」这个连接",ok:"换上"});if(name&&name.trim())setChatModel(pid,m.api,name.trim());return;}

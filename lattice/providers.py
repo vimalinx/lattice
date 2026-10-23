@@ -29,33 +29,64 @@ LOG = logging.getLogger("lattice")
 # sent: bearer (Authorization: Bearer <key>), header (the key in a named header, e.g. Azure's api-key) or none (local
 # servers). chat_path and models_path are joined to the base URL and may carry a query (Azure's api-version).
 def _preset(label, base_url, model="", env="", auth="bearer", headers=None, extra_body=None, note="", chat_path="chat/completions",
-            models_path="models", auth_header="", group="云服务", key_url=""):
+            models_path="models", auth_header="", group="云服务", key_url="", effort="standard"):
     return {"label": label, "base_url": base_url, "model": model, "env": env, "auth": auth, "auth_header": auth_header, "key_url": key_url,
-            "headers": headers or {}, "extra_body": extra_body or {}, "chat_path": chat_path, "models_path": models_path, "note": note, "group": group}
+            "headers": headers or {}, "extra_body": extra_body or {}, "chat_path": chat_path, "models_path": models_path, "note": note, "group": group,
+            "effort_style": effort}
+
+
+# How hard a model thinks: one scale for the learner, sent the way each service understands it (effort_style of a
+# connection). An empty level sends nothing, leaving the service's own default.
+EFFORT_LEVELS = {"off": "关", "low": "低", "medium": "中", "high": "高", "max": "最高"}
+EFFORT_STYLES = {"standard": "reasoning_effort（none / low / medium / high / max）", "openai": "OpenAI：reasoning_effort（最高是 xhigh）",
+                 "deepseek": "DeepSeek：thinking 开关 + reasoning_effort", "openrouter": "OpenRouter：reasoning.effort",
+                 "anthropic": "Claude：thinking.budget_tokens", "qwen": "通义千问 / Qwen3：enable_thinking + thinking_budget",
+                 "thinking": "只有开关：thinking.type", "none": "不支持调思考强度"}
+BUDGET = {"low": 1024, "medium": 4096, "high": 16384, "max": 32768}
+
+
+def effort_body(style, level):
+    """The request fields for a thinking level in a connection's style."""
+    if level not in EFFORT_LEVELS or style == "none":
+        return {}
+    off = level == "off"
+    if style == "openai":
+        return {"reasoning_effort": "none" if off else {"max": "xhigh"}.get(level, level)}
+    if style == "deepseek":
+        return {"thinking": {"type": "disabled"}} if off else {"thinking": {"type": "enabled"}, "reasoning_effort": level}
+    if style == "openrouter":
+        return {"reasoning": {"enabled": False}} if off else {"reasoning": {"effort": {"max": "high"}.get(level, level)}}
+    if style == "anthropic":
+        return {"thinking": {"type": "disabled"}} if off else {"thinking": {"type": "enabled", "budget_tokens": BUDGET[level]}}
+    if style == "qwen":
+        return {"enable_thinking": False} if off else {"enable_thinking": True, "thinking_budget": BUDGET[level]}
+    if style == "thinking":
+        return {"thinking": {"type": "disabled" if off else "enabled"}}
+    return {"reasoning_effort": "none" if off else level}
 
 
 PRESETS = {
-    "deepseek": _preset("DeepSeek", "https://api.deepseek.com", "deepseek-chat", "DEEPSEEK_API_KEY", extra_body={"thinking": {"type": "disabled"}}),
+    "deepseek": _preset("DeepSeek", "https://api.deepseek.com", "deepseek-chat", "DEEPSEEK_API_KEY", extra_body={"thinking": {"type": "disabled"}}, effort="deepseek"),
     "commandcode": _preset("CommandCode", "https://api.commandcode.ai/provider/v1", "deepseek/deepseek-v4.1-flash", "COMMANDCODE_API_KEY", group="聚合"),
     "opencode": _preset("OpenCode Go", "https://opencode.ai/zen/go/v1", "deepseek-v4.1-flash", "OPENCODE_GO_API_KEY",
                         headers={"x-opencode-session": "{session}"}, group="聚合"),
-    "openrouter": _preset("OpenRouter", "https://openrouter.ai/api/v1", "openrouter/auto", "OPENROUTER_API_KEY", group="聚合"),
-    "siliconflow": _preset("硅基流动 SiliconFlow", "https://api.siliconflow.cn/v1", "", "SILICONFLOW_API_KEY", group="聚合"),
-    "openai": _preset("OpenAI", "https://api.openai.com/v1", "", "OPENAI_API_KEY"),
-    "anthropic": _preset("Anthropic Claude", "https://api.anthropic.com/v1", "", "ANTHROPIC_API_KEY", note="走 Anthropic 的 OpenAI 兼容接口"),
+    "openrouter": _preset("OpenRouter", "https://openrouter.ai/api/v1", "openrouter/auto", "OPENROUTER_API_KEY", group="聚合", effort="openrouter"),
+    "siliconflow": _preset("硅基流动 SiliconFlow", "https://api.siliconflow.cn/v1", "", "SILICONFLOW_API_KEY", group="聚合", effort="qwen"),
+    "openai": _preset("OpenAI", "https://api.openai.com/v1", "", "OPENAI_API_KEY", effort="openai"),
+    "anthropic": _preset("Anthropic Claude", "https://api.anthropic.com/v1", "", "ANTHROPIC_API_KEY", note="走 Anthropic 的 OpenAI 兼容接口", effort="anthropic"),
     "gemini": _preset("Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "", "GEMINI_API_KEY", note="走 Gemini 的 OpenAI 兼容接口"),
     "xai": _preset("xAI Grok", "https://api.x.ai/v1", "", "XAI_API_KEY"),
-    "mistral": _preset("Mistral", "https://api.mistral.ai/v1", "", "MISTRAL_API_KEY"),
+    "mistral": _preset("Mistral", "https://api.mistral.ai/v1", "", "MISTRAL_API_KEY", effort="none"),
     "groq": _preset("Groq", "https://api.groq.com/openai/v1", "", "GROQ_API_KEY"),
     "together": _preset("Together AI", "https://api.together.xyz/v1", "", "TOGETHER_API_KEY", group="聚合"),
     "fireworks": _preset("Fireworks AI", "https://api.fireworks.ai/inference/v1", "", "FIREWORKS_API_KEY", group="聚合"),
-    "perplexity": _preset("Perplexity", "https://api.perplexity.ai", "", "PERPLEXITY_API_KEY", models_path=""),
-    "moonshot": _preset("月之暗面 Kimi", "https://api.moonshot.cn/v1", "", "MOONSHOT_API_KEY", group="国内"),
-    "zhipu": _preset("智谱 GLM", "https://open.bigmodel.cn/api/paas/v4", "", "ZHIPUAI_API_KEY", group="国内"),
-    "dashscope": _preset("阿里云百炼 通义千问", "https://dashscope.aliyuncs.com/compatible-mode/v1", "", "DASHSCOPE_API_KEY", group="国内"),
+    "perplexity": _preset("Perplexity", "https://api.perplexity.ai", "", "PERPLEXITY_API_KEY", models_path="", effort="none"),
+    "moonshot": _preset("月之暗面 Kimi", "https://api.moonshot.cn/v1", "", "MOONSHOT_API_KEY", group="国内", effort="none"),
+    "zhipu": _preset("智谱 GLM", "https://open.bigmodel.cn/api/paas/v4", "", "ZHIPUAI_API_KEY", group="国内", effort="thinking"),
+    "dashscope": _preset("阿里云百炼 通义千问", "https://dashscope.aliyuncs.com/compatible-mode/v1", "", "DASHSCOPE_API_KEY", group="国内", effort="qwen"),
     "ark": _preset("火山方舟 豆包", "https://ark.cn-beijing.volces.com/api/v3", "", "ARK_API_KEY", group="国内", note="模型名填推理接入点 ID 或模型 ID"),
-    "minimax": _preset("MiniMax", "https://api.minimaxi.com/v1", "", "MINIMAX_API_KEY", group="国内"),
-    "stepfun": _preset("阶跃星辰 StepFun", "https://api.stepfun.com/v1", "", "STEPFUN_API_KEY", group="国内"),
+    "minimax": _preset("MiniMax", "https://api.minimaxi.com/v1", "", "MINIMAX_API_KEY", group="国内", effort="none"),
+    "stepfun": _preset("阶跃星辰 StepFun", "https://api.stepfun.com/v1", "", "STEPFUN_API_KEY", group="国内", effort="none"),
     "azure": _preset("Azure OpenAI", "https://<资源名>.openai.azure.com/openai/deployments/<部署名>", "", "AZURE_OPENAI_API_KEY", auth="header",
                      auth_header="api-key", chat_path="chat/completions?api-version=2024-10-21", models_path="", note="把 Base URL 里的资源名和部署名换成你的"),
     "ollama": _preset("Ollama（本机）", "http://127.0.0.1:11434/v1", "", auth="none", group="本机"),
@@ -67,7 +98,8 @@ PRESETS = {
 KEY_URLS = {"deepseek": "https://platform.deepseek.com/api_keys", "openrouter": "https://openrouter.ai/keys", "siliconflow": "https://cloud.siliconflow.cn/account/ak", "openai": "https://platform.openai.com/api-keys", "anthropic": "https://console.anthropic.com/settings/keys", "gemini": "https://aistudio.google.com/apikey", "xai": "https://console.x.ai", "mistral": "https://console.mistral.ai/api-keys", "groq": "https://console.groq.com/keys", "moonshot": "https://platform.moonshot.cn/console/api-keys"}
 for _id, _url in KEY_URLS.items():
     PRESETS[_id]["key_url"] = _url
-CONN_FIELDS = {"preset", "label", "base_url", "model", "headers", "extra_body", "auth", "auth_header", "chat_path", "models_path", "key_env", "models"}
+CONN_FIELDS = {"preset", "label", "base_url", "model", "headers", "extra_body", "auth", "auth_header", "chat_path", "models_path", "key_env", "models",
+               "effort_style"}
 AGENT_NAMES = {"tutor": "主会话", "flash": "快答", "coach": "练习教练", "organizer": "整理"}
 WEB_BACKENDS = {"duckduckgo": "DuckDuckGo（无需 Key）", "searxng": "SearXNG（自建地址）", "brave": "Brave Search API", "tavily": "Tavily API"}
 WEB_SECRETS = {"brave_key", "tavily_key"}
@@ -102,7 +134,7 @@ DEFAULTS = {
            "density": "comfortable", "send_key": "enter",
            "selection_popup": True, "activity_plus": False, "themes": {}, "theme_custom": None, "side": {"width": 270, "closed": []}, "spaces": []},
 }
-AGENT_FIELDS = ("api", "model", "max_tokens", "temperature")
+AGENT_FIELDS = ("api", "model", "max_tokens", "temperature", "effort")
 # Settings saved by earlier versions under flat names.
 LEGACY = {"tutor": "tutor", "flash": "flash", "practice": "coach"}
 
@@ -174,7 +206,7 @@ def localrouter_base(conn):
 def _connection(preset, own=None):
     base = PRESETS[preset]
     conn = {"preset": preset, "label": base["label"] if preset != "custom" else "自定义", "key_env": base["env"], "models": [],
-            **{k: copy.deepcopy(base[k]) for k in ("base_url", "model", "headers", "extra_body", "auth", "auth_header", "chat_path", "models_path")},
+            **{k: copy.deepcopy(base[k]) for k in ("base_url", "model", "headers", "extra_body", "auth", "auth_header", "chat_path", "models_path", "effort_style")},
             "api_key": ""}
     conn.update({k: v for k, v in (own or {}).items() if k in CONN_FIELDS | {"api_key"}})
     return conn
@@ -249,9 +281,9 @@ class Config:
         env = conn.get("key_env")
         return conn.get("api_key") or (os.environ.get(env, "") if env else "")
 
-    def agent(self, name, config=None, use=None):
+    def agent(self, name, config=None, use=None, effort=None):
         """Everything one agent's API lane needs to send a request, key included. `use` swaps in another
-        connection and model for one request (a window can pick its own model)."""
+        connection and model for one request (a window can pick its own model); `effort`, a thinking level, likewise."""
         config = config or self.read()
         lane = config["agents"][name]
         if isinstance(use, dict) and use.get("model"):
@@ -272,7 +304,8 @@ class Config:
                 api, conn = other, config["apis"][other]
                 lane = {**lane, "model": conn["model"]}
         temperature = lane.get("temperature")
-        return {**conn, "api": api, "label": conn["label"], "api_key": self.key(api, config), "model": lane["model"] or conn.get("model", ""),
+        level = effort if effort in EFFORT_LEVELS else lane.get("effort") if lane.get("effort") in EFFORT_LEVELS else ""
+        return {**conn, "api": api, "label": conn["label"], "api_key": self.key(api, config), "model": lane["model"] or conn.get("model", ""), "effort": level,
                 "max_tokens": lane["max_tokens"], "timeout": config["timeout"], "notice": notice,
                 "temperature": config["temperature"] if temperature in (None, "") else float(temperature)}
 
@@ -318,6 +351,7 @@ class Config:
         result["web"] = {k: v for k, v in raw["web"].items() if k not in WEB_SECRETS}
         result["web"].update({k: bool(raw["web"].get(k)) for k in WEB_SECRETS})
         result["web_backends"] = WEB_BACKENDS
+        result["effort_levels"], result["effort_styles"] = EFFORT_LEVELS, EFFORT_STYLES
         result["localrouter"] = {"config": str(LOCALROUTER_FILE()), "found": LOCALROUTER in raw["apis"]}
         return result
 
@@ -429,6 +463,8 @@ class Config:
                 api["chat_path"] = "chat/completions"
             api["model"] = str(api.get("model") or "").strip()[:200]
             api["key_env"] = str(api.get("key_env") or "").strip()[:80]
+            if api.get("effort_style") not in EFFORT_STYLES:
+                api["effort_style"] = "standard"
             if not isinstance(api.get("models"), list):
                 api["models"] = []
         if updated["vault"] and not str(updated["vault"]).startswith(("/", "~")):
@@ -443,6 +479,8 @@ class Config:
                 raise ValueError(AGENT_NAMES[name] + "用的连接已经不在了，请给它另选一个")
             lane["model"] = str(lane["model"]).strip()
             lane["max_tokens"] = max(256, min(int(lane["max_tokens"]), 64000))
+            if lane.get("effort") not in EFFORT_LEVELS:
+                lane["effort"] = ""
             if lane["api"] != LOCALROUTER and not updated["apis"][lane["api"]]["base_url"]:
                 raise ValueError(AGENT_NAMES[name] + "所选连接还没有 Base URL")
             if not lane["model"] and not updated["apis"][lane["api"]].get("model"):
@@ -708,7 +746,8 @@ class ApiWorker(QThread):
                     self.emit("status", state="connecting")
                     while True:
                         # include_usage makes a stream end with the request's token counts; extra_body can turn it off.
-                        payload = {"stream_options": {"include_usage": True}, **config["extra_body"], "model": config["model"], "messages": messages,
+                        payload = {"stream_options": {"include_usage": True}, **config["extra_body"],
+                                   **effort_body(config.get("effort_style") or "standard", config.get("effort")), "model": config["model"], "messages": messages,
                                    "stream": True, "max_tokens": config["max_tokens"], "temperature": config["temperature"],
                                    **({"tools": self.tools} if self.tools else {})}
                         self.asked = payload

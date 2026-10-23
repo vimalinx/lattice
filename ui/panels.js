@@ -239,6 +239,7 @@ const SETTINGS_RENDER={
     '<div class="three"><label>API 连接<select data-cfg-agent="'+name+'" data-key="api">'+opt(a.api,apiOpts)+'</select></label><label>模型 <small>可以从连接读到的列表里选</small><input data-cfg-agent="'+name+'" data-key="model" data-suggest="models-'+esc(a.api)+'" value="'+esc(a.model)+'"/></label>'+
     '<label>回复上限（含思考）<input type="number" min="256" max="64000" data-cfg-agent="'+name+'" data-key="max_tokens" value="'+esc(a.max_tokens)+'"/></label></div>'+
     '<div class="three"><label>Temperature <small>留空用全局</small><input type="number" step="0.05" min="0" max="2" data-cfg-agent="'+name+'" data-key="temperature" value="'+esc(a.temperature??"")+'"/></label>'+
+    '<label>思考强度 <small>每个窗口还能在模型菜单里单独调</small><select data-cfg-agent="'+name+'" data-key="effort">'+opt(a.effort||"",[["","服务默认"],...Object.entries(c.effort_levels||{})])+'</select></label>'+
     '<label>每轮带上多少条历史<input type="number" min="0" max="200" data-agent-history="'+name+'" value="'+esc(def.history)+'"/></label>'+
     '<label class="check"><input type="checkbox" data-agent-blocks="'+name+'"'+(def.blocks?" checked":"")+'/> 能用展示块</label></div>'+
     '<div class="field-label">能用的工具</div><div class="tool-grid">'+d.tools.map(t=>'<label class="check" title="'+esc(t.description)+'"><input type="checkbox" data-agent-tool="'+name+'" value="'+t.name+'"'+(def.tools.includes(t.name)?" checked":"")+'/> '+esc(t.name)+'</label>').join("")+'</div>'+
@@ -387,6 +388,7 @@ function apiDetail(a,c){
    '<div class="three"><label>Key 怎么传<select data-cfg-api="'+esc(a.id)+'" data-key="auth">'+opt(a.auth,[["bearer","Bearer（标准）"],["header","放在请求头里"],["none","不需要 Key"]])+'</select></label>'+
     f("auth_header","请求头名字 <small>如 api-key</small>",a.auth==="header"?"":"disabled")+f("key_env","从环境变量读 Key",'placeholder="例如 OPENAI_API_KEY"')+'</div>'+
    '<div class="two">'+f("chat_path","对话接口路径",'placeholder="chat/completions"')+f("models_path","模型列表路径 <small>没有就留空</small>",'placeholder="models"')+'</div>'+
+   '<label>思考强度怎么传 <small>模型菜单里调的「思考强度」按这个方式发给服务</small><select data-cfg-api="'+esc(a.id)+'" data-key="effort_style">'+opt(a.effort_style||"standard",Object.entries(c.effort_styles||{}))+'</select></label>'+
    '<div class="two"><label>请求头 <small>JSON；{session} 会换成会话 id</small><textarea rows="2" data-cfg-api="'+esc(a.id)+'" data-key="headers">'+esc(JSON.stringify(a.headers||{}))+'</textarea></label>'+
    '<label>附加参数 <small>JSON，合进每次请求</small><textarea rows="2" data-cfg-api="'+esc(a.id)+'" data-key="extra_body">'+esc(JSON.stringify(a.extra_body||{}))+'</textarea></label></div>'+
    (a.preset==="custom"?'<div class="inline">'+button("删除这个连接","api-delete",'data-api="'+esc(a.id)+'"',"ghost xs")+'</div>':"")+'</details>';
