@@ -1059,3 +1059,18 @@ input[type=checkbox],input[type=radio],input[type=range]{accent-color:var(--acce
 @container (max-width:620px){.cmp-cols{grid-template-columns:1fr;grid-auto-rows:minmax(260px,1fr);overflow:auto}}
 .cmp{container-type:inline-size}
 .skill-change .suggestion-head>svg{color:var(--accent)}
+.msg-skills{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;margin:0 0 8px;font-size:12px;color:var(--ai)}
+.msg-skills>span{color:var(--muted)}
+.msg-skills a{padding:1px 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--ai) 35%,transparent);background:var(--ai-glow);color:var(--ai);text-decoration:none}
+.msg-skills a:hover{border-color:var(--ai);text-decoration:none}
+[data-skill-open]{cursor:pointer}
+.msg-skill[data-skill-open]:hover{text-decoration:underline}
+.modal.skill-pop{width:min(900px,94vw);display:flex;flex-direction:column}
+.skp{display:flex;flex-direction:column;min-height:0;gap:8px}
+.skp-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.skp-meta code{font-size:11.5px;color:var(--subtle)}
+.skp-desc{margin:0;color:var(--muted);font-size:13px;line-height:1.7}
+.skp-edit{height:min(56vh,620px);overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel-hi)}
+.skp-edit .cm-host,.skp-edit .cm-editor{min-height:100%}
+.skp-edit .cm-host.editor.cm-md .cm-content{padding:14px 22px 30vh}
+.skp-state{font-size:12px;color:var(--ai)}

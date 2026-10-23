@@ -32,6 +32,7 @@ class Turn:
     def __init__(self):
         self.actions, self.sources, self.suggestions, self.after, self.carry = [], [], [], [], []
         self.changes = []   # proposed skill changes, waiting for the learner
+        self.skills = []    # skills this turn followed, shown at the top of the reply
         self.focus = None
         self.refocus = False
 
@@ -133,6 +134,8 @@ def skill(ctx, name, file=None):
     if not found["enabled"]:
         raise ValueError("学习者停用了这个技能")
     ctx.act("用了技能「" + found["title"] + "」", "skill:" + found["slug"], False)
+    if not any(s["slug"] == found["slug"] for s in ctx.turn.skills):
+        ctx.turn.skills.append({"slug": found["slug"], "title": found["title"]})
     # The attributes too, so a change proposed with skill_edit can start from the whole file.
     attrs, _ = split_frontmatter(ctx.l.vault.read_text(f"{skillbook.FOLDER}/{found['slug']}/SKILL.md"))
     return {"skill": found["name"], "title": found["title"], "attributes": attrs, "instructions": skillbook.instructions(found)}

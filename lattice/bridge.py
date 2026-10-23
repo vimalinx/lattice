@@ -474,6 +474,27 @@ class Bridge(QObject):
         self.announce({"type": "skill_change", "change": id, "state": "approved"})
         return {"state": "approved", "edited": edited}
 
+    def rpc_skill_page(self, slug):
+        """A skill's SKILL.md as it is, for editing it in place."""
+        found = skills.find(self.root, slug)
+        rel = f"{skills.FOLDER}/{found['slug']}/SKILL.md"
+        return {**{k: found[k] for k in ("slug", "title", "description", "category", "enabled", "files")}, "path": rel, "content": self.lattice.vault.read_text(rel)}
+
+    def rpc_skill_save(self, slug, content):
+        """The learner's own edit of a skill: one commit, and noted like any other change, so it is in the history."""
+        page = self.rpc_skill_page(slug)
+        content = text(content, 200_000)
+        if content == page["content"]:
+            return {"saved": False}
+        skills.check_page(content)
+        self.commit_mine()
+        self.lattice.vault.write_text(page["path"], content)
+        self.lattice.vault.commit(f"改技能「{page['title']}」（我自己改的）", "me")
+        self.lattice.record("skill_changed", {"skill": page["slug"], "title": page["title"], "file": page["path"], "before": page["content"],
+                                              "after": content, "why": "我自己改的", "by": "me", "edited": True}, "me", [page["path"]])
+        self.changed([page["path"]])
+        return {"saved": True}
+
     def rpc_skill_history(self, slug):
         """Every committed version of a skill's SKILL.md, newest first, the one on disk now marked."""
         rel = f"{skills.FOLDER}/{skills.find(self.root, slug)['slug']}/SKILL.md"
@@ -1223,7 +1244,7 @@ class Bridge(QObject):
                                                     **({"source": source, "message": answer.get("message"), "block": answer.get("block")} if source else {}),
                                                     **({"screen": note[:300]} if note else {})}, "me", [thread, *([source] if source else []), *([topic] if topic else [])])
         user, system = self._compose(definition, thread, topic, practice, message, task, selection, attach, note, extra, picked)
-        self._turn(agent, thread, topic, thread if practice else None, conn, system, history, user, definition["tools"])
+        self._turn(agent, thread, topic, thread if practice else None, conn, system, history, user, definition["tools"], picked)
         return {"thread": thread, "state": "queued"}
 
     def _compose(self, definition, thread, topic, practice, message, task, selection, attach, note, extra="", skill=None):
@@ -1286,10 +1307,10 @@ class Bridge(QObject):
                                      meta.get("attach") or [], note, "", picked)
         self.retrying.add(thread)
         self._turn(agent, thread, topic, thread if practice else None, conn, system, self._history(thread, definition["history"], last), user,
-                   definition["tools"])
+                   definition["tools"], picked)
         return {"thread": thread, "state": "queued"}
 
-    def _turn(self, agent, thread, topic, practice, conn, system, history, user, allowed):
+    def _turn(self, agent, thread, topic, practice, conn, system, history, user, allowed, picked=None):
         if conn.get("notice"):
             self.announce({"type": "notice", "message": conn["notice"]})
         messages = [{"role": "system", "content": system}]
@@ -1303,6 +1324,8 @@ class Bridge(QObject):
         self.workers[thread] = worker
         self.contexts[thread] = (agent, topic, practice, set(allowed))
         self.turns[thread] = tools.Turn()
+        if picked:
+            self.turns[thread].skills.append({"slug": picked["slug"], "title": picked["title"], "picked": True})
         self.busy.add(thread)
         self.status[thread] = "connecting"
         worker.start()
@@ -1438,6 +1461,7 @@ class Bridge(QObject):
             evt["message"] = l.append_message(thread, "assistant", body, {"agent": agent, "stop_reason": reason, "usage": evt.get("usage"),
                                                                           "actions": turn.actions, "sources": sources, "suggestions": turn.suggestions,
                                                                           **({"changes": turn.changes} if turn.changes else {}),
+                                                                          **({"skills": turn.skills} if turn.skills else {}),
                                                                           **({"retry": True} if retried else {}),
                                                                           **({"thinking": evt["thinking"], "think_seconds": evt.get("think_seconds")} if evt.get("thinking") else {})})
         evt.update(actions=turn.actions, sources=sources, suggestions=turn.suggestions)

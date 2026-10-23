@@ -176,3 +176,45 @@ async function compareAction(kind,a){
   const chat=Object.keys(Chat).find(x=>Chat[x].thread===p.thread);if(chat)loadChat(chat);
  }
 }
+/* ---- a skill in a window of its own: wherever a reply or a message names one, clicking it opens it here to read and
+   change. Saving is one entry in the skill's history; closing with changes saves them. -------------------------- */
+async function skillPopup(slug){
+ const s=await safe(()=>rpc("skill_page",{slug}));if(!s)return;
+ const box=modal(modalHead(s.title)+'<div class="skp"><div class="skp-meta">'+svg(typeof catIcon==="function"?catIcon(s.category):"store",13)+' '+esc(s.category)+
+   ' · '+(s.enabled?'<span class="chip on">在用</span>':'<span class="chip">已停用</span>')+' · <code>'+esc(s.path)+'</code></div>'+
+   (s.description?'<p class="skp-desc">'+esc(s.description)+'</p>':"")+
+   '<div class="skp-edit">'+editorHost(s.content,'class="editor prose"',{markdown:true,live:true})+'</div>'+
+   '<div class="modal-actions"><span class="skp-state"></span><span class="grow"></span>'+
+   button(svg("history",13)+" 历史","skp-history","","ghost sm")+button(svg("bot",13)+" 试用","skp-try","","ghost sm")+
+   button(svg("split",13)+" 左右对照着改","skp-revise","",'ghost sm" data-tip="把这里改的和现在的版本左右对照，审过再批准')+
+   button(svg("check",13)+" 保存","skp-save","disabled","primary sm")+'</div></div>',"large skill-pop");
+ mountEditors(box);
+ const view=editorIn(box),now=()=>view.state.doc.toString();
+ let saved=s.content,leaving=false;
+ const mark=()=>{const dirty=now()!==saved;box.querySelector('[data-action="skp-save"]').disabled=!dirty;box.querySelector(".skp-state").textContent=dirty?"有没保存的修改，关掉时会自动保存":"";};
+ const save=async()=>{const text=now();if(text===saved)return true;
+  const r=await safe(()=>rpc("skill_save",{slug,content:text}));if(!r)return false;saved=text;mark();skillsChanged();toast("已保存，记进了这个技能的历史");return true;};
+ view.dom.addEventListener("input",mark);view.dom.addEventListener("keyup",mark);
+ box.addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){e.preventDefault();e.stopPropagation();safe(save);}});
+ box.addEventListener("click",e=>{
+  const b=e.target.closest("[data-action^='skp-']");if(!b||b.disabled)return;e.stopPropagation();
+  const kind=b.dataset.action;
+  if(kind==="skp-save")return safe(save);
+  safe(async()=>{
+   if(kind==="skp-revise"){const text=now();leaving=true;closeModal();return rpc("skill_propose",{slug,why:text===s.content?"我自己改":"我在技能窗口里改的",...(text===s.content?{}:{content:text})});}
+   if(!await save())return;leaving=true;closeModal();
+   if(kind==="skp-history")return skillHistory(slug);
+   if(kind==="skp-try")return skillAction("skill-try",{dataset:{slug}});
+  });
+ });
+ // Esc or a click outside: what was changed is kept.
+ const text0=()=>{try{return view.state.doc.toString();}catch(_){return saved;}};
+ Modal.onClose=()=>{const text=text0();if(!leaving&&text!==saved)safe(()=>rpc("skill_save",{slug,content:text}).then(r=>{if(r?.saved){skillsChanged();toast("关掉前的修改已保存");}}));destroyEditors(box);};
+ setTimeout(()=>view.focus(),50);
+}
+// A skill named in a reply or a message opens on the press itself: a reply still being written redraws many times a
+// second, and a click would be lost between pressing and releasing.
+document.addEventListener("mousedown",e=>{
+ const a=e.button===0&&e.target.closest?.("[data-skill-open]");if(!a)return;
+ e.preventDefault();e.stopPropagation();safe(()=>skillPopup(a.dataset.skillOpen));
+},true);

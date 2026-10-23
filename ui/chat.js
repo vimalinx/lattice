@@ -165,14 +165,14 @@ function messageEl(pid,m,answers){
   const foot='<div class="msg-foot">'+(mine?"":'<span>'+esc(agentTitle(meta.agent||p.agent))+'</span>')+'<time>'+esc(fmtDate(m.at,true))+'</time>'+(mine?"":usageLabel(meta.usage))+
    (m.content.trim()?iconButton("copy","msg-copy","复制",'data-pid="'+pid+'" data-mid="'+m.id+'"'):"")+(!mine&&m.content.trim()?messageTools(pid,m):"")+'</div>';
   const html=mine?'<div class="msg from-me" data-mid="'+m.id+'"><div class="bubble">'+
-    (meta.skill_title?'<div class="msg-skill">'+svg("store",11)+' 按技能「'+esc(meta.skill_title)+'」</div>':"")+
+    (meta.skill_title?'<div class="msg-skill"'+(meta.skill?' data-skill-open="'+esc(meta.skill)+'" data-tip="看看、改改这个技能"':"")+'>'+svg("store",11)+' 按技能「'+esc(meta.skill_title)+'」</div>':"")+
     (meta.selection?'<div class="msg-quote">'+esc(shorten(meta.selection,180))+'</div>':"")+
     (meta.attach?.length?'<div class="msg-attach">'+meta.attach.map(x=>'<a data-action="open-file" data-path="'+esc(x)+'">'+svg(fileIcon(x),12)+' '+esc(x.split("/").pop())+'</a>').join("")+'</div>':"")+
     '<div class="markdown msg-body">'+r.html+'</div></div>'+foot+'</div>'
-   :'<div class="msg from-ai" data-mid="'+m.id+'">'+thinkingHtml(meta.thinking,meta.think_seconds)+'<div class="markdown msg-body">'+r.html+'</div>'+
+   :'<div class="msg from-ai" data-mid="'+m.id+'">'+skillsUsed(meta.skills||olderSkills(list,at))+thinkingHtml(meta.thinking,meta.think_seconds)+'<div class="markdown msg-body">'+r.html+'</div>'+
     (redone?'<div class="msg-note">这次没有答完，下面是重新回答的</div>':incomplete?'<div class="msg-note">'+esc(meta.stop_reason==="cancelled"?"已停止 · 保留了部分回答":meta.stop_reason==="max_tokens"?"达到回复长度上限":"没有正常结束 · 只保留了收到的部分")+
      (canRetry?button(svg("refresh",12)+" 重新回答","chat-retry",'data-pid="'+pid+'"',"ghost xs"):"")+'</div>':"")+
-    actionChips(meta.actions||[],st.data.undone||[])+sourcesHtml(meta.sources)+suggestionsHtml(pid,m)+changesHtml(meta.changes)+foot+'</div>';
+    actionChips((meta.actions||[]).filter(a=>!String(a.ref||"").startsWith("skill:")),st.data.undone||[])+sourcesHtml(meta.sources)+suggestionsHtml(pid,m)+changesHtml(meta.changes)+foot+'</div>';
   cached=st.cache[m.id]={key,html,blocks:r.blocks};
  }
  const node=h(cached.html);
@@ -189,6 +189,23 @@ function messageTools(pid,m){
  return out.join("");
 }
 /* What the agent did, folded to one line; the steps that need the learner now stay outside the fold. */
+/* Which skills a reply followed, at its top: picked by the learner for the message, or looked up by the agent. */
+function skillsUsed(list){
+ if(!list?.length)return "";
+ return '<div class="msg-skills">'+svg("store",12)+'<span>按技能</span>'+list.map(s=>'<a data-skill-open="'+esc(s.slug)+'" data-tip="'+esc(s.picked?"你为这条消息选的技能":"AI 判断这件事该照这个技能做")+'">'+esc(s.title)+'</a>').join("")+'</div>';
+}
+// Replies from before the skills were noted with them: the skill picked for the question, and any the agent read.
+function olderSkills(list,at){
+ const m=list[at],q=[...list.slice(0,at)].reverse().find(x=>x.role==="user"),out=[];
+ if(q?.meta?.skill)out.push({slug:q.meta.skill,title:q.meta.skill_title||q.meta.skill,picked:true});
+ for(const a of m.meta?.actions||[]){const k=String(a.ref||"").match(/^skill:(.+)$/);if(k&&!out.some(s=>s.slug===k[1]))out.push({slug:k[1],title:(a.summary.match(/「(.+)」/)||[,k[1]])[1]});}
+ return out;
+}
+function liveSkills(st){
+ const out=st.liveSkill?[{...st.liveSkill,picked:true}]:[];
+ for(const a of st.live||[]){const m=String(a.ref||"").match(/^skill:(.+)$/);if(m&&!out.some(s=>s.slug===m[1]))out.push({slug:m[1],title:(a.summary.match(/「(.+)」/)||[,m[1]])[1]});}
+ return out;
+}
 function actionChips(actions,undone=[],live=false){
  if(!actions?.length)return "";
  const gone=a=>undone.includes(a.id)||(S.data?.undone||[]).includes(a.id);
@@ -248,7 +265,8 @@ function renderLive(pid){
  const r=replyHtml(st.stream,true);
  const secs=(st.thinkMs+(st.thinkingNow?Date.now()-st.thinkFrom:0))/1000;
  const thought=thinkingHtml(st.think,0,{now:st.thinkingNow,secs,open:st.liveOpen??S.ui.thinking==="open"});
- slot.innerHTML=(st.stream||st.live.length||thought?'<div class="msg from-ai streaming">'+thought+'<div class="markdown msg-body">'+r.html+'</div>'+actionChips(st.live,[],true)+'</div>':"")+
+ const used=liveSkills(st);
+ slot.innerHTML=(st.stream||st.live.length||thought||used.length?'<div class="msg from-ai streaming">'+skillsUsed(used)+thought+'<div class="markdown msg-body">'+r.html+'</div>'+actionChips(st.live.filter(a=>!String(a.ref||"").startsWith("skill:")),[],true)+'</div>':"")+
   (busy&&!st.stream&&!st.thinkingNow?'<div class="thinking"><span></span><span></span><span></span><b>'+esc(st.waiting||"正在想…")+'</b></div>':"")+
   (st.error?'<div class="chat-error">'+esc(st.error)+(busy?"":button(svg("refresh",12)+" 重试","chat-retry",'data-pid="'+pid+'"',"ghost xs"))+'</div>':
    // A question left without any answer (the reply failed before a word came back, or the program was closed meanwhile).
@@ -341,10 +359,10 @@ async function chatSend(pid,text,extra={}){
  if(text==null&&area){area.value="";fitComposer(pid);}st.input="";
  st.error="";st.stream="";st.live=[];st.waiting="";Object.assign(st,freshThinking());
  try{
-  const skill=text==null?st.skill:null;
+  const skill=text==null?st.skill:null;st.liveSkill=skill?{slug:skill.slug,title:skill.title}:null;
   const r=await rpc("send",{agent:p.agent,message,thread:st.thread,selection,task:extra.task||"",note:screenNote(),answer:extra.answer||null,attach,model:p.model||null,skill:skill?.slug||null});
   st.thread=r.thread;if(extra.selection==null)st.quote="";if(text==null){st.attach=[];st.skill=null;}
-  st.data.messages.push({id:"pending",role:"user",content:message||({check:"我写好了，帮我看看我的代码和运行结果。",hint:"我卡住了，给我一点提示，先别直接给答案。",capture:"把我们讨论过的内容整理成知识卡。"})[extra.task]||"",meta:{selection,answer:extra.answer,attach,skill_title:skill?.title},at:new Date().toISOString()});
+  st.data.messages.push({id:"pending",role:"user",content:message||({check:"我写好了，帮我看看我的代码和运行结果。",hint:"我卡住了，给我一点提示，先别直接给答案。",capture:"把我们讨论过的内容整理成知识卡。"})[extra.task]||"",meta:{selection,answer:extra.answer,attach,skill:skill?.slug,skill_title:skill?.title},at:new Date().toISOString()});
   st.data.busy=true;st.anchored=false;renderChat(pid);anchorQuestion(pid);
  }catch(e){if(text==null&&area){area.value=message;fitComposer(pid);}st.error=e.message;renderLive(pid);throw e;}
 }
@@ -353,6 +371,7 @@ async function chatRetry(pid){
  const st=Chat[pid],p=Dock.panels[pid];if(!st?.data)return;
  if(st.data.busy)return toast("这段对话正在回答；可以先停止");
  st.error="";st.stream="";st.live=[];st.waiting="";Object.assign(st,freshThinking());
+ const asked=[...st.data.messages].reverse().find(m=>m.role==="user")?.meta;st.liveSkill=asked?.skill?{slug:asked.skill,title:asked.skill_title||asked.skill}:null;
  try{await rpc("retry",{thread:st.thread,note:screenNote(),model:p.model||null});st.data.busy=true;st.anchored=false;renderChat(pid);anchorQuestion(pid);}
  catch(e){st.error=e.message;renderLive(pid);}
 }
@@ -368,7 +387,7 @@ function chatEvent(evt){
   if(evt.kind==="tool"){st.waiting="";if(evt.actions?.length){st.live.push(...evt.actions);patchLive(pid);}continue;}
   if(evt.kind==="error"){st.error=evt.message||"请求失败";patchLive(pid);continue;}
   if(evt.kind==="finished"){
-   st.stream="";st.live=[];st.waiting="";Object.assign(st,freshThinking());
+   st.stream="";st.live=[];st.waiting="";st.liveSkill=null;Object.assign(st,freshThinking());
    if(evt.errors?.length)toast(evt.errors.join("；"),"error");
    if(evt.focus!==undefined){
     S.data.active_topic=evt.focus||null;
