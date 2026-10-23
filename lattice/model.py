@@ -1004,7 +1004,9 @@ class Lattice:
         fixed = []
         for status, rel in self.vault.changes():
             before = self.vault.at("HEAD", rel)
-            if rel.startswith(APPEND_ONLY) or rel.startswith(".lattice/") or rel == "AGENTS.md" or rel.startswith("agents/"):
+            # Lattice's own conversation and journal lines wait uncommitted for the next commit; only a change it did
+            # not write itself is put back, or every shell command would throw away what was said since.
+            if (rel.startswith(APPEND_ONLY) or rel.startswith(".lattice/") or rel == "AGENTS.md" or rel.startswith("agents/")) and not self.vault.ours(rel):
                 self._put_back(rel, before)
                 fixed.append(f"{rel}：对话、轨迹和规则只由 Lattice 和学习者维护，已还原")
             elif status == "D":

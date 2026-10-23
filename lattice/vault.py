@@ -125,6 +125,13 @@ class Vault:
         st = self.path(rel).stat()
         return st.st_mtime_ns, st.st_size
 
+    def ours(self, rel):
+        """Whether a file is as Lattice itself last wrote or saw it."""
+        try:
+            return self.known.get(rel) == self._stat(rel)
+        except OSError:
+            return False
+
     def mtime(self, rel):
         """A file's version stamp, as a string: nanoseconds do not survive a JavaScript number."""
         try:
