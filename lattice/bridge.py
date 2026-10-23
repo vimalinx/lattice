@@ -766,6 +766,11 @@ class Bridge(QObject):
     def rpc_clipboard_text(self):
         return QGuiApplication.clipboard().text()
 
+    def rpc_clipboard_set(self, text):
+        """Copy buttons write the system clipboard from here: the page itself may not (Qt keeps scripts off it)."""
+        QGuiApplication.clipboard().setText(str(text))
+        return True
+
     def rpc_project_add(self, path=None):
         return self.lattice.add_project(Path(path).name, path) if path else None
 

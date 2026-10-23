@@ -267,7 +267,7 @@ async function onAction(a){
  case "chat-model":return modelMenu(pid,a.closest(".menu")?Dock.els[pid]?.querySelector(".model-tag")||a:a);
  case "chat-model-set":return setChatModel(pid,a.dataset.api,a.dataset.model);
  case "chat-model-other":{const m=chatModel(pid),name=await askText("模型名",m.model,{hint:"用「"+((S.config?.apis||[]).find(x=>x.id===m.api)?.label||m.api)+"」这个连接",ok:"换上"});if(name&&name.trim())setChatModel(pid,m.api,name.trim());return;}
- case "msg-copy":{const m=Chat[pid]?.data?.messages.find(x=>String(x.id)===a.dataset.mid);if(m){await navigator.clipboard.writeText(m.content);toast("已复制");}return;}
+ case "msg-copy":{const m=Chat[pid]?.data?.messages.find(x=>String(x.id)===a.dataset.mid);if(m){await writeClipboard(m.content);toast("已复制");}return;}
  case "zoom-step":{const dir=Number(a.dataset.dir),again=Menus.reopen;stepZoom(pid,dir||0);if(dir&&again)again();return;}
  case "chat-more":return chatMoreMenu(pid,a);
  case "view-step":case "view-set":case "view-reset":case "ui-set":case "ui-step":{
@@ -286,7 +286,7 @@ async function onAction(a){
   }
   if(again)again();return;
  }
- case "chat-copy-all":await navigator.clipboard.writeText(conversationMarkdown(pid));return toast("整段对话已复制（Markdown）");
+ case "chat-copy-all":await writeClipboard(conversationMarkdown(pid));return toast("整段对话已复制（Markdown）");
  case "chat-save-note":{const st=Chat[pid],topic=st.data?.head?.topic||null;
   const r=await rpc("doc_create",{kind:"note",title:"对话 · "+(topic?topicTitle(topic):agentTitle(Dock.panels[pid].agent))+" · "+fmtDate(new Date().toISOString()),topic,body:conversationMarkdown(pid)});
   await refreshState();return openFile(r.path);}
@@ -318,7 +318,7 @@ async function onAction(a){
   return toast("交给快答看了，主会话接着讲");
  }
  case "card-reveal":{const card=a.closest(".mini-card");card.querySelector(".mini-answer").hidden=false;a.parentElement.remove();return;}
- case "code-copy":{const n=el("#"+a.dataset.target);if(n){await navigator.clipboard.writeText(n.textContent);toast("已复制");}return;}
+ case "code-copy":{const n=el("#"+a.dataset.target);if(n){await writeClipboard(n.textContent);toast("已复制");}return;}
  case "code-run":{const n=el("#"+a.dataset.target);if(!n)return;const r=await rpc("run",{code:n.textContent,lang:a.dataset.lang});snippetRuns[a.dataset.target]={run:r.run,outputs:[]};
   const box=el('[data-snippet="'+a.dataset.target+'"]');if(box)box.innerHTML='<div class="run-head"><span class="run-state s-running">运行中…</span></div>';return;}
  case "code-take":{const n=el("#"+a.dataset.target);if(!n)return;const ext=CODE_EXT[(a.dataset.lang||"").toLowerCase()]||".txt";

@@ -1134,3 +1134,5 @@ input[type=checkbox],input[type=radio],input[type=range]{accent-color:var(--acce
 .accel-row b{color:var(--text);font-weight:550}
 .accel-row.on>svg{color:var(--accent)}
 .accel-box{min-width:0;overflow-wrap:anywhere}.accel-box .field-label{display:block}
+/* the parts around text that are not text: not selected along with it */
+.code-bar,.msg-foot,.att-x,.suggestion-actions,.sc-foot,.cmp-foot,.cmp-label,.sc-cols,.thinking-box summary,.msg-skills>span,.to-bottom{user-select:none}

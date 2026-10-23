@@ -145,8 +145,9 @@ function fieldInsert(f,text){
  if(view){view.dispatch(view.state.replaceSelection(text));view.focus();return;}
  f.focus();document.execCommand(text?"insertText":"delete",false,text);
 }
+// Through the program: the page is not allowed to write the clipboard itself.
 async function writeClipboard(text){
- try{await navigator.clipboard.writeText(text);}
+ try{await rpc("clipboard_set",{text:String(text??"")});}
  catch(_){const t=document.createElement("textarea");t.value=text;document.body.appendChild(t);t.select();document.execCommand("copy");t.remove();}
 }
 async function contextDo(kind,ctx){
@@ -314,3 +315,28 @@ function pickPath({mode="dir",title="选择",ok="确定",hint="",name="",ext="",
   go(start||Picker.last[mode]||null).then(()=>{const f=q(".pk-file");if(f){f.focus();const dot=f.value.lastIndexOf(".");f.setSelectionRange(0,dot>0?dot:f.value.length);}});
  });
 }
+
+/* ---- copying a selection from what Lattice shows: the text only. Buttons, toolbars and times around it stay out, and
+   a formula copies as its TeX ($…$), not as the drawn symbols with their hidden source repeated. ------------------ */
+const COPY_SKIP=".code-bar,.msg-foot,.att-x,.sc-take,.cm-merge-revert,.suggestion-actions,.sc-foot,.cmp-foot,button,[data-skill-open] svg,.thinking-box summary";
+document.addEventListener("copy",e=>{
+ const sel=getSelection();if(!sel?.rangeCount||sel.isCollapsed)return;
+ const range=sel.getRangeAt(0),from=range.commonAncestorContainer.nodeType===1?range.commonAncestorContainer:range.commonAncestorContainer.parentElement;
+ // Inside fields and editors the field's own copy is right; only shown text is cleaned.
+ if(!from?.closest?.(".markdown,.msg,.reader-page,.cmp-reply")||from.closest("input,textarea,.cm-editor"))return;
+ const frag=range.cloneContents();
+ if(!frag.querySelector(COPY_SKIP+",.katex"))return;
+ for(const t of frag.querySelectorAll(".tex[data-tex]"))t.replaceWith(document.createTextNode(t.dataset.display?"\n$$"+t.dataset.tex+"$$\n":"$"+t.dataset.tex+"$"));
+ for(const k of frag.querySelectorAll(".katex")){
+  const tex=k.querySelector('annotation[encoding="application/x-tex"]')?.textContent?.trim();if(!tex)continue;
+  const block=!!k.closest(".katex-display");k.replaceWith(document.createTextNode(block?"\n$$"+tex+"$$\n":"$"+tex+"$"));
+ }
+ frag.querySelectorAll(".katex-display").forEach(d=>d.replaceWith(...d.childNodes));
+ frag.querySelectorAll(COPY_SKIP).forEach(n=>n.remove());
+ // innerText needs layout: the cleaned copy is laid out off screen for a moment, in the reading styles.
+ const box=document.createElement("div");box.className="markdown";box.style.cssText="position:fixed;left:-99999px;top:0;width:800px;white-space:normal";
+ box.appendChild(frag);document.body.appendChild(box);
+ const text=box.innerText.replace(/\n{3,}/g,"\n\n").trim();box.remove();
+ if(!text)return;
+ e.preventDefault();e.clipboardData.setData("text/plain",text);
+});

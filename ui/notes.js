@@ -326,7 +326,7 @@ async function notesAction(kind,a){
   }
   case "note-dup":{const d=(await rpc("file_read",{path})).doc;if(!d)return;return newNote(folderOf(path),d.body,uniqueTitle(d.title+" 副本"));}
   case "note-star":{const on=!(S.data.starred||[]).includes(a.dataset.id);S.data.starred=await rpc("star",{id:a.dataset.id,on});toast(on?"已收藏，在笔记列表最上面":"已取消收藏");return renderSide();}
-  case "note-copylink":{const text="[["+a.dataset.title+"]]";try{await navigator.clipboard.writeText(text);}catch(_){const t=document.createElement("textarea");t.value=text;document.body.appendChild(t);t.select();document.execCommand("copy");t.remove();}return toast("已复制 "+text);}
+  case "note-copylink":{const text="[["+a.dataset.title+"]]";await writeClipboard(text);return toast("已复制 "+text);}
   case "note-delete":{
    const folder=a.dataset.kind==="folder";
    const inside=folder?(S.data.docs||[]).filter(d=>d.path.startsWith(path+"/")).length:0;

@@ -126,7 +126,9 @@ const texCache=new Map();
 function texHtml(tex,display){
  const key=(display?"D":"I")+tex;if(texCache.has(key))return texCache.get(key);
  let out;
- try{out=typeof katex==="undefined"?'<code>'+esc(tex)+'</code>':katex.renderToString(tex,{displayMode:display,throwOnError:false,strict:"ignore",output:"html"});}
+ // The source stays with the drawing, so a copied formula comes out as TeX.
+ try{out=typeof katex==="undefined"?'<code>'+esc(tex)+'</code>':'<span class="tex" data-tex="'+esc(tex)+'"'+(display?' data-display="1"':"")+'>'+
+  katex.renderToString(tex,{displayMode:display,throwOnError:false,strict:"ignore",output:"html"})+'</span>';}
  catch(_){out='<code class="math-error" title="公式写错了">'+esc(tex)+'</code>';}
  if(texCache.size>800)texCache.clear();texCache.set(key,out);return out;
 }
