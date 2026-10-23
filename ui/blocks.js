@@ -290,6 +290,8 @@ function compileExpr(src){
  while(i<s.length){
   const c=s[i];
   if(/\s/.test(c)){i++;continue;}
+  // Words in quotes, for a readout that names what is happening: eta < 1 ? '单调靠近' : '震荡'.
+  if(c==="'"||c==='"'||c==="「"){const end=s.indexOf(c==="「"?"」":c,i+1);if(end<0)throw new Error("引号没有配对");toks.push({t:"s",v:s.slice(i+1,end)});i=end+1;continue;}
   const num=/^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?/i.exec(s.slice(i));if(num){toks.push({t:"n",v:Number(num[0])});i+=num[0].length;continue;}
   const id=/^[A-Za-z_Ͱ-Ͽ][\wͰ-Ͽ]*/.exec(s.slice(i));if(id){toks.push({t:"id",v:id[0]});i+=id[0].length;continue;}
   const op=/^(<=|>=|==|!=|&&|\|\||\*\*|[-+*/%^()<>,?:!])/.exec(s.slice(i));if(op){toks.push({t:"op",v:op[0]==="**"?"^":op[0]});i+=op[0].length;continue;}
@@ -300,7 +302,7 @@ function compileExpr(src){
   "+":[5,(a,b)=>a+b],"-":[5,(a,b)=>a-b],"*":[6,(a,b)=>a*b],"/":[6,(a,b)=>a/b],"%":[6,(a,b)=>a%b],"^":[8,(a,b)=>Math.pow(a,b)]};
  const atom=()=>{
   const t=take();if(!t)throw new Error("式子没写完");
-  if(t.t==="n")return()=>t.v;
+  if(t.t==="n"||t.t==="s")return()=>t.v;
   if(t.t==="op"&&t.v==="("){const e=expr(0);take(")");return e;}
   if(t.t==="op"&&(t.v==="-"||t.v==="+"||t.v==="!")){const e=unary();return t.v==="-"?v=>-e(v):t.v==="!"?v=>+!e(v):e;}
   if(t.t==="id"){

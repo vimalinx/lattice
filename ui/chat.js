@@ -269,7 +269,7 @@ function renderLive(pid){
   waitingHtml(st,busy)+
   (st.error?'<div class="chat-error">'+esc(st.error)+(busy?"":button(svg("refresh",12)+" 重试","chat-retry",'data-pid="'+pid+'"',"ghost xs"))+'</div>':
    // A question left without any answer (the reply failed before a word came back, or the program was closed meanwhile).
-   !busy&&st.data?.messages?.at(-1)?.role==="user"&&st.data.messages.at(-1).id!=="pending"?'<div class="chat-error quiet">这一问还没有得到回答'+button(svg("refresh",12)+" 重新回答","chat-retry",'data-pid="'+pid+'"',"ghost xs")+'</div>':"");
+   !busy&&st.data?.messages?.at(-1)?.role==="user"&&st.data.messages.at(-1).id!=="pending"?'<div class="chat-error quiet">这一问还没有得到回答'+(st.data.failure?.message?'<small class="fail-why">'+esc(st.data.failure.at+" 那次出错："+shorten(st.data.failure.message,240))+(/502|503|forbidden|upstream/i.test(st.data.failure.message)?"。这是服务那边拒绝了，可以换个模型试试":"")+'</small>':"")+button(svg("refresh",12)+" 重新回答","chat-retry",'data-pid="'+pid+'"',"ghost xs")+'</div>':"");
  if(r.blocks.length)mountBlocks(slot,r.blocks,{thread:st.thread,message:0,answers:{},pid,live:true});
 }
 /* What the reply is doing while no words come: a tool at work (with what it works on and for how long), or thinking

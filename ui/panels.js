@@ -177,6 +177,20 @@ async function renderSettings(node,page){
  box.innerHTML='<div class="loading">…</div>';
  S.config=await rpc("settings");
  box.innerHTML=await SETTINGS_RENDER[page](S.config,node);
+ if(page==="apis")fitProviders(box);
+}
+/* The provider list and its details scroll on their own; they are as tall as the room left in the settings window
+   (not the screen), so in a small or floating window their ends are not hidden below its edge. */
+function fitProviders(box){
+ const prov=box.querySelector(".prov");if(!prov)return;
+ const fit=()=>{
+  if(!prov.isConnected)return box.__fit?.disconnect();
+  const k=box.getBoundingClientRect().height/(box.offsetHeight||1)||1;
+  const top=(prov.getBoundingClientRect().top-box.getBoundingClientRect().top)/k+box.scrollTop;
+  const room=Math.max(240,Math.round(box.clientHeight-top-24)),stacked=getComputedStyle(prov).gridTemplateColumns.split(" ").length<2;
+  for(const el of prov.querySelectorAll(".prov-list,.prov-detail"))el.style.maxHeight=(stacked&&el.classList.contains("prov-list")?220:room)+"px";
+ };
+ fit();box.__fit?.disconnect();box.__fit=new ResizeObserver(fit);box.__fit.observe(box);
 }
 const opt=(value,list)=>list.map(([v,t])=>'<option value="'+esc(v)+'"'+(String(value)===String(v)?" selected":"")+'>'+esc(t)+'</option>').join("");
 const SETTINGS_RENDER={

@@ -98,6 +98,7 @@ class Bridge(QObject):
         self.checking = {}
         # Skill comparisons: id -> the conversation they continue and what each side wrote.
         self.compares = {}
+        self.failures = {}   # thread -> why its last turn failed, until the next one goes through
         self.reviews = {}
         self.runs, self.kernels, self.kernel_states, self.batches = {}, {}, {}, {}
         self.screen, self.edits, self.last_write = {}, {}, 0.0
@@ -1314,6 +1315,7 @@ class Bridge(QObject):
         answers = {f"{d['message']}:{d['block']}": d["text"] for d in (e["data"] for e in l.journal("answered", ref=thread, limit=300))
                    if d.get("source") == thread and "message" in d}
         return {"thread": thread, "head": head, "messages": l.messages(thread), "busy": thread in self.busy, "status": self.status.get(thread),
+                **({"failure": self.failures[thread]} if thread in self.failures else {}),
                 "undone": sorted(l.undone()), "decisions": decisions, "answers": answers,
                 "practice": l.practice(thread) if head.get("practice") else None}
 
@@ -1556,6 +1558,8 @@ class Bridge(QObject):
             self._finish(evt)
         elif evt["kind"] == "error":
             self.status[thread] = "error"
+            # Kept, so a question left without an answer still says why after the conversation is reopened.
+            self.failures[thread] = {"message": str(evt.get("message") or "")[:600], "at": time.strftime("%H:%M")}
         elif evt["kind"] == "connection_test" and evt.get("ok") and evt.get("models") and evt.get("api"):
             self.config.remember_models(evt["api"], evt["models"])
         self.announce(evt)
@@ -1607,6 +1611,8 @@ class Bridge(QObject):
         self.busy.discard(thread)
         retried = thread in self.retrying
         self.retrying.discard(thread)
+        if evt.get("stop_reason", "end_turn") == "end_turn":
+            self.failures.pop(thread, None)
         turn = self.turns.pop(thread, tools.Turn())
         _, topic, practice, _ = self.contexts.get(thread, (agent, None, None, set()))
         reason = evt.get("stop_reason", "end_turn")
