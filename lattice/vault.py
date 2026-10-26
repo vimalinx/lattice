@@ -37,6 +37,10 @@ target/
 """
 # Journal and conversations only ever grow; undoing an agent's change never rewrites them.
 APPEND_ONLY = ("journal/", "threads/")
+# What the learner is like, as the agents keep it (they add to it only through Lattice, one line at a time).
+ME = "me.md"
+# Files at the vault's root kept by Lattice and the learner: the rules every agent reads, and what it is told about them.
+KEPT = ("AGENTS.md", ME)
 TEXT_LIMIT = 4 * 1024 * 1024
 
 

@@ -104,6 +104,17 @@ label.check input{margin:0}
 .side-row:hover .row-btn{opacity:1}
 .row-btn:hover{background:var(--surface-hover);color:var(--text)}
 .dot-on{color:var(--accent);font-size:9px}
+/* Topics with their conversations under them */
+.tp-fold{flex:0 0 auto;display:grid;place-items:center;width:14px;height:16px;margin:0 -5px 0 -4px;color:var(--subtle);border-radius:4px}
+.tp-fold:hover{background:var(--surface-hover);color:var(--text)}
+.tp-row.here>.t{font-weight:600}
+.ss-row{padding-left:calc(26px + var(--d,0)*14px - 14px);color:var(--muted)}
+.ss-row:hover{color:var(--text)}
+.ss-row.on{background:var(--accent-glow);box-shadow:inset 2px 0 0 var(--accent);color:var(--text);font-weight:600}
+.ss-row .ss-busy{display:inline-block}
+.ss-kept{color:var(--subtle);font-size:11.5px;padding-left:calc(26px + var(--d,0)*14px - 14px)}
+.ss-kept>svg{color:var(--subtle)}
+.ss-none{margin-left:calc(26px + var(--d,0)*14px - 14px);margin-top:1px;margin-bottom:3px}
 .stage-dot{display:inline-block;width:7px;height:7px;border-radius:50%}
 .side-group{margin-top:8px}
 .side-group h6{margin:6px 8px 3px;font-size:10.5px;color:var(--subtle);font-weight:600;letter-spacing:.5px}
@@ -299,6 +310,12 @@ label.check input{margin:0}
 .sources a{padding:1px 8px;border:1px solid var(--line);border-radius:20px}
 .card-sort{display:grid;grid-template-columns:minmax(120px,180px) 1fr;gap:12px}
 .card-sort select{width:100%}
+.remembered{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11.5px;color:var(--muted)}
+.remembered>svg{flex:0 0 auto;color:var(--accent)}
+.remembered a{cursor:pointer;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.remembered a:hover{color:var(--text)}
+.remembered.undone a{text-decoration:line-through;color:var(--subtle)}
+.remembered small{color:var(--subtle)}
 .cards-noted{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;font-size:11.5px;color:var(--subtle)}
 .cards-noted>span{display:inline-flex;align-items:center;gap:4px}
 .cards-noted a{display:inline-flex;align-items:center;gap:5px;padding:1px 8px 1px 3px;border:1px solid var(--line);border-radius:20px;color:var(--muted);cursor:pointer}

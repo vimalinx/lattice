@@ -16,7 +16,7 @@ const SIDE_SECTIONS={
 };
 // Things that belong to a list live in its header (知识图 under 主题, 回顾 under 知识卡); only the rest sit at the bottom.
 const SIDE_LAUNCH=[["search","搜索 · Ctrl K","palette"],["history","学习轨迹","open-journal"],["home","开始","open-home"]];
-const Side={entries:{},open:new Set(["code","notebooks","data"]),query:"",hits:null,stage:"",cardQuery:""};
+const Side={entries:{},open:new Set(["code","notebooks","data"]),topicOpen:new Set(),topicShut:new Set(),archOpen:new Set(),query:"",hits:null,stage:"",cardQuery:""};
 function renderActivity(){
  const bar=el("#activity");if(!bar)return;
  bar.innerHTML='<div class="act-logo" title="Lattice">'+logo()+'</div>'+
@@ -55,15 +55,34 @@ function sideGroup(title,rows,empty=""){
  return '<div class="side-group"><h6>'+esc(title)+'</h6>'+(rows.join("")||'<p class="side-empty">'+esc(empty)+'</p>')+'</div>';
 }
 const docsOf=kind=>(S.data.docs||[]).filter(d=>d.kind===kind);
-function topicsSection(){
- const topics=S.data.topics||[],active=S.data.active_topic;
- const row=(t,depth)=>sideRow("map",t.title,'data-action="open-file" data-path="'+esc(t.path)+'" style="--d:'+depth+'"',t.id===active?'<b class="dot-on">●</b>':"",
-  t.id===active?"":'<button class="row-btn" data-action="topic-focus" data-id="'+esc(t.id)+'" title="在这里接着学">'+svg("bot",12)+'</button>');
- const tree=(parent,depth,state)=>topics.filter(t=>(t.parent||null)===parent&&t.state===state).flatMap(t=>[row(t,depth),...tree(t.id,depth+1,state)]);
- const roots=state=>topics.filter(t=>t.state===state&&(!t.parent||!topics.some(x=>x.id===t.parent&&x.state===state))).flatMap(t=>[row(t,0),...tree(t.id,1,state)]);
- return {tools:iconButton("network","open-map","知识图"),body:sideRow("bot","默认对话（不属于任何主题）",'data-action="topic-focus" data-id=""',active?"":'<b class="dot-on">●</b>')+
+/* Topics with their conversations under them, as one tree. Clicking a topic learns there (in the conversation it last had
+   open); clicking the topic being learned folds it. Its own conversations come first, then its branches. */
+async function topicsSection(){
+ const topics=S.data.topics||[],active=S.data.active_topic||"";
+ const r=await safe(()=>rpc("sessions",{agent:"tutor",every:true})),byTopic={};
+ for(const x of r?.sessions||[])(byTopic[x.topic||""]=byTopic[x.topic||""]||[]).push(x);
+ const open=key=>Side.topicOpen.has(key)||(key===active&&!Side.topicShut.has(key));
+ const session=(x,depth)=>'<div class="side-row ss-row'+(x.current&&(x.topic||"")===active?" on":"")+'" data-action="session-open" data-id="'+esc(x.id)+'" style="--d:'+depth+'" title="'+esc(sessionTip(x))+'">'+
+  '<span class="t" data-session-title="'+esc(x.id)+'">'+esc(x.title)+'</span><small>'+sessionMeta(x)+'</small>'+
+  '<button class="row-btn" data-action="session-more" data-id="'+esc(x.id)+'" data-archived="'+(x.archived?1:0)+'" title="改名、归档、删除">'+svg("dots",12)+'</button></div>';
+ const sessions=(key,depth)=>{
+  const list=byTopic[key]||[],live=list.filter(x=>!x.archived),kept=list.filter(x=>x.archived),shown=Side.archOpen.has(key);
+  return live.map(x=>session(x,depth)).join("")+(list.length?"":'<p class="side-empty ss-none" style="--d:'+depth+'">还没有会话</p>')+
+   (kept.length?'<div class="side-row ss-kept" data-action="session-kept" data-key="'+esc(key)+'" style="--d:'+depth+'">'+svg(shown?"chevrondown":"chevron",11)+'<span class="t">已归档 '+kept.length+'</span></div>'+(shown?kept.map(x=>session(x,depth)).join(""):""):"");
+ };
+ const head=(key,icon,title,depth,extra)=>'<div class="side-row tp-row'+(key===active?" here":"")+'" data-action="topic-row" data-id="'+esc(key)+'" style="--d:'+depth+'" title="'+esc(title)+'">'+
+  '<span class="tp-fold" data-action="topic-fold" data-id="'+esc(key)+'">'+svg(open(key)?"chevrondown":"chevron",11)+'</span>'+svg(icon,14)+'<span class="t">'+esc(title)+'</span>'+
+  (key===active?'<b class="dot-on">●</b>':"")+'<button class="row-btn" data-action="session-new" data-agent="tutor" data-topic="'+esc(key)+'" title="在这里开新会话">'+svg("plus",12)+'</button>'+(extra||"")+'</div>';
+ const node=(t,depth,state)=>head(t.id,"map",t.title,depth,'<button class="row-btn" data-action="open-file" data-path="'+esc(t.path)+'" title="打开主题页">'+svg("document",12)+'</button>')+
+  (open(t.id)?sessions(t.id,depth+1)+tree(t.id,depth+1,state).join(""):"");
+ const tree=(parent,depth,state)=>topics.filter(t=>(t.parent||null)===parent&&t.state===state).map(t=>node(t,depth,state));
+ const roots=state=>topics.filter(t=>t.state===state&&(!t.parent||!topics.some(x=>x.id===t.parent&&x.state===state))).map(t=>node(t,0,state));
+ return {tools:iconButton("network","open-map","知识图"),body:head("","bot","默认对话（不属于任何主题）",0)+(open("")?sessions("",1):"")+
   sideGroup("进行中",roots("active"),"还没有主题。和主会话聊着聊着，它会把值得深入的内容建成主题。")+sideGroup("先放一放",roots("parked"))+sideGroup("学完了",roots("completed"))};
 }
+// Topics folded or unfolded by hand; the one being learned is open unless folded.
+function topicFold(key){const on=Side.topicOpen.has(key)||(key===(S.data.active_topic||"")&&!Side.topicShut.has(key));
+ if(on){Side.topicOpen.delete(key);Side.topicShut.add(key);}else{Side.topicShut.delete(key);Side.topicOpen.add(key);}return renderSide();}
 function cardsSection(){
  const q=Side.cardQuery.trim().toLowerCase(),cards=(S.data.cards||[]).filter(c=>(!Side.stage||c.stage===Side.stage)&&(!q||c.title.toLowerCase().includes(q)));
  // Whether a card is due is decided once, by the backend, for the UI and the agents alike.

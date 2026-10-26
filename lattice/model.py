@@ -18,7 +18,7 @@ from pathlib import Path
 import re
 
 from .index import Index, dump, stamp_of, uid
-from .vault import APPEND_ONLY, MD_KINDS, VAULT_PATH, Vault, VaultError, join_frontmatter, kind_of, now, slug, split_frontmatter
+from .vault import APPEND_ONLY, KEPT, ME, MD_KINDS, VAULT_PATH, Vault, VaultError, join_frontmatter, kind_of, now, slug, split_frontmatter
 
 STAGES = ("suggested", "seen", "explained", "applied")
 # What kind of knowledge a card holds: what something is, why it holds, how to do it, a way of seeing, a fact to know.
@@ -569,7 +569,7 @@ class Lattice:
 
     def rename_file(self, path, new_name):
         _, rel = self.resolve(path)
-        if rel is None or rel.startswith(APPEND_ONLY) or rel == "AGENTS.md":
+        if rel is None or rel.startswith(APPEND_ONLY) or rel in KEPT:
             raise ValueError("这个文件不能在这里改名")
         target = rel.rsplit("/", 1)[0] + "/" + slug(new_name, 120) if "/" in rel else slug(new_name, 120)
         self.vault.move(rel, target)
@@ -579,7 +579,7 @@ class Lattice:
 
     def delete_file(self, path):
         absolute, rel = self.resolve(path)
-        if rel is None or rel.startswith(APPEND_ONLY) or rel in {"AGENTS.md", ""} or "/" not in rel and absolute.is_dir():
+        if rel is None or rel.startswith(APPEND_ONLY) or rel in {*KEPT, ""} or "/" not in rel and absolute.is_dir():
             raise ValueError("这个文件不能删除")
         inside = [self.vault.rel(p) for p in absolute.rglob("*") if p.is_file()] if absolute.is_dir() else [rel]
         self.vault.remove(rel)
@@ -829,6 +829,38 @@ class Lattice:
             return True
         return self._nb_change(path, change)
 
+    # ---- what the agents know about the learner -------------------------------------------------------------
+    ME_HEAD = ("# 关于我\n\nLattice 的每个 AI 每一轮都会读这份记录。AI 记下的每一条都显示在当时那条回复下面，点「撤销」就去掉；"
+               "你也可以直接改这个文件。\n\n")
+
+    def me(self):
+        """What holds about the learner whatever they are learning: one line each."""
+        if not self.vault.path(ME).exists():
+            return []
+        return [line[2:].strip() for line in self.vault.read_text(ME).splitlines() if line.startswith("- ") and line[2:].strip()]
+
+    def remember(self, text, replace=None):
+        """Note one thing about the learner, or change (or, with no text, drop) the line `replace`."""
+        lines = self.vault.read_text(ME).splitlines() if self.vault.path(ME).exists() else self.ME_HEAD.splitlines()
+        text = re.sub(r"\s+", " ", str(text or "")).strip()[:300]
+        if replace is not None:
+            at = next((i for i, line in enumerate(lines) if line.startswith("- ") and line[2:].strip() == str(replace).strip()), None)
+            if at is None:
+                raise ValueError("没有这一条：replace 要和记录里的某一条一字不差")
+            lines[at:at + 1] = ["- " + text] if text else []
+        elif not text:
+            raise ValueError("要记的内容是空的")
+        elif text in self.me():
+            return False
+        elif len(self.me()) >= 40:
+            raise ValueError("记录已经有 40 条：先用 replace 把相近的几条合并")
+        else:
+            while lines and not lines[-1].strip():
+                lines.pop()
+            lines += ([""] if lines and not lines[-1].startswith("- ") else []) + ["- " + text]
+        self.vault.write_text(ME, "\n".join(lines).rstrip() + "\n")
+        return True
+
     # ---- conversations ------------------------------------------------------------------------------
     def thread_new(self, agent, topic=None, title=None, attrs=None):
         t = now()
@@ -840,34 +872,56 @@ class Lattice:
 
     def thread_for(self, agent, topic=None):
         """The conversation an agent is having about a topic (None: the default conversation)."""
-        # Practice conversations and skill trials are threads of their own, never the conversation itself.
-        row = self.index.one("SELECT id FROM threads WHERE agent=? AND topic IS ? AND json_extract(head,'$.practice') IS NULL "
-                             "AND json_extract(head,'$.trial') IS NULL AND COALESCE(json_extract(head,'$.archived'),0)=0 ORDER BY created DESC LIMIT 1",
-                             (agent, topic))
-        if row:
-            return row["id"]
+        current = self.current_thread(agent, topic)
+        if current:
+            return current
         name = self.doc(topic, "topic")["title"] if topic else None
         return self.thread_new(agent, topic, ({"tutor": "主会话", "flash": "快答"}.get(agent, agent)) + (" · " + name if name else ""))["id"]
 
-    def sessions(self, agent, topic=None):
-        """An agent's conversations about a topic (None: the default conversation), newest first: a topic can have many,
-        each named by the learner or else by its first question."""
+    def current_thread(self, agent, topic=None):
+        """The one the learner last opened about this topic, while it is still there and not archived; else the newest."""
+        # Practice conversations and skill trials are threads of their own, never the conversation itself.
+        live = ("agent=? AND topic IS ? AND json_extract(head,'$.practice') IS NULL AND json_extract(head,'$.trial') IS NULL "
+                "AND COALESCE(json_extract(head,'$.archived'),0)=0")
+        picked = (self.setting("current_threads") or {}).get(f"{agent}:{topic or ''}")
+        row = (picked and self.index.one(f"SELECT id FROM threads WHERE id=? AND {live}", (picked, agent, topic))
+               or self.index.one(f"SELECT id FROM threads WHERE {live} ORDER BY created DESC LIMIT 1", (agent, topic)))
+        return row["id"] if row else None
+
+    def thread_pick(self, ident):
+        """Open a conversation as its agent's one about its topic, until another is picked."""
+        head = self.thread_head(ident)
+        picked = self.setting("current_threads") or {}
+        picked[f"{head['agent']}:{head.get('topic') or ''}"] = ident
+        self.set_setting("current_threads", picked)
+        return head
+
+    def sessions(self, agent, topic=None, every=False):
+        """An agent's conversations about a topic (None: the default conversation; every: about any topic), newest first:
+        a topic can have many, each named by the learner or else by its first question."""
         rows = self.index.rows("SELECT t.id, t.head, t.created, t.updated, COUNT(m.id) AS n, "
                                "(SELECT content FROM messages WHERE thread=t.id AND role='user' ORDER BY id LIMIT 1) AS first, "
                                "(SELECT content FROM messages WHERE thread=t.id AND role='user' ORDER BY id DESC LIMIT 1) AS last, "
                                "(SELECT content FROM messages WHERE thread=t.id AND role='assistant' ORDER BY id DESC LIMIT 1) AS answer "
-                               "FROM threads t LEFT JOIN messages m ON m.thread=t.id WHERE t.agent=? AND t.topic IS ? "
+                               "FROM threads t LEFT JOIN messages m ON m.thread=t.id WHERE t.agent=? AND (? OR t.topic IS ?) "
                                "AND json_extract(t.head,'$.practice') IS NULL AND json_extract(t.head,'$.trial') IS NULL "
-                               "GROUP BY t.id ORDER BY t.created DESC", (agent, topic))
+                               "GROUP BY t.id ORDER BY t.created DESC", (agent, every, topic))
         out = []
         for r in rows:
             head = json.loads(r["head"])
             first = re.sub(r"\s+", " ", r["first"] or "").strip()
-            out.append({"id": r["id"], "title": head["title"] if head.get("named") else (first[:28] or "新会话"), "named": bool(head.get("named")),
+            out.append({"id": r["id"], "topic": head.get("topic"), "summary": (head.get("summary") or {}).get("text", ""), "title": head["title"] if head.get("named") else (first[:28] or "新会话"), "named": bool(head.get("named")),
                         "archived": bool(head.get("archived")), "created": r["created"], "updated": r["updated"], "messages": r["n"],
                         "last": re.sub(r"\s+", " ", r["last"] or "").strip()[:120],
                         "answer": re.sub(r"\s+", " ", re.sub(r"```.*?(```|$)", "", r["answer"] or "", flags=re.S)).strip()[:160]})
         return out
+
+    def unsaved_threads(self):
+        """The tutor's conversations with replies since they were last saved, and when the last thing was said in each."""
+        return self.index.rows("SELECT t.id AS thread, MAX(m.at) AS at FROM threads t JOIN messages m ON m.thread=t.id "
+                               "WHERE t.agent='tutor' AND json_extract(t.head,'$.practice') IS NULL AND json_extract(t.head,'$.trial') IS NULL "
+                               "AND m.id > COALESCE(json_extract(t.head,'$.summary.upto'),0) GROUP BY t.id "
+                               "HAVING SUM(m.role='assistant') > 0")
 
     def thread_head(self, ident):
         row = self.index.one("SELECT head FROM threads WHERE id=?", (ident,))
@@ -1035,7 +1089,7 @@ class Lattice:
             before = self.vault.at("HEAD", rel)
             # Lattice's own conversation and journal lines wait uncommitted for the next commit; only a change it did
             # not write itself is put back, or every shell command would throw away what was said since.
-            if (rel.startswith(APPEND_ONLY) or rel.startswith(".lattice/") or rel == "AGENTS.md" or rel.startswith("agents/")) and not self.vault.ours(rel):
+            if (rel.startswith(APPEND_ONLY) or rel.startswith(".lattice/") or rel in KEPT or rel.startswith("agents/")) and not self.vault.ours(rel):
                 self._put_back(rel, before)
                 fixed.append(f"{rel}：对话、轨迹和规则只由 Lattice 和学习者维护，已还原")
             elif status == "D":

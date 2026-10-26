@@ -184,6 +184,7 @@ async function onEvent(evt){
  if(evt.type==="agent"&&String(evt.thread||"").startsWith("compare:"))return compareEvent(evt);
  if(evt.type==="agent")return chatEvent(evt);
  if(evt.type==="skill_change"){skillsChanged();return skillChangeEvent(evt);}
+ if(evt.type==="saved"){sideChanged([]);return;}
  if(evt.type==="cards"){refreshState();for(const pid of Object.keys(Chat))if(Chat[pid].thread===evt.thread)loadChat(pid);return;}
  if(evt.type==="run")return runEvent(evt);
  if(evt.type==="kernel"){kernelEvent(evt);if(["run_finished","batch_finished"].includes(evt.kind))journalsChanged();return;}
@@ -295,6 +296,7 @@ async function onAction(a){
  case "zoom-reset-all":Object.keys(Dock.panels).forEach(x=>{if(Dock.panels[x].zoom)setZoom(x,null);});return toast("所有窗口都回到了各自面板的默认大小");
  case "chat-cancel":return rpc("cancel",{thread:Chat[pid].thread});
  case "chat-task":return chatSend(pid,"",{task:a.dataset.task});
+ case "session-kept":{const k=a.dataset.key;Side.archOpen.has(k)?Side.archOpen.delete(k):Side.archOpen.add(k);return renderSide();}
  case "chat-sessions":case "session-new":case "session-open":case "session-more":case "session-rename":case "session-archive":case "session-delete":return sessionAction(kind,a);
  case "chat-new":{if(SESSION_AGENTS.has(Dock.panels[pid]?.agent))return sessionAction("session-new",a);if(!await ask("之前的对话还在，可以在学习库的 threads/ 里找到，也能被搜索到。",{title:"开一段新会话？",ok:"开新会话"}))return;await rpc("thread_new",{agent:Dock.panels[pid].agent,topic:S.data.active_topic||""});return loadChat(pid,false);}
  case "practice-start":return startPractice(pid,a.dataset.mid);
@@ -342,6 +344,9 @@ async function onAction(a){
  case "open-change":return wideWindow(openPanel({type:"skillchange",change:a.dataset.change}));
  case "cmp-stop":case "cmp-window":case "cmp-pick":return compareAction(kind,a);
  case "organizer-dismiss":Organizer.text="";return renderOrganizer();
+ case "topic-fold":return topicFold(a.dataset.id);
+ case "topic-row":{if(a.dataset.id===(S.data.active_topic||""))return topicFold(a.dataset.id);Side.topicShut.delete(a.dataset.id);}
+ // falls through: learning in another topic
  case "topic-focus":{await rpc("focus",{topic:a.dataset.id});await refreshState();followingPanels().forEach(x=>loadChat(x));
   let tutor=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="tutor"&&!Dock.panels[x].thread);if(!tutor)openPanel({type:"chat",agent:"tutor"});else activate(tutor);return;}
  case "topic-delete":{if(!await ask("里面的卡片、笔记和对话都会留下，只是不再属于它。主题文件会留在学习库的历史里。",{title:"删除这个主题？",...{danger:true,ok:"删除"}}))return;

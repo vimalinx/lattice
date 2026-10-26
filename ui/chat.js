@@ -29,27 +29,27 @@ panelType("chat",{side:"ai",icon:p=>AGENT_ICON[p.agent]||"bot",
  }});
 async function loadChat(pid,keepScroll=true){
  const p=Dock.panels[pid],st=Chat[pid];if(!p||!st)return;
- // A conversation picked from the topic's list stays open here while that topic is the one being learned.
- if(p.session&&p.sessionTopic!==(S.data.active_topic||"")){delete p.session;delete p.sessionTopic;}
- const thread=p.thread||p.session;
- let data=await safe(()=>rpc("chat",thread?{agent:p.agent,thread}:{agent:p.agent,topic:S.data.active_topic||""}));
- if(!data&&p.session){delete p.session;data=await safe(()=>rpc("chat",{agent:p.agent,topic:S.data.active_topic||""}));}
+ // Without a thread of its own, a panel shows the conversation the topic being learned opens (the one last picked).
+ const data=await safe(()=>rpc("chat",p.thread?{agent:p.agent,thread:p.thread}:{agent:p.agent,topic:S.data.active_topic||""}));
  if(!data||!Chat[pid])return;
  if(st.thread&&st.thread!==data.thread){st.cache={};st.stream="";st.live=[];st.error="";st.anchored=false;st.bottom=undefined;}
  st.thread=data.thread;st.data=data;
  renderChat(pid,keepScroll);refreshTab(pid);renderSessions(pid);
 }
-/* ---- a topic's conversations, in a column at the conversation's left: open one, start one, rename (double-click),
-   archive or delete. The tutor's panels show it unless closed; the quick answer's when opened. -------------------- */
+/* ---- a topic's conversations. The tutor's are listed under their topics in the sidebar; the quick answer's in a column
+   at its panel's left, when opened. Opening one makes its topic the one being learned and it the conversation that topic
+   opens, in every panel following along; rename (double-click), archive or delete in place. ------------------------- */
 const SESSION_AGENTS=new Set(["tutor","flash"]);
-const sessionsOn=pid=>{const p=Dock.panels[pid];return !!p&&SESSION_AGENTS.has(p.agent)&&!p.thread&&(p.sessions??p.agent==="tutor");};
+const sessionsOn=pid=>{const p=Dock.panels[pid];return !!p&&p.agent==="flash"&&!p.thread&&!!p.sessions;};
+function sessionMeta(x){return (x.busy?'<i class="ss-busy"></i>':"")+x.messages+' 条';}
+function sessionTip(x){return fmtDate(x.updated,true)+" · "+(x.summary?shorten(x.summary,160):x.last?"最近问："+x.last:"还没有消息");}
 async function renderSessions(pid){
  const node=Dock.els[pid],st=Chat[pid],p=Dock.panels[pid],box=node?.querySelector(".chat-sessions");if(!box||!st)return;
  box.hidden=!sessionsOn(pid);if(box.hidden)return;
  const topic=st.data?.head?.topic||"",r=await safe(()=>rpc("sessions",{agent:p.agent,topic}));if(!r||!Chat[pid])return;
- const item=x=>'<div class="ss-item'+(x.id===st.thread?" on":"")+'" data-action="session-open" data-pid="'+pid+'" data-id="'+esc(x.id)+'" data-tip="'+esc(x.last?"最近问："+x.last:"还没有消息")+'">'+
-  '<span class="ss-title" data-session-title="'+esc(x.id)+'">'+esc(x.title)+'</span><small>'+(x.busy?'<i class="ss-busy"></i>':"")+x.messages+' 条 · '+esc(fmtDate(x.updated,true))+'</small>'+
-  '<button class="ss-more" data-action="session-more" data-pid="'+pid+'" data-id="'+esc(x.id)+'" data-archived="'+(x.archived?1:0)+'" title="改名、归档、删除">'+svg("dots",13)+'</button></div>';
+ const item=x=>'<div class="ss-item'+(x.id===st.thread?" on":"")+'" data-action="session-open" data-id="'+esc(x.id)+'" data-tip="'+esc(sessionTip(x))+'">'+
+  '<span class="ss-title" data-session-title="'+esc(x.id)+'">'+esc(x.title)+'</span><small>'+sessionMeta(x)+' · '+esc(fmtDate(x.updated,true))+'</small>'+
+  '<button class="ss-more" data-action="session-more" data-id="'+esc(x.id)+'" data-archived="'+(x.archived?1:0)+'" title="改名、归档、删除">'+svg("dots",13)+'</button></div>';
  const live=r.sessions.filter(x=>!x.archived),kept=r.sessions.filter(x=>x.archived);
  box.innerHTML='<div class="ss-head"><div><b>会话</b><small>'+esc(topic?topicTitle(topic):"默认对话")+'</small></div>'+
   iconButton("plus","session-new","在这个主题下开新会话",'data-pid="'+pid+'"')+iconButton("sidebar","chat-sessions","收起会话栏",'data-pid="'+pid+'"')+'</div>'+
@@ -57,33 +57,41 @@ async function renderSessions(pid){
   (kept.length?'<details class="ss-archived"'+(st.archivedOpen?" open":"")+'><summary>已归档 '+kept.length+'</summary>'+kept.map(item).join("")+'</details>':"")+'</div>';
  box.querySelector(".ss-archived")?.addEventListener("toggle",e=>{st.archivedOpen=e.target.open;});
 }
-function openSession(pid,id){
- const p=Dock.panels[pid];if(!p)return;
- p.session=id;p.sessionTopic=S.data.active_topic||"";saveLayout();return loadChat(pid,false);
+// Every list of conversations, after one was opened, started, renamed, archived or deleted.
+function sessionsChanged(){sideChanged([]);Object.keys(Chat).forEach(x=>sessionsOn(x)&&renderSessions(x));}
+async function openSession(id){
+ const r=await rpc("session_open",{id});S.data.active_topic=r.topic||null;
+ await refreshState();followingPanels().forEach(x=>loadChat(x,false));sessionsChanged();
 }
+// The tutor's panel that follows along, brought forward (or opened) when a conversation is picked in the sidebar.
+function showTutor(){const pid=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="tutor"&&!Dock.panels[x].thread);if(pid)activate(pid);else openPanel({type:"chat",agent:"tutor"});}
 // Renaming in place: Enter keeps it, Esc leaves it as it was, an empty name goes back to the first question.
-function renameSession(pid,id){
- const span=Dock.els[pid]?.querySelector('[data-session-title="'+CSS.escape(id)+'"]');if(!span)return;
+function renameSession(id){
+ const span=document.querySelector('[data-session-title="'+CSS.escape(id)+'"]');if(!span)return;
  const input=h('<input class="ss-rename" value="'+esc(span.textContent)+'"/>');span.replaceWith(input);input.focus();input.select();
- let done=false;const finish=async keep=>{if(done)return;done=true;if(keep)await safe(()=>rpc("session_update",{id,title:input.value}));renderSessions(pid);};
+ let done=false;const finish=async keep=>{if(done)return;done=true;if(keep)await safe(()=>rpc("session_update",{id,title:input.value}));sessionsChanged();};
  input.addEventListener("keydown",e=>{e.stopPropagation();if(e.key==="Enter")finish(true);else if(e.key==="Escape")finish(false);});
  input.addEventListener("click",e=>e.stopPropagation());input.addEventListener("blur",()=>finish(true));
 }
-document.addEventListener("dblclick",e=>{const t=e.target.closest?.("[data-session-title]");if(!t)return;const it=t.closest(".ss-item");e.preventDefault();renameSession(it.dataset.pid,t.dataset.sessionTitle);});
+document.addEventListener("dblclick",e=>{const t=e.target.closest?.("[data-session-title]");if(!t)return;e.preventDefault();renameSession(t.dataset.sessionTitle);});
 async function sessionAction(kind,a){
- const pid=a.dataset.pid,p=Dock.panels[pid];if(!p)return;
- if(kind==="chat-sessions"){p.sessions=!sessionsOn(pid);saveLayout();return renderSessions(pid);}
- if(kind==="session-new"){const r=await rpc("thread_new",{agent:p.agent,topic:Chat[pid]?.data?.head?.topic||S.data.active_topic||""});await openSession(pid,r.thread);return Dock.els[pid]?.querySelector("[data-composer]")?.focus();}
- if(kind==="session-open")return openSession(pid,a.dataset.id);
+ const pid=a.dataset.pid,p=Dock.panels[pid];
+ if(kind==="chat-sessions"){if(!p)return;p.sessions=!sessionsOn(pid);saveLayout();return renderSessions(pid);}
+ if(kind==="session-new"){
+  const agent=a.dataset.agent||p?.agent||"tutor",topic=a.dataset.topic??(Chat[pid]?.data?.head?.topic||S.data.active_topic||"");
+  const r=await rpc("thread_new",{agent,topic});await openSession(r.thread);if(!p)showTutor();
+  return setTimeout(()=>{const t=pid||Object.keys(Chat).find(x=>Dock.panels[x]?.agent===agent&&!Dock.panels[x].thread);Dock.els[t]?.querySelector("[data-composer]")?.focus();},60);
+ }
+ if(kind==="session-open"){await openSession(a.dataset.id);return a.closest("#side")?showTutor():undefined;}
  const id=a.dataset.id,archived=a.dataset.archived==="1";
- if(kind==="session-more")return popMenu(a,'<button data-action="session-rename" data-pid="'+pid+'" data-id="'+esc(id)+'">'+svg("edit",14)+'<span>改名</span></button>'+
-  '<button data-action="session-archive" data-pid="'+pid+'" data-id="'+esc(id)+'" data-archived="'+(archived?1:0)+'">'+svg("history",14)+'<span>'+(archived?"取消归档":"归档")+'</span></button><hr/>'+
-  '<button class="danger" data-action="session-delete" data-pid="'+pid+'" data-id="'+esc(id)+'">'+svg("trash",14)+'<span>删除</span></button>');
- if(kind==="session-rename")return renameSession(pid,id);
- if(kind==="session-archive"){await rpc("session_update",{id,archived:!archived});if(!archived&&Chat[pid]?.thread===id){delete p.session;await loadChat(pid,false);}return renderSessions(pid);}
+ if(kind==="session-more")return popMenu(a,'<button data-action="session-rename" data-id="'+esc(id)+'">'+svg("edit",14)+'<span>改名</span></button>'+
+  '<button data-action="session-archive" data-id="'+esc(id)+'" data-archived="'+(archived?1:0)+'">'+svg("history",14)+'<span>'+(archived?"取消归档":"归档")+'</span></button><hr/>'+
+  '<button class="danger" data-action="session-delete" data-id="'+esc(id)+'">'+svg("trash",14)+'<span>删除</span></button>');
+ if(kind==="session-rename")return renameSession(id);
+ if(kind==="session-archive"){await rpc("session_update",{id,archived:!archived});followingPanels().forEach(x=>loadChat(x,false));return sessionsChanged();}
  if(kind==="session-delete"){
   if(!await ask("对话会从会话列表和学习库里删掉，学习库的历史里还能找回。",{title:"删除这段会话？",danger:true,ok:"删除"}))return;
-  await rpc("session_delete",{id});if(Chat[pid]?.thread===id){delete p.session;await loadChat(pid,false);}return renderSessions(pid);
+  await rpc("session_delete",{id});followingPanels().forEach(x=>loadChat(x,false));return sessionsChanged();
  }
 }
 function chatPanels(thread){return Object.keys(Chat).filter(pid=>Chat[pid].thread===thread);}
@@ -101,13 +109,15 @@ function renderChat(pid,keepScroll=true){
  if(!scroll.__watched){
   scroll.__watched=true;
   // Only the learner's own scrolling (wheel, touch, keys, the scrollbar) decides whether the view follows the reply:
-  // reaching the end starts following, leaving it stops; scrolling done by the program changes nothing.
+  // scrolling up always stops it, even within the room kept below a fresh question; scrolling down to the end starts it.
+  // Scrolling done by the program changes nothing.
   const mine=()=>{st.userAt=Date.now();};
   for(const ev of ["wheel","touchmove","keydown"])scroll.addEventListener(ev,mine,{passive:true});
   scroll.addEventListener("mousedown",e=>{if(e.target===scroll){st.dragBar=true;addEventListener("mouseup",()=>{st.dragBar=false;},{once:true});}});
   scroll.addEventListener("scroll",()=>{
    if(!scroll.isConnected||!scroll.clientHeight)return;
-   if(st.dragBar||Date.now()-(st.userAt||0)<700)st.bottom=toEnd(scroll)<60;
+   const top=scroll.scrollTop,up=top<(st.lastTop??top)-1;st.lastTop=top;
+   if(st.dragBar||Date.now()-(st.userAt||0)<700)st.bottom=!up&&toEnd(scroll)<60;
    toBottomButton(pid);
   });
   // Which folded parts are open survives re-rendering.
@@ -191,7 +201,7 @@ function chatHead(pid){
     button(svg("check",13)+" 结束并复盘","practice-end",'data-pid="'+pid+'"',"primary sm"):'<span class="chip">'+(pr.state==="reviewing"?"主会话复盘中":"已复盘")+'</span>')+'</div>';
  }
  const topic=d.head?.topic;
- const tools=(SESSION_AGENTS.has(p.agent)&&!p.thread&&!sessionsOn(pid)?iconButton("sidebar","chat-sessions","会话列表",'data-pid="'+pid+'"'):"")+iconButton("edit","chat-new","开新会话",'data-pid="'+pid+'"')+
+ const tools=(p.agent==="flash"&&!p.thread&&!sessionsOn(pid)?iconButton("sidebar","chat-sessions","会话列表",'data-pid="'+pid+'"'):"")+iconButton("edit","chat-new","开新会话",'data-pid="'+pid+'"')+
   iconButton("dots","chat-more","显示和更多",'data-pid="'+pid+'"');
  return '<button class="topic-chip'+(topic?"":" quiet")+'" data-action="chat-topic-menu" data-pid="'+pid+'" title="这段对话属于哪个主题">'+svg(topic?"map":"bot",12)+'<span>'+esc(topic?topicTitle(topic):"默认对话")+'</span>'+svg("chevrondown",11)+'</button>'+
   '<div class="chat-tools">'+tools+'</div>';
@@ -223,7 +233,7 @@ function messageEl(pid,m,answers){
    :'<div class="msg from-ai" data-mid="'+m.id+'">'+skillsUsed(meta.skills||olderSkills(list,at))+thinkingHtml(meta.thinking,meta.think_seconds)+'<div class="markdown msg-body">'+r.html+'</div>'+
     (redone?'<div class="msg-note">这次没有答完，下面是重新回答的</div>':incomplete?'<div class="msg-note">'+esc(meta.stop_reason==="cancelled"?"已停止 · 保留了部分回答":meta.stop_reason==="max_tokens"?"达到回复长度上限":"没有正常结束 · 只保留了收到的部分")+
      (canRetry?button(svg("refresh",12)+" 重新回答","chat-retry",'data-pid="'+pid+'"',"ghost xs"):"")+'</div>':"")+
-    actionChips((meta.actions||[]).filter(a=>!String(a.ref||"").startsWith("skill:")),st.data.undone||[])+sourcesHtml(meta.sources)+cardsNoted(st.data.cards?.[m.id])+suggestionsHtml(pid,m)+changesHtml(meta.changes)+foot+'</div>';
+    actionChips((meta.actions||[]).filter(a=>!/^(skill|me):/.test(String(a.ref||""))),st.data.undone||[])+remembered(meta.actions,st.data.undone||[])+sourcesHtml(meta.sources)+cardsNoted(st.data.cards?.[m.id])+suggestionsHtml(pid,m)+changesHtml(meta.changes)+foot+'</div>';
   cached=st.cache[m.id]={key,html,blocks:r.blocks};
  }
  const node=h(cached.html);
@@ -274,6 +284,13 @@ function actionChips(actions,undone=[],live=false){
 // A search result's title can be a PDF's raw bytes read as text; the site's name says more then.
 function sourceTitle(s){const t=String(s.title||"");return !t||(t.match(/[\u0080-\u00ff\ufffd]/g)||[]).length>t.length*.15?hostOf(s.url):t;}
 /* Skill changes an agent proposed in this reply: each is reviewed right here, side by side (see skillchange.js). */
+// What the agent noted about the learner in this reply (me.md): each line on its own, to keep or undo.
+function remembered(actions,undone=[]){
+ const notes=(actions||[]).filter(a=>a.ref==="me:");if(!notes.length)return "";
+ const gone=a=>undone.includes(a.id)||(S.data?.undone||[]).includes(a.id);
+ return notes.map(a=>'<div class="remembered'+(gone(a)?" undone":"")+'">'+svg("bulb",12)+'<a data-action="open-file" data-path="me.md" data-tip="打开「关于我」">'+esc(a.summary)+'</a>'+
+  (gone(a)?'<small>已撤销</small>':a.undoable?button(svg("undo",11)+" 撤销","undo",'data-id="'+esc(a.id)+'"',"ghost xs"):"")+'</div>').join("");
+}
 // The cards the organizer noted from a reply, by kind; each opens.
 function cardsNoted(list){
  if(!list?.length)return "";
@@ -501,11 +518,10 @@ function chatEvent(evt){
    }else loadChat(pid);
   }
  }
- if(evt.kind==="finished"&&evt.agent==="organizer"&&!evt.cards_for)organizeFinished(evt);
+ if(evt.kind==="finished"&&evt.agent==="organizer"&&!evt.cards_for&&!evt.saved)organizeFinished(evt);
  if(evt.kind==="finished")refreshState();
  // The lists of conversations show which one is answering, and a first question names a new one.
- if(evt.kind==="finished"||evt.kind==="status")for(const pid of Object.keys(Chat))if(Dock.panels[pid]?.agent===evt.agent&&sessionsOn(pid)){
-  clearTimeout(Chat[pid].ssTimer);Chat[pid].ssTimer=setTimeout(()=>renderSessions(pid),300);}
+ if((evt.kind==="finished"||evt.kind==="status")&&SESSION_AGENTS.has(evt.agent)){clearTimeout(Side.sessionsTimer);Side.sessionsTimer=setTimeout(sessionsChanged,300);}
 }
 async function startPractice(pid,mid){
  const st=Chat[pid];

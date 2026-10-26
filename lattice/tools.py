@@ -17,7 +17,7 @@ from pathlib import Path
 from . import agents
 from . import skills as skillbook
 from .model import AGENT_RECORDS, CARD_TYPES, LINK_KINDS, readable_outputs, text, title_of
-from .vault import APPEND_ONLY, kind_of, slug, split_frontmatter
+from .vault import APPEND_ONLY, KEPT, ME, kind_of, now, slug, split_frontmatter
 
 ALL = {"tutor", "flash", "coach", "organizer"}
 
@@ -115,7 +115,9 @@ def _guard(ctx, path):
         raise ValueError("挂载的外部目录对你只读；需要改的话用 suggest 提给学习者")
     if rel.startswith("agents/"):
         raise ValueError("AI 的规则不直接改：用 rules_edit 提出修改，学习者在左右对照里看过、批准了才生效")
-    if rel.startswith(APPEND_ONLY) or rel.startswith(".lattice/") or rel == "AGENTS.md":
+    if rel == ME:
+        raise ValueError("关于学习者的记录只用 remember 一条一条地记")
+    if rel.startswith(APPEND_ONLY) or rel.startswith(".lattice/") or rel in KEPT:
         raise ValueError("对话、轨迹、规则和 .lattice 只由 Lattice 和学习者维护")
     if rel.startswith("skills/"):
         raise ValueError("技能不直接改：用 skill_edit 提出修改，学习者在左右对照里看过、批准了才生效")
@@ -274,14 +276,17 @@ def _run_brief(e):
     return {"at": e["at"][:16], "by": e["actor"], **{k: e["data"].get(k) for k in ("file", "cell", "state", "summary", "sandbox")}}
 
 
-LIST_KINDS = ["topics", "cards", "notes", "lessons", "insights", "notebooks", "practices", "threads", "files", "projects", "envs"]
+LIST_KINDS = ["topics", "cards", "notes", "lessons", "insights", "notebooks", "practices", "threads", "files", "projects", "envs", "skills"]
 
 
-@tool("list", ALL, "列出学习库里某一类东西的全部（和界面上开着什么无关）：topics 主题、cards 知识卡（含理解阶段和是否到期）、notes 笔记、lessons 课程、insights 薄弱点和做得好的地方、notebooks 实验笔记、practices 练习、threads 全部对话、files 代码和数据文件、projects 挂载的目录（只读）、envs Python 环境和包。可以按 topic（给空字符串就是不属于任何主题的）、stage（卡片）、state、query（标题里包含）筛选。",
+@tool("list", ALL, "列出学习库里某一类东西的全部（和界面上开着什么无关）：topics 主题、cards 知识卡（含理解阶段和是否到期）、notes 笔记、lessons 课程、insights 薄弱点和做得好的地方、notebooks 实验笔记、practices 练习、threads 全部对话、files 代码和数据文件、projects 挂载的目录（只读）、envs Python 环境和包、skills 装上的全部技能（含给别的 AI 用的和停用的）。可以按 topic（给空字符串就是不属于任何主题的）、stage（卡片）、state、query（标题里包含）筛选。",
       {"kind": {"type": "string", "enum": LIST_KINDS}, "topic": S, "stage": S, "state": S, "query": S, "limit": I}, ["kind"])
 def list_kind(ctx, kind, topic=None, stage=None, state=None, query=None, limit=200):
     if kind in ("projects", "envs"):
         return ctx.bridge.catalog(kind)
+    if kind == "skills":
+        return [{k: s[k] for k in ("name", "title", "description", "category", "agents", "enabled", "files")}
+                for s in skillbook.installed(ctx.l.root) if not query or query in s["title"] + s["name"]]
     return ctx.bridge.catalog(kind, topic=topic, stage=stage, state=state, query=query, limit=limit)
 
 
@@ -368,6 +373,29 @@ def web_fetch(ctx, url):
             done(result)
         ctx.bridge.background(lambda: web.fetch(url), finish)
     return Later(start)
+
+
+# ---- the learner ---------------------------------------------------------------------------------
+
+@tool("remember", {"tutor", "flash", "coach"}, "记下关于学习者本人、换个主题也成立的一件事（背景、已经会的、怎么学最顺、讲法上的好恶），一条一句，写进 me.md；每个 AI 每一轮都会读到。"
+      "只对某个主题成立的（这条路线从哪起步、这里先跳过什么）写进主题档案，不记在这里。已有的一条变了，用 replace 给出原来那条（一字不差）改掉它；text 留空就是删掉那条。"
+      "记下的内容会显示在你这条回复下面，学习者不认可可以撤销。",
+      {"text": S, "replace": S})
+def remember(ctx, text="", replace=None):
+    if not ctx.l.remember(text, replace):
+        return {"ok": True, "already": "这一条已经记着了"}
+    ctx.act(("不再记：" + str(replace).strip()) if replace is not None and not str(text).strip() else ("记住了：" + text.strip()), "me:")
+    return {"ok": True}
+
+
+@tool("checkpoint", {"organizer"}, "存档：学习者离开了一段主会话时，写下这段会话到现在的摘要（summary，整篇替换上次的摘要）。只在被要求存档时用，每次存档用一次。",
+      {"summary": S}, ["summary"])
+def checkpoint(ctx, summary):
+    job = ctx.bridge.job_running.get(ctx.thread)
+    if not job or job.get("kind") != "save":
+        raise ValueError("现在没有要存档的会话")
+    ctx.l.thread_update(job["thread"], summary={"text": text(summary, 3000).strip(), "upto": job["upto"], "at": now()})
+    return {"ok": True}
 
 
 # ---- topics and the map ---------------------------------------------------------------------------

@@ -3,14 +3,15 @@
 Each agent ships as lattice/agents/<name>.md (YAML attributes, then the policy).
 A file with the same name in the vault's agents/ folder replaces it, so the
 learner can rewrite how an agent works without touching Lattice. Every turn
-starts with the vault's AGENTS.md, so all agents follow the same rules.
+starts with the vault's AGENTS.md, so all agents follow the same rules, and
+what they have noted about the learner in me.md.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
 from . import skills
-from .vault import split_frontmatter
+from .vault import ME, split_frontmatter
 
 HERE = Path(__file__).with_name("agents")
 NAMES = ("tutor", "flash", "coach", "organizer")
@@ -65,8 +66,10 @@ def parse(name, text):
 
 
 def system_prompt(vault_root, agent, extra=""):
-    rules = Path(vault_root) / "AGENTS.md"
-    parts = [rules.read_text(encoding="utf-8").strip() if rules.is_file() else "", agent["policy"]]
+    rules, me = Path(vault_root) / "AGENTS.md", Path(vault_root) / ME
+    known = [line for line in me.read_text(encoding="utf-8").splitlines() if line.startswith("- ")] if me.is_file() else []
+    parts = [rules.read_text(encoding="utf-8").strip() if rules.is_file() else "",
+             ("# 关于学习者\n\n记下的、换个主题也成立的事（me.md，用 remember 增改）：\n" + "\n".join(known)) if known else "", agent["policy"]]
     if agent["blocks"]:
         parts.append((HERE / "blocks.md").read_text(encoding="utf-8").strip())
     parts.append(skills.prompt_section(vault_root, agent["name"]))

@@ -26,7 +26,7 @@ import time
 ETC = ["ld.so.cache", "ld.so.conf", "ld.so.conf.d", "fonts", "ssl", "ca-certificates", "localtime", "passwd", "group",
        "nsswitch.conf", "mime.types", "alternatives", "os-release", "java-openjdk", "java21-openjdk", "java17-openjdk", "java11-openjdk"]
 # Inside the vault, these stay read-only for the sandbox.
-PROTECTED = (".git", ".lattice", "threads", "journal", "AGENTS.md", "agents")
+PROTECTED = (".git", ".lattice", "threads", "journal", "AGENTS.md", "me.md", "agents")
 MPL = Path(__file__).with_name("mpl")
 
 

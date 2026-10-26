@@ -98,7 +98,9 @@ class Bridge(QObject):
         self.checking = {}
         # Skill comparisons: id -> the conversation they continue and what each side wrote.
         self.compares = {}
-        self.card_jobs, self.card_running = [], {}   # stretches of explanation waiting to be noted as cards
+        # The organizer's background work, one at a time: stretches of explanation to note as cards, and conversations
+        # the learner left, to save where they stand. Saves tried this run, by the last message they covered.
+        self.jobs, self.job_running, self.saves_tried = [], {}, {}
         self.failures = {}   # thread -> why its last turn failed, until the next one goes through
         self.reviews = {}
         self.runs, self.kernels, self.kernel_states, self.batches = {}, {}, {}, {}
@@ -121,6 +123,10 @@ class Bridge(QObject):
         self.commit_timer = QTimer(self)
         self.commit_timer.timeout.connect(lambda: time.monotonic() - self.last_write > self.config.read()["commit_idle"] and self.commit_mine())
         self.commit_timer.start(10000)
+        # Conversations the learner has stepped away from are saved where they stand (also those left when Lattice closed).
+        self.save_timer = QTimer(self)
+        self.save_timer.timeout.connect(self.save_idle)
+        self.save_timer.start(300000)
 
     @staticmethod
     def _init_log():
@@ -280,6 +286,8 @@ class Bridge(QObject):
         return self.lattice.journal(types, ref, since, until, actor, limit)
 
     def rpc_focus(self, topic=None):
+        if (topic or None) != self.lattice.active_topic():
+            self.save_later(self.lattice.current_thread("tutor", self.lattice.active_topic()))
         self.lattice.focus(topic or None)
         return self.rpc_state()
 
@@ -1367,12 +1375,34 @@ class Bridge(QObject):
     def rpc_thread_new(self, agent, topic=None):
         topic = self.lattice.active_topic() if topic is None else (topic or None)
         name = self.lattice.topic(topic)["title"] if topic else None
-        return {"thread": self.lattice.thread_new(agent, topic, AGENT_NAMES[agent] + (" · " + name if name else ""))["id"]}
+        ident = self.lattice.thread_new(agent, topic, AGENT_NAMES[agent] + (" · " + name if name else ""))["id"]
+        if agent in ("tutor", "flash"):
+            self.lattice.thread_pick(ident)
+        return {"thread": ident}
 
-    # ---- a topic's conversations, managed beside them -----------------------------------------------
-    def rpc_sessions(self, agent, topic=None):
-        topic = self.lattice.active_topic() if topic is None else (topic or None)
-        return {"topic": topic, "sessions": [{**s, "busy": s["id"] in self.busy} for s in self.lattice.sessions(agent, topic)]}
+    # ---- a topic's conversations, listed under it in the sidebar ------------------------------------
+    def rpc_sessions(self, agent, topic=None, every=False):
+        """One topic's conversations, or (every) all of them, each saying whether it is the one its topic opens."""
+        l = self.lattice
+        topic = l.active_topic() if topic is None else (topic or None)
+        current = {}
+        def is_current(s):
+            if s["topic"] not in current:
+                current[s["topic"]] = l.current_thread(agent, s["topic"])
+            return current[s["topic"]] == s["id"]
+        return {"topic": topic, "sessions": [{**s, "busy": s["id"] in self.busy, "current": is_current(s)} for s in l.sessions(agent, topic, every)]}
+
+    def rpc_session_open(self, id):
+        """Learn in this conversation: its topic becomes the one being learned, and it the conversation that topic opens."""
+        head = self.lattice.thread_head(id)
+        if head.get("practice") or head.get("trial") or head.get("agent") not in ("tutor", "flash"):
+            raise ValueError("练习和试用的对话不在会话列表里")
+        left = self.lattice.current_thread(head["agent"], self.lattice.active_topic())
+        if left != id:
+            self.save_later(left)
+        self.lattice.thread_pick(id)
+        self.lattice.focus(head.get("topic"))
+        return {"topic": head.get("topic") or ""}
 
     def rpc_session_update(self, id, title=None, archived=None):
         head = self.lattice.thread_head(id)
@@ -1481,7 +1511,7 @@ class Bridge(QObject):
         for rel, content in inline:
             user += f"\n\n（学习者附上的「{rel}」，全文如下）\n```\n{content}\n```"
         where = self._topic_brief(definition["name"], thread, topic) if topic else "这是默认对话，不属于任何主题。"
-        context = f"现在是 {tools.today()}。{where}对话 id：{thread}。"
+        context = f"现在是 {tools.today()}。{where}对话 id：{thread}。" + self._earlier(thread, definition["history"])
         if practice:
             context += (f"\n\n这次练习：practice:{thread}「{practice['title']}」，练习文件：{practice['file']}。"
                         + (f"\n目标：{practice['goal']}" if practice.get("goal") else "") + "\n\n练习依据的讲解：\n" + practice["seed"])
@@ -1503,8 +1533,18 @@ class Bridge(QObject):
             others = [x for x in l.sessions("tutor", topic) if x["id"] != thread and not x["archived"] and x["messages"]][:6]
             if others:
                 lines.append("这个主题下的其他主会话（要细看用 conversation 的 thread 读）：" +
-                             "；".join(f"「{x['title']}」(thread {x['id']}，{x['messages']} 条，最近问：{x['last'][:60]}；最近讲的开头：{x['answer'][:120]})" for x in others))
+                             "；".join(f"「{x['title']}」(thread {x['id']}，{x['messages']} 条，" +
+                                      (f"存档摘要：{x['summary'][:300]}" if x["summary"] else f"最近问：{x['last'][:60]}；最近讲的开头：{x['answer'][:120]}") + ")" for x in others))
         return "\n".join(lines) + "\n"
+
+    def _earlier(self, thread, history):
+        """What a conversation said before the stretch the model sees: its saved summary, once it runs past that stretch."""
+        l = self.lattice
+        saved = (l.thread_head(thread).get("summary") or {}).get("text")
+        count = l.index.one("SELECT COUNT(*) AS n FROM messages WHERE thread=?", (thread,))["n"]
+        if not saved or count <= history:
+            return ""
+        return f"\n\n这段对话有 {count} 条，你只看得到最近的 {history} 条；更早的部分存档时的摘要（要细看用 conversation 读）：\n{saved}"
 
     def _since(self, thread, topic):
         """What the learner did since the tutor last spoke, which says where they are unsure: the questions they put to
@@ -1513,11 +1553,10 @@ class Bridge(QObject):
         last = l.index.one("SELECT at FROM messages WHERE thread=? AND role='assistant' ORDER BY id DESC LIMIT 1", (thread,))
         if not last:
             return ""
-        side = l.index.one("SELECT id FROM threads WHERE agent='flash' AND topic IS ? AND json_extract(head,'$.practice') IS NULL "
-                           "AND json_extract(head,'$.trial') IS NULL ORDER BY created DESC LIMIT 1", (topic,))
-        asked = [e["data"].get("text", "") for e in l.journal("asked", side["id"], last["at"], limit=8)] if side else []
+        side = l.current_thread("flash", topic)
+        asked = [e["data"].get("text", "") for e in l.journal("asked", side, last["at"], limit=8)] if side else []
         judged = l.journal("judged", thread, last["at"], limit=6)
-        handed = [e["data"]["handoff"] for e in l.journal("action", side["id"], last["at"], limit=4) if e["data"].get("handoff")] if side else []
+        handed = [e["data"]["handoff"] for e in l.journal("action", side, last["at"], limit=4) if e["data"].get("handoff")] if side else []
         parts = []
         if asked:
             parts.append("在快答里问了" + "；".join(f"「{q[:160]}」" for q in reversed(asked)))
@@ -1760,14 +1799,18 @@ class Bridge(QObject):
                 ids = [r["id"] for r in l.index.rows("SELECT id FROM messages WHERE thread=? ORDER BY id DESC LIMIT 2", (thread,))]
                 l.move_messages(ids + turn.carry, target)
                 evt["moved_to"] = target
+                self.save_later(thread)
             l.focus(target_topic)
             evt["focus"] = target_topic or ""
         if agent == "tutor" and reason == "end_turn" and evt.get("message") and len(body.strip()) >= 200 and self.config.read().get("auto_cards", True):
             home = evt.get("moved_to") or thread
             if not {"trial", "practice"} & set(l.thread_head(home)):
-                self.card_jobs.append({"thread": home, "message": evt["message"], "topic": evt.get("focus", topic) if turn.refocus else topic})
-        job = self.card_running.pop(thread, None) if agent == "organizer" else None
-        if job:
+                self.jobs.append({"kind": "cards", "thread": home, "message": evt["message"], "topic": evt.get("focus", topic) if turn.refocus else topic})
+        job = self.job_running.pop(thread, None) if agent == "organizer" else None
+        if job and job["kind"] == "save":
+            evt["saved"] = job["thread"]   # quiet: no tidying notice
+            job = None
+        elif job:
             evt["cards_for"] = job["thread"]   # shown under the reply it came from, not as a tidying notice
         if job and turn.cards:
             l.record("carded", {"message": job["message"], "cards": turn.cards}, "organizer", [job["thread"], *(c["id"] for c in turn.cards)])
@@ -1782,8 +1825,10 @@ class Bridge(QObject):
                 errors.append(str(exc))
         if errors:
             evt["errors"] = errors
-        if agent in ("tutor", "organizer") and self.card_jobs:
-            QTimer.singleShot(0, self.next_cards)
+        if evt.get("saved"):
+            self.announce({"type": "saved", "thread": evt["saved"]})
+        if agent in ("tutor", "organizer") and self.jobs:
+            QTimer.singleShot(0, self.next_job)
 
     # ---- organizing, practices, suggestions, undo -------------------------------------------------------
     def _organizer(self):
@@ -1793,27 +1838,92 @@ class Bridge(QObject):
             thread = self.lattice.set_setting("organizer_thread", self.lattice.thread_new("organizer", None, "整理")["id"])
         return thread, self.config.agent("organizer")
 
-    def next_cards(self):
-        """Cards noted while learning: after a stretch of explanation, the organizer sorts what it taught into cards of
-        their kind and area, joined to the cards already there. One stretch at a time, after any tidying under way."""
-        if not self.card_jobs:
+    def next_job(self):
+        """The organizer's next piece of background work, after any tidying under way: cards noted from a stretch of
+        explanation (sorted by kind and area, joined to the cards already there), or a conversation the learner left,
+        saved where it stands."""
+        if not self.jobs:
             return
         thread, conn = self._organizer()
         if thread in self.busy or not conn["api_key"]:
             return
-        job, l = self.card_jobs.pop(0), self.lattice
+        job, l = self.jobs.pop(0), self.lattice
+        message = self._save_message(job) if job["kind"] == "save" else self._cards_message(job)
+        if not message:
+            return self.next_job()
+        self.job_running[thread] = job
+        definition = agents.load(self.root, "organizer")
+        l.append_message(thread, "user", message, {"agent": "organizer", ("save_for" if job["kind"] == "save" else "cards_for"): job})
+        system = agents.system_prompt(self.root, definition, f"现在是 {tools.today()}。")
+        self._turn("organizer", thread, job.get("topic"), None, conn, system, [], message, definition["tools"])
+
+    def _cards_message(self, job):
+        l = self.lattice
         msgs = l.messages(job["thread"])
         at = next((i for i, m in enumerate(msgs) if m["id"] == job["message"]), None)
         if at is None:
-            return self.next_cards()
+            return None
         asked = next((m["content"] for m in reversed(msgs[:at]) if m["role"] == "user"), "")
         where = f"主题「{l.topic(job['topic'])['title']}」" if job.get("topic") and l.doc(job["topic"], "topic") else "默认对话"
-        message = (f"主会话在{where}里刚讲完一段。请按「边学边记知识卡」整理这一段。\n\n学习者说：\n{asked[:4000]}\n\n主会话讲的：\n{msgs[at]['content'][:16000]}")
-        self.card_running[thread] = job
-        definition = agents.load(self.root, "organizer")
-        l.append_message(thread, "user", message, {"agent": "organizer", "cards_for": job})
-        system = agents.system_prompt(self.root, definition, f"现在是 {tools.today()}。")
-        self._turn("organizer", thread, job.get("topic"), None, conn, system, [], message, definition["tools"])
+        return f"主会话在{where}里刚讲完一段。请按「边学边记知识卡」整理这一段。\n\n学习者说：\n{asked[:4000]}\n\n主会话讲的：\n{msgs[at]['content'][:16000]}"
+
+    # ---- saving where a conversation stands, when the learner leaves it ----------------------------------------
+    def save_later(self, thread):
+        """Queue a save of a tutor's conversation the learner just left, when something was said since the last one."""
+        l = self.lattice
+        if not thread or any(j["kind"] == "save" and j["thread"] == thread for j in self.jobs + list(self.job_running.values())):
+            return
+        try:
+            head = l.thread_head(thread)
+        except ValueError:
+            return
+        if head.get("agent") != "tutor" or head.get("practice") or head.get("trial"):
+            return
+        upto = (head.get("summary") or {}).get("upto") or 0
+        last = l.index.one("SELECT MAX(id) AS id FROM messages WHERE thread=?", (thread,))["id"] or 0
+        answered = l.index.one("SELECT 1 FROM messages WHERE thread=? AND role='assistant' AND id>?", (thread, upto))
+        if last <= upto or not answered or self.saves_tried.get(thread) == last:
+            return
+        self.saves_tried[thread] = last
+        self.jobs.append({"kind": "save", "thread": thread, "upto": last, "topic": head.get("topic")})
+        QTimer.singleShot(0, self.next_job)
+
+    def save_idle(self):
+        """Every conversation nobody has said anything in for a while, with something new since its last save."""
+        cutoff = datetime.now().astimezone() - timedelta(minutes=15)
+        for row in self.lattice.unsaved_threads():
+            if row["thread"] not in self.busy and datetime.fromisoformat(row["at"]) < cutoff:
+                self.save_later(row["thread"])
+
+    def _save_message(self, job):
+        l = self.lattice
+        try:
+            head = l.thread_head(job["thread"])
+        except ValueError:
+            return None
+        topic = head.get("topic")
+        t = l.topic(topic) if topic and l.doc(topic, "topic") else None
+        before = (head.get("summary") or {})
+        msgs = [m for m in l.messages(job["thread"]) if m["id"] > (before.get("upto") or 0) and m["id"] <= job["upto"] and m["role"] in ("user", "assistant")]
+        if not msgs:
+            return None
+        said, size = [], 0
+        for m in reversed(msgs):   # the latest first, within about 40k characters
+            line = ("学习者：" if m["role"] == "user" else "主会话：") + m["content"][:4000]
+            if size + len(line) > 40000:
+                said.append(f"（更早的 {len(msgs) - len(said)} 条略去，需要时用 conversation 读 thread {job['thread']}）")
+                break
+            said.append(line)
+            size += len(line)
+        route = (t or {}).get("route") or []
+        return ("学习者离开了一段主会话，请按「存档」整理，最后用 checkpoint 写下摘要。\n\n"
+                f"会话：「{head.get('title') or job['thread']}」（thread {job['thread']}），"
+                + (f"属于主题「{t['title']}」（topic:{t['id']}），这个主题想弄懂：{t['question'][:400]}" if t else "在默认对话里，不属于任何主题") + "\n\n"
+                + "这段会话上次存档的摘要：\n" + (before.get("text") or "（还没有存过）") + "\n\n"
+                + ("主题档案（主会话维护，供参考）：\n" + ((t.get("notes") or "").strip() or "（空）") + "\n\n"
+                   + ("主干路线：" + "；".join(f"{i + 1}.{s['title']}" + {"done": "✓", "now": "（现在）"}.get(s.get("state"), "") for i, s in enumerate(route)) + "\n\n" if route else "")
+                   if t else "")
+                + "上次存档之后的对话：\n\n" + "\n\n".join(reversed(said)))
 
     def rpc_organize(self, path):
         """Tidy something the learner just wrote, in the background."""
