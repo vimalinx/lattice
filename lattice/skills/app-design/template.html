@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>应用名</title>
+<meta name="description" content="一句话说这个应用让学习者做什么、看到什么">
+<style>
+/* Lattice 加载时给出 --bg、--text 等变量；这里接一层别名，单独打开文件时用后备值。 */
+:root{
+ --c-bg:var(--bg,#0d1117);--c-panel:var(--panel,#121820);--c-panel-hi:var(--panel-hi,#161e27);
+ --c-surface:var(--surface,#1a232e);--c-surface-hover:var(--surface-hover,#22303b);
+ --c-line:var(--line,#29333f);--c-line-soft:var(--line-soft,#1e2731);
+ --c-text:var(--text,#e7edf2);--c-muted:var(--muted,#95a1af);--c-subtle:var(--subtle,#7e8b99);
+ --c-accent:var(--accent,#8bdcc5);--c-accent-ink:var(--accent-ink,#12382f);--c-accent-glow:var(--accent-glow,rgba(139,220,197,.1));
+ --c-ai:var(--ai,#b5a8fa);--c-amber:var(--amber,#ecc994);--c-red:var(--red,#f3a09b);--c-green:var(--green,#86dbc0);
+ --c-sans:var(--sans,system-ui,"Noto Sans CJK SC",sans-serif);--c-mono:var(--mono,ui-monospace,monospace);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--c-bg);color:var(--c-text);font:14px/1.6 var(--c-sans);-webkit-font-smoothing:antialiased}
+.app{max-width:1100px;margin:0 auto;padding:16px;display:grid;gap:16px}
+header h1{margin:0;font-size:17px;font-weight:600}
+header p{margin:4px 0 0;color:var(--c-muted);font-size:12.5px}
+.layout{display:grid;gap:16px}
+@media (min-width:720px){.layout{grid-template-columns:260px minmax(0,1fr)}}
+.panel{background:var(--c-panel);border:1px solid var(--c-line);border-radius:10px;padding:12px}
+.controls{display:grid;gap:12px;align-content:start}
+.field{display:grid;gap:4px}
+.field-top{display:flex;justify-content:space-between;color:var(--c-muted);font-size:12.5px}
+.field-top output{font-family:var(--c-mono);color:var(--c-text);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--c-accent)}
+button{font:inherit;color:var(--c-text);background:var(--c-surface);border:1px solid var(--c-line);border-radius:8px;padding:6px 12px;cursor:pointer;transition:background .15s ease-out}
+button:hover{background:var(--c-surface-hover)}
+button:active{transform:translateY(1px)}
+button.primary{background:var(--c-accent);color:var(--c-accent-ink);border-color:transparent}
+button:disabled{opacity:.45;cursor:default}
+:focus-visible{outline:2px solid var(--c-accent);outline-offset:2px}
+.stage{min-height:320px;display:grid}
+.stage canvas{width:100%;height:100%;min-height:300px;display:block}
+.readouts{display:flex;flex-wrap:wrap;gap:24px}
+.readout b{display:block;font:500 24px/1.2 var(--c-mono);font-variant-numeric:tabular-nums}
+.readout span{color:var(--c-muted);font-size:12.5px}
+.note{color:var(--c-muted);font-size:12.5px;margin:0}
+.actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+ <header><h1>应用名</h1><p>一句话：拖动什么，注意看什么。</p></header>
+ <div class="layout">
+  <section class="panel controls">
+   <label class="field"><span class="field-top">参数名 <output id="rate-out"></output></span>
+    <input id="rate" type="range" min="0" max="2" step="0.01"></label>
+   <button id="reset">恢复默认</button>
+  </section>
+  <section class="panel stage"><canvas id="view"></canvas></section>
+ </div>
+ <section class="panel">
+  <div class="readouts"><div class="readout"><b id="result">—</b><span>读数的名字（单位）</span></div></div>
+  <p class="note">注意看：……</p>
+  <div class="actions"><button class="primary" id="ask">带着结果问 AI</button></div>
+ </section>
+</div>
+<script>
+"use strict";
+const DEFAULTS={rate:0.5};
+const KEY="app:"+document.title;
+const state=load();
+const $=s=>document.querySelector(s);
+const css=name=>getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+function load(){try{return {...DEFAULTS,...JSON.parse(localStorage.getItem(KEY)||"{}")};}catch(e){return {...DEFAULTS};}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){}}
+function update(patch){Object.assign(state,patch);save();render();}
+
+// 要讲的那个关系写成有名字的函数，注释里写公式。
+function result(rate){return rate*2;}
+
+const canvas=$("#view"),ctx=canvas.getContext("2d");
+function fit(){const r=canvas.getBoundingClientRect(),k=devicePixelRatio||1;canvas.width=Math.round(r.width*k);canvas.height=Math.round(r.height*k);ctx.setTransform(k,0,0,k,0,0);render();}
+new ResizeObserver(fit).observe(canvas);
+
+function render(){
+ $("#rate").value=state.rate;$("#rate-out").textContent=state.rate.toFixed(2);
+ $("#result").textContent=result(state.rate).toFixed(2);
+ const w=canvas.clientWidth,h=canvas.clientHeight;
+ ctx.clearRect(0,0,w,h);
+ ctx.strokeStyle=css("--c-line-soft");ctx.lineWidth=1;
+ for(let x=0;x<=w;x+=40){ctx.beginPath();ctx.moveTo(x+.5,0);ctx.lineTo(x+.5,h);ctx.stroke();}
+ ctx.strokeStyle=css("--c-accent");ctx.lineWidth=2;
+ ctx.beginPath();ctx.moveTo(0,h);ctx.lineTo(w,h-h*Math.min(1,state.rate/2));ctx.stroke();
+}
+
+$("#rate").addEventListener("input",e=>update({rate:+e.target.value}));
+$("#reset").addEventListener("click",()=>update({...DEFAULTS}));
+$("#ask").addEventListener("click",()=>window.lattice?.ask("参数名 = "+state.rate.toFixed(2)+" 时，读数是 "+result(state.rate).toFixed(2)+"。"));
+fit();
+</script>
+</body>
+</html>

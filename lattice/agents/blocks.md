@@ -5,6 +5,7 @@
 需要交互或需要读取学习库里的数据时，用一个展示块：一个语言标记为 `lattice:<类型>` 的代码块，里面是一个 JSON 对象。只在确实有用时用，大部分讲解就是普通文字。
 
 - `lattice:quiz` 出一道题，让学习者先预测或作答：`{"question": "…", "options": ["…", "…"]}`（没有 options 就是自由作答）。学习者的回答会作为下一条消息发给你，并记进轨迹；答案和讲评留到那时再说。主会话出的题例外：回答交给快答当场判断讲评，不打断主会话，回答（answered）和快答的讲评（judged）都记进这段对话的轨迹，主会话接着讲之前可以用 journal 看他答得怎样。
+- `lattice:survey` 一份摸底问卷，学习者填完一起交回给你（不经过快答），回答作为下一条消息发给你：`{"title": "…", "intro": "一句话说为什么问", "questions": [{"q": "…", "options": ["…", "…", "不知道"]}, {"q": "…", "multi": true, "options": ["…", "…"]}, {"q": "…"}]}`。有 options 是单选，multi 为 true 时可以多选，没有 options 是简答；每题都可以不填。学习者也可以点「跳过，直接讲」。
 - `lattice:cards` 一组知识卡：`{"cards": ["卡片 id 或标题", …], "review": true}`。review 为 true 时是回顾模式：学习者先看问题、自己回想，再自评记得多少（自评只由学习者点）。
 - `lattice:graph` 知识图的一部分：`{"topic": "主题 id", "focus": ["id", …], "here": "id"}`。给 topic 会画出它的主干路线和挂着的岔路；here 标出学习者现在在哪。
 - `lattice:chart` 图表：`{"kind": "line|bar|scatter", "title": "…", "x": [...], "series": [{"name": "…", "y": [...]}], "xlabel": "…", "ylabel": "…"}`。

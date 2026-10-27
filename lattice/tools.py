@@ -19,7 +19,7 @@ from . import skills as skillbook
 from .model import AGENT_RECORDS, CARD_TYPES, LINK_KINDS, readable_outputs, text, title_of
 from .vault import APPEND_ONLY, KEPT, ME, kind_of, now, slug, split_frontmatter
 
-ALL = {"tutor", "flash", "coach", "organizer"}
+ALL = {"tutor", "flash", "coach", "organizer", "builder"}
 
 
 class Later:
@@ -123,6 +123,8 @@ def _guard(ctx, path):
         raise ValueError("技能不直接改：用 skill_edit 提出修改，学习者在左右对照里看过、批准了才生效")
     if ctx.bridge.typing(rel):
         raise ValueError("学习者正在编辑这个文件；不要直接改，用 suggest 提出修改建议")
+    if ctx.agent == "builder" and not rel.startswith("apps/"):
+        raise ValueError("应用助手只在 apps/ 里写文件")
     return rel
 
 
@@ -316,7 +318,7 @@ def due(ctx):
 
 # ---- the shell ------------------------------------------------------------------------------------
 
-@tool("shell", {"tutor", "coach", "organizer"}, "在沙箱里运行一条 bash 命令，工作目录是学习库：用来查看、搜索、分析和按规矩组织文件（ls、rg、cat、head、git log、python…）。学习库可写，挂载的外部目录只读，不联网，看不到家目录的其余部分。Python 用学习库的环境。命令有时限，输出过长会截断。命令改动的文件会作为一次可撤销的操作提交；改到只归学习者的部分会被自动退回。"
+@tool("shell", {"tutor", "coach", "organizer", "builder"}, "在沙箱里运行一条 bash 命令，工作目录是学习库：用来查看、搜索、分析和按规矩组织文件（ls、rg、cat、head、git log、python…）。学习库可写，挂载的外部目录只读，不联网，看不到家目录的其余部分。Python 用学习库的环境。命令有时限，输出过长会截断。命令改动的文件会作为一次可撤销的操作提交；改到只归学习者的部分会被自动退回。"
       "要用 NVIDIA 显卡（CUDA、torch.cuda…）时 gpu 设为 true：这条命令运行时显卡被唤醒、结束就回到休眠；不需要显卡时别设。",
       {"command": S, "timeout": I, "gpu": {"type": "boolean"}}, ["command"])
 def shell(ctx, command, timeout=None, gpu=False):
@@ -344,7 +346,7 @@ def shell(ctx, command, timeout=None, gpu=False):
 
 # ---- the web --------------------------------------------------------------------------------------
 
-@tool("web_search", {"tutor", "flash", "coach"}, "联网搜索。返回标题、链接和摘要；需要细读时用 web_fetch。什么时候需要查、信哪个来源由你判断；用到的内容在回复里注明出处。", {"query": S}, ["query"])
+@tool("web_search", {"tutor", "flash", "coach", "builder"}, "联网搜索。返回标题、链接和摘要；需要细读时用 web_fetch。什么时候需要查、信哪个来源由你判断；用到的内容在回复里注明出处。", {"query": S}, ["query"])
 def web_search(ctx, query):
     from . import web
 
@@ -360,7 +362,7 @@ def web_search(ctx, query):
     return Later(start)
 
 
-@tool("web_fetch", {"tutor", "flash", "coach"}, "读一个网页的正文（转成纯文本，过长会截断）。不能读本机和局域网地址。", {"url": S}, ["url"])
+@tool("web_fetch", {"tutor", "flash", "coach", "builder"}, "读一个网页的正文（转成纯文本，过长会截断）。不能读本机和局域网地址。", {"url": S}, ["url"])
 def web_fetch(ctx, url):
     from . import web
 
@@ -716,7 +718,7 @@ def _write(ctx, rel, content, summary):
     return {"restored": "理解阶段、回顾安排和「我的理解」只归学习者，这几处已还原"} if restored else {}
 
 
-@tool("edit", {"tutor", "coach", "organizer"}, "直接改学习库里的一个文件：把 old（必须只出现一次）换成 new。只用于你自己的示例和实验文件、整理学习者刚写完的东西，或者学习者明确让你改的时候；其余情况用 suggest。",
+@tool("edit", {"tutor", "coach", "organizer", "builder"}, "直接改学习库里的一个文件：把 old（必须只出现一次）换成 new。只用于你自己的示例和实验文件、整理学习者刚写完的东西，或者学习者明确让你改的时候；其余情况用 suggest。",
       {"file": S, "old": S, "new": S}, ["file", "old", "new"])
 def edit(ctx, file, old, new):
     rel = _guard(ctx, _path_of(ctx, file))
@@ -726,7 +728,7 @@ def edit(ctx, file, old, new):
     return {"file": rel, **_write(ctx, rel, content.replace(old, text(new), 1), "改了 " + rel.rsplit("/", 1)[-1])}
 
 
-@tool("write", {"tutor", "coach", "organizer"}, "新建或整篇改写学习库里的一个文件（不给目录时放进 code/）。Markdown 文档要保留开头的属性块。规则同 edit。",
+@tool("write", {"tutor", "coach", "organizer", "builder"}, "新建或整篇改写学习库里的一个文件（不给目录时放进 code/）。Markdown 文档要保留开头的属性块。规则同 edit。",
       {"file": S, "content": S}, ["file", "content"])
 def write(ctx, file, content):
     path = str(file).strip()
@@ -755,7 +757,7 @@ def write_cell(ctx, source, kind="code", notebook=None, cell=None, after=None):
     return {"notebook": rel, "cell": ident}
 
 
-@tool("run", {"tutor", "coach"}, "运行一个文件并等它结束，取回真实输出：.py、.ipynb（cells 指定单元格，不给就全部）、.c、.cpp、.rs、.go、.js、.ts、.sh 等。在沙箱里执行（不联网）；缺 Python 包时会自动装上再跑一次。学习者关掉了「允许 AI 运行代码」时会拒绝，这时请学习者自己点运行。"
+@tool("run", {"tutor", "coach", "builder"}, "运行一个文件并等它结束，取回真实输出：.py、.ipynb（cells 指定单元格，不给就全部）、.c、.cpp、.rs、.go、.js、.ts、.sh 等。在沙箱里执行（不联网）；缺 Python 包时会自动装上再跑一次。学习者关掉了「允许 AI 运行代码」时会拒绝，这时请学习者自己点运行。"
       "要用 NVIDIA 显卡（训练、CUDA）时 gpu 设为 true：显卡只在这次运行时被唤醒，结束就回到休眠；实验笔记会换到用显卡的内核（之前的变量没了），"
       "这个内核空闲 15 分钟后自动关掉。训练这类跑得久的，用 timeout 给够秒数（最多 3600）。",
       {"file": S, "cells": LIST, "gpu": {"type": "boolean"}, "timeout": I}, ["file"])
@@ -782,7 +784,7 @@ def run(ctx, file, cells=None, gpu=False, timeout=None):
     return Later(start)
 
 
-@tool("accelerator", {"tutor", "coach"}, "这台电脑能用来计算的硬件（不会唤醒显卡）：有哪些显卡、驱动、驱动支持到的 CUDA、该装哪种 torch、"
+@tool("accelerator", {"tutor", "coach", "builder"}, "这台电脑能用来计算的硬件（不会唤醒显卡）：有哪些显卡、驱动、驱动支持到的 CUDA、该装哪种 torch、"
       "运行时怎么启动显卡（launcher），以及学习者是否允许用显卡。每台电脑都不一样，装 torch 之类的库、要用显卡之前先看它，按它装对应的版本。"
       "给 launcher 时改这台电脑的启动方式：auto（有 nvidia-run 就用它，否则直接运行）、none（直接运行），或者一条命令的开头（如 prime-run）；"
       "只在 auto 不合适、你确认另一种在这台电脑上能用时改，并用 why 说明。改了会记在你的回复下面。",
@@ -798,7 +800,7 @@ def accelerator(ctx, launcher=None, why=""):
     return bridge.rpc_accelerator()
 
 
-@tool("install", {"tutor", "coach"}, "往学习库的 Python 环境装包（只装预编译的 wheel），并写进环境定义 envs/<env>.txt，学习者可以撤销。env 默认 default。"
+@tool("install", {"tutor", "coach", "builder"}, "往学习库的 Python 环境装包（只装预编译的 wheel），并写进环境定义 envs/<env>.txt，学习者可以撤销。env 默认 default。"
       "装包在沙箱外进行，能联网；大的包要等一会儿（torch 连同 CUDA 的库约 3GB，可能要十几分钟），装好之前别下结论说装不上。"
       "要按这台电脑的显卡装特定版本（比如某个 CUDA 版本的 torch）时，先用 accelerator 看显卡和驱动，再给 index_url（主索引）或 extra_index_url（额外索引），只能是 https 地址。",
       {"packages": LIST, "env": S, "index_url": S, "extra_index_url": S}, ["packages"])
@@ -820,6 +822,58 @@ def install(ctx, packages, env="default", index_url=None, extra_index_url=None):
         say = bridge.tool_progress(ctx)
         bridge.background(lambda: bridge.envs.install(env or "default", packages, binary_only=True, progress=say, index_url=index_url or None,
                                                       extra_index_url=extra_index_url or None), finish)
+    return Later(start)
+
+
+# ---- apps ----------------------------------------------------------------------------------------
+
+@tool("build_app", {"tutor", "coach"}, "请应用助手在后台做一个小应用：网页形式，在学习者那边的「应用」窗口里运行，用来动手操作、可视化、模拟、练习"
+      "（比如能拖动参数看曲线变化的演示、一个可以弹的虚拟键盘、排序算法一步步走的动画、听音辨音程的小练习）。"
+      "比展示块（lattice:explore 之类）复杂、要反复写和调试的，交给它；它不占这段对话，你接着讲，做好了会自动在学习者那边打开，你下一轮也会知道。"
+      "brief 写清给谁用、要能做什么、界面上有什么、操作后要看到什么，以及和现在讲的内容怎么对上；title 是应用的名字。"
+      "要改一个已有的应用时，file 给它的路径（apps/ 下的 .html），brief 写要改什么。",
+      {"title": S, "brief": S, "file": S}, ["title", "brief"])
+def build_app(ctx, title, brief, file=None):
+    started = ctx.bridge.build_app(text(title, 80), text(brief, 8000), file, origin=ctx.thread, topic=ctx.topic, by=ctx.agent)
+    ctx.act("请应用助手做「" + started["title"] + "」", "file:" + started["file"], False)
+    return {**started, "note": "应用助手在后台做；做好会在学习者那边自动打开。不用等它，接着讲。"}
+
+
+@tool("check_app", {"builder"}, "在学习者界面里真正加载一次 apps/ 下的应用（和学习者看到的一样：它自己的站点、能联网、用得到 apps/assets/ 里的素材），"
+      "取回页面报的错误（脚本错误、加载失败的脚本和图片、未处理的 Promise、console.error）、页面上显示出来的文字开头、尺寸、画布和图片的加载情况。"
+      "probe 可以给一段 JavaScript（在应用里、页面加载后执行，可以 await；用 return 交回结果），用来点按钮、改输入、读状态，检查交互是否真的工作。",
+      {"file": S, "probe": S, "wait": I}, ["file"])
+def check_app(ctx, file, probe=None, wait=None):
+    rel = _path_of(ctx, file)
+    if not rel.startswith("apps/") or not rel.endswith(".html"):
+        raise ValueError("只检查 apps/ 下的 .html 应用")
+    if not ctx.l.vault.path(rel).is_file():
+        raise ValueError("文件不存在：" + rel)
+    html = ctx.l.vault.read_text(rel)
+    return Later(lambda done: ctx.bridge.app_check(rel, html, text(probe or "", 20000), max(300, min(int(wait or 1500), 10000)), done))
+
+
+@tool("fetch_asset", {"builder"}, "从网上下载一个素材文件（图片、音频、字体、库的 .js/.css、数据）存进 apps/assets/ 下，应用用相对路径引用它，离线也能用。"
+      "file 是存放路径（apps/assets/ 开头）；只能下公网地址，单个文件最多 20MB。来源和许可写进回复。",
+      {"url": S, "file": S}, ["url", "file"])
+def fetch_asset(ctx, url, file):
+    from . import web
+    rel = _guard(ctx, str(file).strip())
+    if not rel.startswith("apps/assets/") or rel.endswith("/"):
+        raise ValueError("素材存在 apps/assets/ 下，file 要写到文件名")
+
+    def start(done):
+        def finish(result):
+            if isinstance(result, Exception):
+                return done({"error": "下载失败：" + str(result)})
+            final, kind, data = result
+            ctx.l.vault.path(rel).parent.mkdir(parents=True, exist_ok=True)
+            ctx.l.vault.path(rel).write_bytes(data)
+            ctx.l.index.sync()
+            ctx.act("下载了素材 " + rel.rsplit("/", 1)[-1], "file:" + rel)
+            ctx.bridge.changed([rel])
+            done({"file": rel, "bytes": len(data), "type": kind, "from": final})
+        ctx.bridge.background(lambda: web.asset(url), finish)
     return Later(start)
 
 

@@ -14,7 +14,7 @@ from . import skills
 from .vault import ME, split_frontmatter
 
 HERE = Path(__file__).with_name("agents")
-NAMES = ("tutor", "flash", "coach", "organizer")
+NAMES = ("tutor", "flash", "coach", "organizer", "builder")
 
 # Buttons that ask the tutor to work a certain way this turn: the learner's words, and how to work.
 TASKS = {

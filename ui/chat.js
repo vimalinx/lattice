@@ -2,7 +2,7 @@
 /* AI panels: one conversation with one agent. Everything an agent shows lives in its own panel;
    the learner reads, answers its questions, and takes what they want to their side. */
 const Chat={};
-const AGENT_ICON={tutor:"bot",flash:"spark",coach:"code",organizer:"edit"};
+const AGENT_ICON={tutor:"bot",flash:"spark",coach:"code",organizer:"edit",builder:"apps"};
 const AGENT_HINT={tutor:"想到什么，直接说",flash:"这个词什么意思？这行为什么这样写？",coach:"说说你的想法、预测，或者哪里卡住了"};
 function sendHint(){return S.ui.send_key==="ctrl"?"Ctrl + Enter 发送":"Enter 发送，Shift + Enter 换行";}
 function agentTitle(agent){return S.data?.agents?.[agent]||agent;}
@@ -124,6 +124,7 @@ function renderChat(pid,keepScroll=true){
   scroll.addEventListener("toggle",e=>{
    const box=e.target,mid=box.closest?.("[data-mid]")?.dataset.mid;
    if(box.matches("details.actions")&&mid)box.open?st.opened.add(mid):st.opened.delete(mid);
+   if(box.matches("details.steps-box")&&mid)box.open?st.opened.add("steps:"+mid):st.opened.delete("steps:"+mid);
    if(box.matches("details.thinking-box")){if(box.classList.contains("live")){if(st.liveOpen!==box.open){st.liveOpen=box.open;patchLive(pid);}}else if(mid)st.thoughts[mid]=box.open;}
   },true);
  }
@@ -230,7 +231,7 @@ function messageEl(pid,m,answers){
     (meta.selection?'<div class="msg-quote">'+esc(shorten(meta.selection,180))+'</div>':"")+
     (meta.attach?.length?messageTiles(meta.attach):"")+
     '<div class="markdown msg-body">'+r.html+'</div></div>'+foot+'</div>'
-   :'<div class="msg from-ai" data-mid="'+m.id+'">'+skillsUsed(meta.skills||olderSkills(list,at))+thinkingHtml(meta.thinking,meta.think_seconds)+'<div class="markdown msg-body">'+r.html+'</div>'+
+   :'<div class="msg from-ai" data-mid="'+m.id+'">'+skillsUsed(meta.skills||olderSkills(list,at))+thinkingHtml(meta.thinking,meta.think_seconds)+stepsHtml(meta.steps)+'<div class="markdown msg-body">'+r.html+'</div>'+
     (redone?'<div class="msg-note">这次没有答完，下面是重新回答的</div>':incomplete?'<div class="msg-note">'+esc(meta.stop_reason==="cancelled"?"已停止 · 保留了部分回答":meta.stop_reason==="max_tokens"?"达到回复长度上限":"没有正常结束 · 只保留了收到的部分")+
      (canRetry?button(svg("refresh",12)+" 重新回答","chat-retry",'data-pid="'+pid+'"',"ghost xs"):"")+'</div>':"")+
     actionChips((meta.actions||[]).filter(a=>!/^(skill|me):/.test(String(a.ref||""))),st.data.undone||[])+remembered(meta.actions,st.data.undone||[])+sourcesHtml(meta.sources)+cardsNoted(st.data.cards?.[m.id])+suggestionsHtml(pid,m)+changesHtml(meta.changes)+foot+'</div>';
@@ -239,6 +240,7 @@ function messageEl(pid,m,answers){
  const node=h(cached.html);
  const fold=node.querySelector("details.actions");if(fold)fold.open=st.opened.has(String(m.id));
  const thought=node.querySelector("details.thinking-box");if(thought)thought.open=st.thoughts[m.id]??S.ui.thinking==="open";
+ const steps=node.querySelector("details.steps-box");if(steps)steps.open=st.opened.has("steps:"+m.id);
  if(cached.blocks.length)mountBlocks(node,cached.blocks,{thread:st.thread,message:m.id,answers,pid});
  if(meta.changes?.length)mountInlineChanges(node);
  if(meta.attach?.length){hydrateVault(node);fillTextTiles(node);}
@@ -315,7 +317,7 @@ function suggestionsHtml(pid,m){
  }).join("");
 }
 /* What the model thought before answering: folded to how long and one line, the full text one click away. */
-function freshThinking(){return {think:"",thinkingNow:false,thinkMs:0,thinkFrom:0,liveOpen:null};}
+function freshThinking(){return {think:"",thinkingNow:false,thinkMs:0,thinkFrom:0,liveOpen:null,steps:[],stepAt:0};}
 function thinkSummary(text){
  const plain=String(text||"").replace(/[#*`>_|]/g," ").replace(/\s+/g," ").trim();
  return shorten((plain.match(/^.*?(?:[。！？]|[.!?](?=\s|$))/)||[plain])[0],90);
@@ -329,24 +331,45 @@ function thinkingHtml(text,secs,live=null){
  return '<details class="thinking-box'+(live?" live":"")+(live?.now?" now":"")+'"'+(open?" open":"")+'><summary>'+svg("bulb",13)+'<b>'+head+'</b><span>'+esc(live?.now?lastThought(text):thinkSummary(text))+'</span>'+svg("chevrondown",11)+'</summary>'+
   (live&&!open?"":'<div class="thinking-text markdown">'+markdown(text)+'</div>')+'</details>';
 }
+/* The one-line notes written between tool rounds: where a long reply has got to while it works, folded once it is done. */
+function stepsHtml(steps,live=null){
+ if(!steps?.length)return "";
+ const list='<ol class="steps-list">'+steps.map((s,i)=>'<li'+(live?.now&&i===steps.length-1?' class="now"':"")+'>'+esc(s).replace(/`([^`]+)`/g,"<code>$1</code>")+'</li>').join("")+'</ol>';
+ if(live)return '<div class="steps-box live">'+list+'</div>';
+ return '<details class="steps-box"><summary>'+svg("check",12)+'<b>经过 '+steps.length+' 步</b><span>'+esc(steps.at(-1))+'</span>'+svg("chevrondown",11)+'</summary>'+list+'</details>';
+}
+function atScrollEnd(box){return box.scrollHeight-box.scrollTop-box.clientHeight<24;}
 /* Only the reply being written re-renders while it streams. */
 function renderLive(pid){
  const node=Dock.els[pid],st=Chat[pid];if(!node||!st)return;
  const slot=node.querySelector(".live-slot");if(!slot)return;
  const busy=st.data?.busy;
  const unanswered=!busy&&st.data?.messages?.at(-1)?.role==="user"&&st.data.messages.at(-1).id!=="pending";
- if(!st.stream&&!st.live.length&&!busy&&!st.error&&!st.think&&!unanswered){slot.innerHTML="";return;}
+ if(!st.stream&&!st.live.length&&!busy&&!st.error&&!st.think&&!st.steps.length&&!unanswered){slot.innerHTML="";slot.__frame="";return;}
  const r=replyHtml(st.stream,true);
  const secs=(st.thinkMs+(st.thinkingNow?Date.now()-st.thinkFrom:0))/1000;
- const thought=thinkingHtml(st.think,0,{now:st.thinkingNow,secs,open:st.liveOpen??S.ui.thinking==="open"});
+ const open=st.liveOpen??S.ui.thinking==="open",thought=thinkingHtml(st.think,0,{now:st.thinkingNow,secs,open});
  const used=liveSkills(st);
- // Blocks already drawn (a relation graph, an experiment…) stay as they are while the rest of the reply grows.
- const kept=new Map();for(const n of slot.querySelectorAll(".lblock[data-live-key]"))kept.set(n.dataset.liveKey,n);
- slot.innerHTML=(st.stream||st.live.length||thought||used.length?'<div class="msg from-ai streaming">'+skillsUsed(used)+thought+'<div class="markdown msg-body">'+r.html+'</div>'+actionChips(st.live.filter(a=>!String(a.ref||"").startsWith("skill:")),[],true)+'</div>':"")+
+ const steps=stepsHtml(st.steps,{now:busy&&st.stream.length===st.stepAt&&!st.thinkingNow});
+ const frame=(st.stream||st.live.length||thought||steps||used.length?'<div class="msg from-ai streaming">'+skillsUsed(used)+"\u0000"+steps+'<div class="markdown msg-body">'+r.html+'</div>'+actionChips(st.live.filter(a=>!String(a.ref||"").startsWith("skill:")),[],true)+'</div>':"")+
   waitingHtml(st,busy)+
   (st.error?'<div class="chat-error">'+esc(st.error)+(busy?"":button(svg("refresh",12)+" 重试","chat-retry",'data-pid="'+pid+'"',"ghost xs"))+'</div>':
    // A question left without any answer (the reply failed before a word came back, or the program was closed meanwhile).
    !busy&&st.data?.messages?.at(-1)?.role==="user"&&st.data.messages.at(-1).id!=="pending"?'<div class="chat-error quiet">这一问还没有得到回答'+(st.data.failure?.message?'<small class="fail-why">'+esc(st.data.failure.at+" 那次出错："+shorten(st.data.failure.message,240))+(/502|503|forbidden|upstream/i.test(st.data.failure.message)?"。这是服务那边拒绝了，可以换个模型试试":"")+'</small>':"")+button(svg("refresh",12)+" 重新回答","chat-retry",'data-pid="'+pid+'"',"ghost xs")+'</div>':"");
+ // While only the thinking grows, it is updated in place, so the learner can scroll through it as it is written;
+ // it follows the newest line until they scroll up, and follows again once they scroll back to its end.
+ const box=slot.querySelector(".thinking-box.live"),text=box?.querySelector(".thinking-text");
+ if(box&&thought&&slot.__frame===frame&&box.open===open){
+  const fresh=h(thought),grown=fresh.querySelector(".thinking-text");
+  box.className=fresh.className;box.querySelector("summary").replaceWith(fresh.querySelector("summary"));
+  if(text&&grown){const end=atScrollEnd(text);text.innerHTML=grown.innerHTML;if(end)text.scrollTop=text.scrollHeight;}
+  return;
+ }
+ const was=text&&{top:text.scrollTop,end:atScrollEnd(text)};
+ // Blocks already drawn (a relation graph, an experiment…) stay as they are while the rest of the reply grows.
+ const kept=new Map();for(const n of slot.querySelectorAll(".lblock[data-live-key]"))kept.set(n.dataset.liveKey,n);
+ slot.innerHTML=frame.replace("\u0000",()=>thought);slot.__frame=frame;
+ const shown=slot.querySelector(".thinking-box.live .thinking-text");if(shown)shown.scrollTop=!was||was.end?shown.scrollHeight:was.top;
  if(r.blocks.length){
   for(const node of slot.querySelectorAll(".lblock[data-block]")){
    const b=r.blocks[+node.dataset.block];if(!b||b.error==="pending")continue;
@@ -498,6 +521,8 @@ function chatEvent(evt){
   const st=Chat[pid];
   if(evt.kind==="thinking"){if(!st.thinkingNow){st.thinkingNow=true;st.thinkFrom=Date.now();}st.think+=evt.text;patchLive(pid);continue;}
   if(st.thinkingNow&&["chunk","tool","tool_wait","finished","error"].includes(evt.kind)){st.thinkingNow=false;st.thinkMs+=Date.now()-st.thinkFrom;}
+  // A short note before tool calls moves out of the answer into the list of steps.
+  if(evt.kind==="step"){const at=st.stream.lastIndexOf(evt.text);if(at>=0)st.stream=st.stream.slice(0,at).trimEnd();st.steps.push(evt.text);st.stepAt=st.stream.length;patchLive(pid);continue;}
   if(evt.kind==="chunk"){st.stream+=evt.text;st.waiting="";st.lastChunk=Date.now();patchLive(pid);continue;}
   if(evt.kind==="status"){if(st.data){st.data.status=evt.state;st.data.busy=!["ready","offline","error","cancelled"].includes(evt.state)||st.data.busy;}const head=Dock.els[pid]?.querySelector(".chat-head");if(head)head.innerHTML=chatHead(pid);continue;}
   if(evt.kind==="tool_wait"){st.waiting={name:evt.name,detail:evt.detail||"",since:Date.now(),gpu:!!evt.gpu};patchLive(pid);liveTicker(pid);continue;}

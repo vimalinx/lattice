@@ -29,6 +29,8 @@ panelType("file",{side:"mine",icon:p=>fileIcon(p.path),
  screen(p,node){return fileScreen(node.dataset.pid);}});
 function openFile(path,at=null){
  if(!path)return;
+ // An app the app builder made runs in its own window; its source is a button away there.
+ if(/^apps\/[^/]+\.html?$/i.test(path))return openPanel({type:"app",path});
  return openPanel({type:"file",path},{then:pid=>{if(at)gotoIn(pid,at);}});
 }
 function filePanels(path){return Object.keys(Files).filter(pid=>Dock.panels[pid]?.path===path);}

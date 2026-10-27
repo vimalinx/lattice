@@ -68,6 +68,7 @@ function svg(name,size=18){
   bulb:'<path d="M9 18h6m-5 3h4M8 15a6 6 0 1 1 8 0l-1 3H9l-1-3Z"/>',
   quote:'<path d="M9 11H3v8h7V9H4m16 2h-6v8h7V9h-6"/>',
   terminal:'<rect x="2" y="3" width="20" height="18" rx="2"/><path d="m6 8 4 4-4 4m6 1h6"/>',
+  apps:'<rect x="3" y="3" width="7.5" height="7.5" rx="1.8"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.8"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.8"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.8"/>',
   layout:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 10h18M10 10v11"/>',
   info:'<circle cx="12" cy="12" r="10"/><path d="M12 10v6m0-10h.01"/>',
   slash:'<path d="M19 4 5 20"/>',
@@ -254,4 +255,4 @@ const kindName={topic:"主题",card:"知识卡",lesson:"课程",note:"笔记",in
 const journalName={asked:"提问",answered:"作答",judged:"AI 判断",explained:"讲解",ran:"运行",viewed:"查看",wrote:"写作",staged:"理解阶段",reviewed:"回顾",detour:"岔开",bridged:"接回主干",insight:"薄弱点",organized:"整理",searched:"联网",installed:"装包",action:"AI 动作",undo:"撤销",skill_proposed:"提议改技能",skill_changed:"改了技能",skill_change_dismissed:"没采用的技能修改",skill_compared:"两版对比",skill_compare_done:"两版对比",carded:"记了卡"};
 // A change to an agent's rules is recorded like a skill's, and named for what it is.
 const rulesJournalName={skill_proposed:"提议改规则",skill_changed:"改了规则",skill_change_dismissed:"没采用的规则修改"};
-function who(actor){return actor==="me"?"我":({tutor:"主会话",flash:"快答",coach:"练习教练",organizer:"整理",lattice:"Lattice",app:"Lattice"})[actor]||actor;}
+function who(actor){return actor==="me"?"我":({tutor:"主会话",flash:"快答",coach:"练习教练",organizer:"整理",builder:"应用助手",lattice:"Lattice",app:"Lattice"})[actor]||actor;}

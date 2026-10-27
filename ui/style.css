@@ -397,6 +397,21 @@ label.check input{margin:0}
 .thinking-box.now summary b{animation:pulse 1.4s infinite}
 .thinking-text{margin:6px 0 4px;padding:2px 0 2px 14px;border-left:2px solid var(--line);color:var(--muted);max-height:28em;overflow:auto}
 .thinking-box.live .thinking-text{max-height:16em}
+.steps-box{margin:0 0 10px;font-size:.92em;color:var(--muted)}
+.steps-box summary{display:flex;align-items:center;gap:7px;cursor:pointer;list-style:none;width:fit-content;max-width:100%;padding:3px 9px 3px 0;border-radius:8px}
+.steps-box summary::-webkit-details-marker{display:none}
+.steps-box summary:hover{color:var(--text)}
+.steps-box summary>svg:first-child{color:var(--green);flex:0 0 auto}
+.steps-box summary b{font-weight:600;flex:0 0 auto}
+.steps-box summary span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0;color:var(--subtle)}
+.steps-box summary>svg:last-child{flex:0 0 auto;transition:transform .15s}
+.steps-box[open] summary>svg:last-child{transform:rotate(180deg)}
+.steps-list{list-style:none;margin:4px 0;padding:0 0 0 14px;border-left:2px solid var(--line)}
+.steps-list li{position:relative;padding:2px 0 2px 14px;line-height:1.55}
+.steps-list li::before{content:"";position:absolute;left:0;top:.72em;width:6px;height:6px;border-radius:50%;background:var(--subtle)}
+.steps-list li.now{color:var(--text)}
+.steps-list li.now::before{background:var(--ai);animation:pulse 1s infinite}
+.steps-list code{font-size:.9em;background:var(--surface);padding:0 5px;border-radius:5px}
 .menu-wide{min-width:320px;max-width:440px}
 .menu-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:3px 9px;font-size:12.5px}
 .menu-row>span{color:var(--muted);white-space:nowrap}
@@ -433,6 +448,14 @@ label.check input{margin:0}
 .quiz-free{width:100%;margin-top:6px}
 .quiz-actions{display:flex;justify-content:flex-end;margin-top:6px}
 .quiz-answered{margin-top:6px;font-size:12.5px;color:var(--accent)}
+.survey-head{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;color:var(--amber)}
+.survey-head b{color:var(--text)}
+.survey-head span{flex-basis:100%;color:var(--muted);font-size:12.5px}
+.survey-qs{margin:10px 0 0;padding-left:22px;display:grid;gap:12px}
+.survey-qs>li>.markdown>p{margin:0}
+.survey-qs .quiz-options{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 12px}
+.survey-free{width:100%;margin-top:5px}
+.block-survey .quiz-actions{gap:8px;margin-top:10px}
 .cards-head{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-bottom:6px}
 .mini-card{padding:8px 10px;border-radius:8px;background:var(--panel-hi);border:1px solid var(--line-soft);margin:6px 0}
 .mini-card-top{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:600}
@@ -1200,3 +1223,30 @@ input[type=checkbox],input[type=radio],input[type=range]{accent-color:var(--acce
 .code-bar,.msg-foot,.att-x,.suggestion-actions,.sc-foot,.cmp-foot,.cmp-label,.sc-cols,.thinking-box summary,.msg-skills>span,.to-bottom{user-select:none}
 .sc-merge .cm-collapsedLines{background:var(--surface)!important;color:var(--muted)!important;border-color:var(--line-soft)!important}.sc-merge .cm-collapsedLines:hover{color:var(--text)!important}
 .chat-error .fail-why{display:block;flex-basis:100%;margin-top:4px;font-size:11.5px;color:var(--muted);word-break:break-all}
+/* Apps the app builder makes: a bar over a sandboxed frame; without a file, the list of apps and a request box. */
+.app-panel{display:flex;flex-direction:column;height:100%;min-height:0;container-type:inline-size}
+.app-bar{display:flex;align-items:center;gap:6px;padding:7px 12px;border-bottom:1px solid var(--line-soft);flex:0 0 auto;min-width:0}
+.app-bar>.icon,.app-bar>.btn,.app-bar>.chip{flex:0 0 auto}
+.app-where{display:flex;align-items:center;gap:7px;min-width:0;flex:1 1 auto;color:var(--muted)}
+.app-where>svg{flex:0 0 auto;color:var(--ai)}
+.app-where b{color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
+.app-where small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--subtle);min-width:0}
+.app-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:auto}
+.app-frame{flex:1 1 auto;width:100%;min-height:0;border:0;background:var(--bg)}
+.app-check{position:fixed;left:0;top:0;width:900px;height:640px;border:0;opacity:0;pointer-events:none;z-index:-1}
+.app-building{flex:0 0 auto;padding:10px 14px;border-bottom:1px solid var(--line-soft);background:var(--panel)}
+.app-progress-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.app-progress-head b{font-weight:600}
+.app-progress-head em{font-style:normal;font-size:11.5px;color:var(--subtle);font-variant-numeric:tabular-nums}
+.app-progress-head .btn{margin-left:auto}
+.app-progress .steps-box{margin:6px 0 0}
+.app-progress-now{font-size:12px;color:var(--muted);margin-top:4px;padding-left:16px}
+.app-gallery{padding:16px;display:flex;flex-direction:column;gap:10px;max-width:880px;width:100%;margin:0 auto}
+.app-ask{display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+.app-ask textarea{width:100%;resize:vertical}
+.app-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.app-card{display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);cursor:pointer}
+.app-card:hover{border-color:var(--ai)}
+.app-card span{font-size:12.5px;color:var(--muted)}
+.app-card small{font-size:11px;color:var(--subtle)}
+.app-card.building{cursor:pointer;width:100%}

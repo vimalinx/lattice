@@ -50,10 +50,10 @@ const NEW_ITEMS=[
  ["新工作区…","space-new","layout","自己搭一套窗口组合"]];
 // Panels that already have a button of their own; the palette still lists them as commands.
 const PANEL_ITEMS=[["开始","open-home","home",""],["知识图","open-map","network",""],["学习轨迹","open-journal","history",""],["回顾","open-review","refresh",""],["卡片库","open-library","card",""],["记忆","open-memory","calendar",""],
- ["快速打开笔记 · Ctrl O","note-switcher","document",""],["技能商城","open-skills","store",""],["今天的日记","note-daily","calendar",""],["大纲与链接","open-noteinfo","list",""],["设置","open-settings","sliders",""]];
+ ["快速打开笔记 · Ctrl O","note-switcher","document",""],["技能商城","open-skills","store",""],["应用","open-apps","apps",""],["今天的日记","note-daily","calendar",""],["大纲与链接","open-noteinfo","list",""],["设置","open-settings","sliders",""]];
 // What a group of tabs can open: something new, or any window. The same list is behind the activity bar's +, when it is shown.
 const OPEN_ITEMS=[["主会话","open-agent","bot",'data-agent="tutor"'],["快答","open-agent","spark",'data-agent="flash"'],["开始","open-home","home"],["知识图","open-map","network"],
- ["卡片库","open-library","card"],["回顾","open-review","refresh"],["记忆","open-memory","calendar"],["大纲与链接","open-noteinfo","list"],["学习轨迹","open-journal","history"],["技能商城","open-skills","store"],["设置","open-settings","sliders"]];
+ ["卡片库","open-library","card"],["回顾","open-review","refresh"],["记忆","open-memory","calendar"],["大纲与链接","open-noteinfo","list"],["学习轨迹","open-journal","history"],["应用","open-apps","apps"],["技能商城","open-skills","store"],["设置","open-settings","sliders"]];
 function openMenuHtml(){
  const item=([t,a,i,d,x])=>'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+(d?'<small>'+esc(d)+'</small>':"")+'</span></button>';
  return '<div class="menu-label">新建</div><div class="menu-grid">'+NEW_ITEMS.slice(0,4).map(([t,a,i,d,x])=>item([t,a,i,"",x])).join("")+
@@ -182,7 +182,10 @@ function screenNote(){
 /* ---- events from the backend ---------------------------------------------------------------------------------- */
 async function onEvent(evt){
  if(evt.type==="agent"&&String(evt.thread||"").startsWith("compare:"))return compareEvent(evt);
+ if(evt.type==="agent"&&evt.agent==="builder"){appAgentEvent(evt);if(evt.kind==="finished")refreshState();return;}
  if(evt.type==="agent")return chatEvent(evt);
+ if(evt.type==="app_build")return appBuildEvent(evt);
+ if(evt.type==="app_check")return appCheck(evt);
  if(evt.type==="skill_change"){skillsChanged();return skillChangeEvent(evt);}
  if(evt.type==="saved"){sideChanged([]);return;}
  if(evt.type==="cards"){refreshState();for(const pid of Object.keys(Chat))if(Chat[pid].thread===evt.thread)loadChat(pid);return;}
@@ -236,6 +239,7 @@ async function onAction(a){
  case "open-memory":return openPanel({type:"memory"});
  case "open-noteinfo":return openPanel({type:"noteinfo"});
  case "open-skills":return openPanel({type:"skills"});
+ case "open-apps":case "app-open":case "app-reload":case "app-stop":case "app-build":case "app-change":case "app-source":return appAction(kind,a);
  case "open-settings":{const page=a.dataset.page,had=findPanel({type:"settings"}),id=openPanel({type:"settings",...(page?{page}:{})});if(had&&page)renderSettings(Dock.els[id],page);return;}
  case "open-file":return openFile(a.dataset.path||a.dataset.id,{line:a.dataset.line?Number(a.dataset.line):null,highlight:a.dataset.highlight||null});
  case "open-doc":{const d=(S.data.docs||[]).find(x=>x.id===a.dataset.id);if(d)return openFile(d.path);return toast("找不到这个文档，它可能已经被删除","error");}
@@ -321,6 +325,18 @@ async function onAction(a){
   await chatSend(side,"我的回答："+answer,{answer:{...sent,thread:src.thread},selection:"主会话的小问题："+shorten(question.replace(/[#*`]/g,""),400)});
   src.data.answers={...(src.data.answers||{}),[a.dataset.key]:answer};renderChat(chatPid);
   return toast("交给快答看了，主会话接着讲");
+ }
+ case "survey-send":case "survey-skip":{
+  // The whole survey goes back to the conversation that asked, as one message; skipping says so, and it teaches on.
+  const block=a.closest(".lblock"),info=JSON.parse(block.dataset.survey||"{}"),[message,index]=a.dataset.key.split(":"),chatPid=a.closest(".panel").dataset.pid;
+  const sent={message:Number(message),block:Number(index),question:info.title||"摸底问卷"};
+  if(kind==="survey-skip")return chatSend(chatPid,"先不填问卷了，直接讲吧。",{answer:sent,selection:""});
+  const lines=[...block.querySelectorAll(".survey-qs>li")].map((li,i)=>{
+   const picked=[...li.querySelectorAll("input:checked")].map(x=>x.value),free=li.querySelector("textarea")?.value.trim();
+   return (i+1)+". "+String(info.questions?.[i]||"").replace(/\s+/g," ")+"\n   → "+(picked.length?picked.join("、"):free||"（没填）");
+  });
+  if(lines.every(x=>x.endsWith("（没填）")))return toast("至少答一题，或者点「跳过，直接讲」");
+  return chatSend(chatPid,"我的摸底问卷：\n\n"+lines.join("\n"),{answer:sent,selection:""});
  }
  case "card-reveal":{const card=a.closest(".mini-card");card.querySelector(".mini-answer").hidden=false;a.parentElement.remove();return;}
  case "code-copy":{const n=el("#"+a.dataset.target);if(n){await writeClipboard(n.textContent);toast("已复制");}return;}

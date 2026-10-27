@@ -20,7 +20,9 @@ from .vault import join_frontmatter, split_frontmatter
 
 SHIPPED = Path(__file__).with_name("skills")
 FOLDER = "skills"
-AGENTS = ("tutor", "flash", "coach", "organizer")
+AGENTS = ("tutor", "flash", "coach", "organizer", "builder")
+# A skill that does not say which agents it is for is for the ones that teach and tidy, not the app builder.
+LEARNING = ("tutor", "flash", "coach", "organizer")
 CATEGORIES = ("讲解思路", "课程与教程", "练习与评估", "复杂生产", "研究与阅读", "笔记与整理", "其他")
 LIMIT_FILES, LIMIT_BYTES = 60, 4 * 1024 * 1024
 
@@ -36,7 +38,7 @@ def _parse(folder, where):
         attrs, body = split_frontmatter(page.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    agents = [a for a in (attrs.get("agents") or AGENTS) if a in AGENTS] or list(AGENTS)
+    agents = [a for a in (attrs.get("agents") or LEARNING) if a in AGENTS] or list(LEARNING)
     files = sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file() and p.name != "SKILL.md")[:LIMIT_FILES]
     return {"slug": folder.name, "name": str(attrs.get("name") or folder.name), "title": str(attrs.get("title") or attrs.get("name") or folder.name),
             "description": str(attrs.get("description") or "").strip(), "category": attrs.get("category") if attrs.get("category") in CATEGORIES else "其他",
@@ -168,13 +170,13 @@ TEMPLATE = """# 什么时候用
 """
 
 
-def create(vault, title, description="", category="其他", agents=AGENTS, body=""):
+def create(vault, title, description="", category="其他", agents=LEARNING, body=""):
     slug = slug_of(title)
     target = f"{FOLDER}/{slug}"
     if vault.path(target).exists():
         raise ValueError("已经有一个叫「" + slug + "」的技能了")
     attrs = {"name": slug, "title": str(title).strip()[:60], "description": str(description).strip()[:400] or "（写一句：什么时候该用它）",
-             "category": category if category in CATEGORIES else "其他", "agents": [a for a in agents if a in AGENTS] or list(AGENTS), "version": 1}
+             "category": category if category in CATEGORIES else "其他", "agents": [a for a in agents if a in AGENTS] or list(LEARNING), "version": 1}
     vault.write_text(f"{target}/SKILL.md", join_frontmatter(attrs, (body or TEMPLATE).strip() + "\n"))
     return f"{target}/SKILL.md"
 

@@ -49,6 +49,21 @@ const BLOCKS={
     (ctx.live?'':'<div class="quiz-actions">'+button("交给 AI","quiz-answer",'data-key="'+esc(key)+'"',"primary sm")+'</div>'));
   node.dataset.question=d.question||"";
  },
+ // A placement survey: a few questions answered together and sent back, as one message, to the agent that asked.
+ survey(d,node,ctx){
+  const key=ctx.message+":"+ctx.index,answered=ctx.answers?.[key];
+  const qs=(Array.isArray(d.questions)?d.questions:[]).slice(0,12),words=q=>String(q?.q||q?.question||"");
+  node.dataset.survey=JSON.stringify({title:d.title||"",questions:qs.map(words)});
+  node.innerHTML='<div class="survey-head">'+svg("list",15)+'<b>'+esc(d.title||"摸底问卷")+'</b>'+(d.intro?'<span>'+esc(d.intro)+'</span>':"")+'</div>'+
+   (answered?'<div class="quiz-answered">'+(/^先不填/.test(answered)?"跳过了问卷":"已经填好交回去了")+'</div>':
+    '<ol class="survey-qs">'+qs.map((q,i)=>{
+     const opts=Array.isArray(q.options)?q.options:[],name="sv"+key+"-"+i;
+     return '<li><div class="markdown">'+markdown(words(q))+'</div>'+
+      (opts.length?'<div class="quiz-options">'+opts.map(o=>'<label><input type="'+(q.multi?"checkbox":"radio")+'" name="'+esc(name)+'" value="'+esc(o)+'"/> '+esc(o)+'</label>').join("")+'</div>':
+       '<textarea class="survey-free" rows="2" placeholder="写几个字就行，也可以不填"></textarea>')+'</li>';
+    }).join("")+'</ol>'+
+    (ctx.live?'':'<div class="quiz-actions">'+button("跳过，直接讲","survey-skip",'data-key="'+esc(key)+'"',"ghost sm")+button("交给 AI","survey-send",'data-key="'+esc(key)+'"',"primary sm")+'</div>'));
+ },
  async cards(d,node,ctx){
   const refs=(d.cards||[]).slice(0,30);
   node.innerHTML='<div class="block-pending">读取知识卡…</div>';

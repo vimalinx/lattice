@@ -236,8 +236,9 @@ class _Text(HTMLParser):
         return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
-def _download(url):
-    """The page at url (redirects followed, each hop checked to be public): final url, content type, bytes."""
+def _download(url, cap=None):
+    """The page at url (redirects followed, each hop checked to be public): final url, content type, bytes. Past `cap`
+    bytes a page is cut short; a file asked for with a cap of its own is refused instead."""
     url = str(url).strip()
     with httpx.Client(timeout=25, headers={"User-Agent": AGENT}, follow_redirects=False) as client:
         for _ in range(6):
@@ -249,14 +250,21 @@ def _download(url):
                 if response.status_code >= 400:
                     raise WebError(f"网页返回 HTTP {response.status_code}")
                 kind = response.headers.get("content-type", "")
-                cap = 40_000_000 if "pdf" in kind else 3_000_000
+                limit = cap or (40_000_000 if "pdf" in kind else 3_000_000)
                 data = b""
                 for chunk in response.iter_bytes():
                     data += chunk
-                    if len(data) > cap:
+                    if len(data) > limit:
+                        if cap:
+                            raise WebError(f"文件超过 {cap // 1_000_000}MB")
                         break
                 return url, kind, data
     raise WebError("重定向次数太多")
+
+
+def asset(url, cap=20_000_000):
+    """A file from the internet, whole: final url, content type, bytes."""
+    return _download(url, cap)
 
 
 def _pdf(data):

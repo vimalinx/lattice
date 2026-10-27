@@ -29,9 +29,9 @@ from .model import Lattice, STAGES, outside_code, readable_outputs, text
 from .notebook import NotebookWorker
 from .providers import AGENT_NAMES, ApiWorker, Config
 from .runner import RunWorker, command_for, missing_tool, runner_for, tool_hint
-from . import accel
+from . import accel, appscheme
 from .sandbox import MPL, Sandbox, on_gpu
-from .vault import APPEND_ONLY, VAULT_PATH, VaultError, kind_of, split_frontmatter
+from .vault import APPEND_ONLY, VAULT_PATH, VaultError, kind_of, slug as vault_slug, split_frontmatter
 
 LOG = logging.getLogger("lattice")
 DATA_HOME = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
@@ -72,6 +72,14 @@ def compact(items):
     return json.dumps(items, ensure_ascii=False, default=str)
 
 
+def app_meta(head, fallback):
+    """An app's name and one-line description, from its <title> and <meta name="description">."""
+    title = re.search(r"<title[^>]*>(.*?)</title>", head, re.S | re.I)
+    about = re.search(r"<meta\s+name=[\"']description[\"']\s+content=[\"'](.*?)[\"']", head, re.S | re.I)
+    clean = lambda x: re.sub(r"\s+", " ", x).strip()
+    return {"title": clean(title.group(1))[:80] if title and clean(title.group(1)) else fallback, "about": clean(about.group(1))[:200] if about else ""}
+
+
 class Bridge(QObject):
     event = Signal(str)
     _done = Signal(object, object)
@@ -102,6 +110,10 @@ class Bridge(QObject):
         # the learner left, to save where they stand. Saves tried this run, by the last message they covered.
         self.jobs, self.job_running, self.saves_tried = [], {}, {}
         self.failures = {}   # thread -> why its last turn failed, until the next one goes through
+        # Apps the app builder is making, each in a conversation of its own, by that conversation.
+        self.builds = {}
+        # Apps being checked, by the site each one is loaded from for its check (see appscheme).
+        self.app_docs = {}
         self.reviews = {}
         self.runs, self.kernels, self.kernel_states, self.batches = {}, {}, {}, {}
         self.screen, self.edits, self.last_write = {}, {}, 0.0
@@ -1253,7 +1265,7 @@ class Bridge(QObject):
             return (on_gpu(["bash", "-c", command], accelerated) if accelerated else ["bash", "-c", command]), env
         scratch.mkdir(parents=True, exist_ok=True)
         worker = RunWorker(run_id, None, str(workdir), None, max(self.config.read()["run_timeout"], int(timeout or 0)), scratch, prepare)
-        self.runs[run_id] = {"path": shown, "by": by, "sandbox": sandboxed, "gpu": gpu, "worker": worker, "waiters": [], "attempt": attempt,
+        self.runs[run_id] = {"path": shown, "by": by, "sandbox": sandboxed, "gpu": gpu, "worker": worker, "waiters": [], "attempt": attempt, "timeout": timeout,
                              "cwd": cwd, "snippet": rel is None and str(absolute).startswith(str(self.root / ".lattice"))}
         worker.event.connect(self.run_event)
         worker.start()
@@ -1288,7 +1300,8 @@ class Bridge(QObject):
                     return self._run_done(info, evt)
                 self._installed(env, [package], result[0], info["by"])
                 try:
-                    again = self.run_file(absolute, info["by"], info["sandbox"], info.get("cwd"), attempt=1)
+                    again = self.run_file(absolute, info["by"], info["sandbox"], info.get("cwd"), attempt=1, gpu=info["gpu"],
+                                         timeout=info["timeout"])
                     self.runs[again]["waiters"] = info["waiters"]
                     self.announce({"type": "run", "run": evt["run"], "path": info["path"], "kind": "retry", "next": again})
                 except Exception as exc:
@@ -1564,7 +1577,11 @@ class Bridge(QObject):
             parts.append("快答判断 TA 缺一整块基础，转交给你：" + "；".join(h[:400] for h in reversed(handed)))
         if judged:
             parts.append("答了你出的小题，快答的判断是" + "；".join(f"「{e['data'].get('question', '')[:80]}」：{e['data'].get('text', '')[:240]}" for e in reversed(judged)))
-        return ("\n\n（上次回复之后，学习者" + "。".join(parts) + "。这些说明 TA 现在哪里还不熟。）") if parts else ""
+        built = l.journal("built", thread, last["at"], limit=4)
+        apps = "；".join({"done": "做好了", "partial": "做到一半断了（已保存的版本能打开）"}.get(e["data"]["state"], "没做成") + f"「{e['data']['title']}」（{e['data']['file']}）：{e['data'].get('summary', '')[:400]}"
+                        for e in reversed(built))
+        return ((("\n\n（上次回复之后，学习者" + "。".join(parts) + "。这些说明 TA 现在哪里还不熟。）") if parts else "")
+                + (f"\n\n（你请应用助手做的应用：{apps}。做好的已经在学习者那边打开了。）" if apps else ""))
 
     def _history(self, thread, limit, before=None):
         """What the model sees of a conversation. A reply that broke off and was then answered again stays in the record
@@ -1777,12 +1794,13 @@ class Bridge(QObject):
         if checked and body.strip():
             l.record("judged", {"text": body[:800], "agent": agent, "question": checked[1], "source": checked[0]}, agent, [checked[0], thread])
         sources = list({s["url"]: s for s in turn.sources if s.get("url")}.values())[:12]
-        if body.strip() or turn.actions or turn.suggestions or turn.changes:
+        if body.strip() or turn.actions or turn.suggestions or turn.changes or evt.get("steps"):
             evt["message"] = l.append_message(thread, "assistant", body, {"agent": agent, "stop_reason": reason, "usage": evt.get("usage"),
                                                                           "actions": turn.actions, "sources": sources, "suggestions": turn.suggestions,
                                                                           **({"changes": turn.changes} if turn.changes else {}),
                                                                           **({"skills": turn.skills} if turn.skills else {}),
                                                                           **({"retry": True} if retried else {}),
+                                                                          **({"steps": evt["steps"]} if evt.get("steps") else {}),
                                                                           **({"thinking": evt["thinking"], "think_seconds": evt.get("think_seconds")} if evt.get("thinking") else {})})
         evt.update(actions=turn.actions, sources=sources, suggestions=turn.suggestions)
         errors = []
@@ -1806,6 +1824,9 @@ class Bridge(QObject):
             home = evt.get("moved_to") or thread
             if not {"trial", "practice"} & set(l.thread_head(home)):
                 self.jobs.append({"kind": "cards", "thread": home, "message": evt["message"], "topic": evt.get("focus", topic) if turn.refocus else topic})
+        build = self.builds.pop(thread, None) if agent == "builder" else None
+        if build:
+            self._built(build, reason, body)
         job = self.job_running.pop(thread, None) if agent == "organizer" else None
         if job and job["kind"] == "save":
             evt["saved"] = job["thread"]   # quiet: no tidying notice
@@ -1942,6 +1963,114 @@ class Bridge(QObject):
         system = agents.system_prompt(self.root, definition, f"现在是 {tools.today()}。")
         self._turn("organizer", thread, self.lattice.active_topic(), None, conn, system, [], message, definition["tools"])
         return {"thread": thread}
+
+    # ---- apps the app builder makes ---------------------------------------------------------------------
+    def build_app(self, title, brief, file=None, origin=None, topic=None, by="me"):
+        """Hand a small app to the app builder. It works in a conversation of its own, in the background, so the one
+        that asked goes on; the app opens on the learner's side when it is done."""
+        l = self.lattice
+        brief = str(brief or "").strip()
+        if not brief:
+            raise ValueError("写一下这个应用要做什么")
+        conn = self.config.agent("builder")
+        if not conn["api_key"]:
+            raise ValueError(f"请先在设置里给应用助手填写 {conn['label']} 的 API Key")
+        # Asked without a name: the request's first clause, without "做一个".
+        title = str(title or "").strip() or re.sub(r"^(请|帮我)?(做|写|弄)?(一个|个)?", "", re.split(r"[，。：:；;,.!?！？（(\n]", brief, maxsplit=1)[0]).strip()[:24] or "小应用"
+        if file:
+            _, rel = l.resolve(str(file).removeprefix("file:"))
+            if not rel or not rel.startswith("apps/") or not rel.endswith(".html"):
+                raise ValueError("应用是 apps/ 下的 .html 文件")
+        else:
+            base, n = "apps/" + vault_slug(title, 40), 2
+            rel = base + ".html"
+            while l.vault.path(rel).exists() or any(b["file"] == rel for b in self.builds.values()):
+                rel, n = f"{base}-{n}.html", n + 1
+        if any(b["file"] == rel for b in self.builds.values()):
+            raise ValueError("应用助手正在做这个应用，等它做完再改")
+        existed = l.vault.path(rel).is_file()
+        spec = self._app_spec()
+        thread = l.thread_new("builder", topic, "应用 · " + title)["id"]
+        message = f"应用：{title}\n文件：{rel}（" + ("已经有了：先读它，在它的基础上改" if existed else "新建") + "）\n\n要求：\n" + brief
+        definition = agents.load(self.root, "builder")
+        self.builds[thread] = {"build": thread, "title": title, "file": rel, "origin": origin, "topic": topic, "by": by,
+                               "since": int(time.time() * 1000), "existed": existed,
+                               "mtime": l.vault.path(rel).stat().st_mtime_ns if existed else 0}
+        l.append_message(thread, "user", message, {"agent": "builder", "app": rel, **({"origin": origin} if origin else {})})
+        system = agents.system_prompt(self.root, definition, f"现在是 {tools.today()}。")
+        # The rules for apps come with every request, whole: the builder works by them without having to look them up.
+        user = message + ("\n\n（按技能「" + spec["title"] + "」来做。完整做法如下；说明里提到的附带文件用 skill 工具的 file 读。）\n\n" + skills.instructions(spec) if spec else "")
+        self._turn("builder", thread, topic, None, conn, system, [], user, definition["tools"], spec)
+        self.announce({"type": "app_build", "state": "started", **self._build_public(self.builds[thread])})
+        return {"title": title, "file": rel, "build": thread}
+
+    def _app_spec(self):
+        """The skill the builder makes apps by: the learner's copy in the vault (installed the first time, then theirs to
+        change like any skill), unless they switched it off."""
+        own = next((s for s in skills.installed(self.root) if s["slug"] == "app-design"), None)
+        if own is None:
+            self.commit_mine()
+            skills.install(self.lattice.vault, "app-design")
+            self.lattice.vault.commit("装上技能「应用规范」，应用助手按它做应用", "lattice")
+            own = next((s for s in skills.installed(self.root) if s["slug"] == "app-design"), None)
+        return own if own and own["enabled"] else None
+
+    @staticmethod
+    def _build_public(build):
+        return {k: build[k] for k in ("build", "title", "file", "origin", "since", "existed")}
+
+    def _built(self, build, reason, body):
+        """An app build ended: noted in the journal (the conversation that asked for it hears of it on its next turn),
+        and the learner's side opens the app."""
+        l = self.lattice
+        path = l.vault.path(build["file"])
+        made = path.is_file() and path.stat().st_mtime_ns != build["mtime"]
+        # Cut off after the app was written (the service failed, it ran out of room): what it saved is there to open.
+        state = "done" if made and reason == "end_turn" else "stopped" if reason == "cancelled" else "partial" if made else "failed"
+        summary = body.strip()[-1200:]
+        l.record("built", {"title": build["title"], "file": build["file"], "state": state, "summary": summary[:800], "by": build["by"]},
+                 "builder", [build["origin"], build["build"], build["file"]])
+        self.announce({"type": "app_build", "state": state, "summary": summary, "made": made, "reason": reason, **self._build_public(build)})
+
+    def rpc_app_build(self, brief, file=None, title=""):
+        """The learner asks the app builder for an app, or for a change to one, directly."""
+        return self.build_app(title, brief, file, origin=None, topic=self.lattice.active_topic(), by="me")
+
+    def rpc_apps(self):
+        """The apps in the vault, newest first, and the ones being made."""
+        folder, out = self.lattice.vault.path("apps"), []
+        for path in sorted(folder.glob("*.html"), key=lambda x: x.stat().st_mtime, reverse=True) if folder.is_dir() else []:
+            head = path.read_text(encoding="utf-8", errors="replace")[:8000]
+            out.append({"file": "apps/" + path.name, **app_meta(head, path.stem),
+                        "updated": datetime.fromtimestamp(path.stat().st_mtime).astimezone().isoformat(timespec="seconds")})
+        return {"apps": out, "builds": [self._build_public(b) for b in self.builds.values()]}
+
+    def rpc_app_read(self, path):
+        absolute, rel = self.lattice.resolve(path)
+        if rel is None or absolute.suffix.lower() not in (".html", ".htm"):
+            raise ValueError("应用是学习库里的 .html 文件")
+        if not absolute.is_file():
+            raise ValueError("文件不存在：" + rel)
+        if absolute.stat().st_size > 8_000_000:
+            raise ValueError("这个应用太大了（超过 8MB）")
+        if not rel.startswith("apps/"):
+            raise ValueError("应用放在 apps/ 下")
+        head = absolute.read_text(encoding="utf-8", errors="replace")[:8000]
+        return {"file": rel, "url": f"lattice-app://{appscheme.host_of(rel)}/{rel}", "mtime": str(absolute.stat().st_mtime_ns), **app_meta(head, absolute.stem)}
+
+    def app_check(self, rel, html, probe, wait, done):
+        """Load an app in the interface, from where it lives and as the learner would see it (its assets, the network),
+        and hand back what it reported."""
+        ident = uid()
+        host = "c" + ident.lower()
+        self.app_docs[host] = {"file": rel, "html": html, "probe": probe, "wait": wait, "request": ident}
+
+        def finish(result):
+            self.app_docs.pop(host, None)
+            done(result)
+        self.ui_waiters[ident] = finish
+        self.announce({"type": "app_check", "request": ident, "url": f"lattice-app://{host}/{rel}", "wait": wait})
+        QTimer.singleShot(wait + 20000, lambda: self.ui_waiters.pop(ident, None) and finish({"error": "界面没有交回结果：应用可能卡住了（死循环？），或者界面没有打开"}))
 
     def rpc_practice_start(self, thread, message):
         """Start a practice from one of the tutor's replies."""

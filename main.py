@@ -15,13 +15,19 @@ from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngin
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from lattice.bridge import APP_HOME, Bridge
+from lattice import appscheme
 
 ROOT=Path(__file__).resolve().parent
+# Apps get a scheme of their own; it has to be known before the application object exists.
+appscheme.register()
 
 
 class LatticePage(QWebEnginePage):
     def acceptNavigationRequest(self,url,kind,is_main_frame):
         if url.scheme() in ("http","https"):
+            # A frame an app embeds (a video, a map) loads in place; a link followed goes to the browser.
+            if not is_main_frame and kind!=QWebEnginePage.NavigationType.NavigationTypeLinkClicked:
+                return True
             QDesktopServices.openUrl(url)
             return False
         if url.scheme()=="file":
@@ -56,10 +62,17 @@ class MainWindow(QMainWindow):
         self.view.setPage(self.page)
         self.setCentralWidget(self.view)
         self.bridge=Bridge(self)
+        self.apps=appscheme.AppScheme(self.bridge,self)
+        self.profile.installUrlSchemeHandler(appscheme.SCHEME,self.apps)
+        self.app_guard=appscheme.AppGuard(self)
+        self.profile.setUrlRequestInterceptor(self.app_guard)
         self.channel=QWebChannel(self.page)
         self.channel.registerObject("backend",self.bridge)
         self.page.setWebChannel(self.channel)
-        self.page.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls,False)
+        # Remote access is on for local content because the apps (lattice-app://, a local scheme so this page may frame
+        # them) use the network; this page itself stays off it through the CSP in index.html (default-src 'self'), and
+        # the apps stay off this computer and the local network through appscheme.AppGuard.
+        self.page.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls,True)
         # File-URL access must stay on: under Qt's per-file origin model the app's
         # own sibling file:// scripts count as other local URLs, and disabling this
         # flag stops index.html from loading them at all. Exfiltration is instead

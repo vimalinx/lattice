@@ -3,7 +3,7 @@
    one kind of work (lattice/skills.py); installed ones live in the vault's skills/ folder, where they can be edited. */
 const SkillBook={list:null,loading:null};
 const SKILL_CATS=[["讲解思路","bulb"],["课程与教程","map"],["练习与评估","check"],["复杂生产","layout"],["研究与阅读","book"],["笔记与整理","document"],["其他","spark"]];
-const SKILL_AGENTS={tutor:"主会话",flash:"快答",coach:"练习教练",organizer:"整理"};
+const SKILL_AGENTS={tutor:"主会话",flash:"快答",coach:"练习教练",organizer:"整理",builder:"应用助手"};
 const catIcon=c=>(SKILL_CATS.find(x=>x[0]===c)||SKILL_CATS.at(-1))[1];
 async function skillList(fresh=false){
  if(fresh||!SkillBook.list){SkillBook.loading=SkillBook.loading||rpc("skills").then(l=>{SkillBook.list=l;SkillBook.loading=null;return l;}).catch(e=>{SkillBook.loading=null;throw e;});await SkillBook.loading;}

@@ -47,6 +47,12 @@ BUDGET = {"low": 1024, "medium": 4096, "high": 16384, "max": 32768}
 
 # Asked of the model when a reply broke off (a dropped connection, a service briefly down) or reached its length:
 # it goes on from where it stopped, and the learner reads one reply.
+def is_step(content):
+    """A short single line before tool calls says what the reply is doing next, rather than being part of the answer."""
+    line = content.strip()
+    return 0 < len(line) <= 160 and "\n" not in line and "```" not in line
+
+
 CONTINUE = "（刚才的回答在这里断了。从断开的地方接着往下写，不要重复已经写过的内容，也不要提断开这件事。）"
 
 
@@ -117,7 +123,8 @@ for _id, _url in KEY_URLS.items():
     PRESETS[_id]["key_url"] = _url
 CONN_FIELDS = {"preset", "label", "base_url", "model", "headers", "extra_body", "auth", "auth_header", "chat_path", "models_path", "key_env", "models",
                "effort_style"}
-AGENT_NAMES = {"tutor": "主会话", "flash": "快答", "coach": "练习教练", "organizer": "整理"}
+BACKGROUND = {"organizer", "builder"}
+AGENT_NAMES = {"tutor": "主会话", "flash": "快答", "coach": "练习教练", "organizer": "整理", "builder": "应用助手"}
 WEB_BACKENDS = {"duckduckgo": "DuckDuckGo（无需 Key）", "searxng": "SearXNG（自建地址）", "brave": "Brave Search API", "tavily": "Tavily API"}
 WEB_SECRETS = {"brave_key", "tavily_key"}
 DEFAULTS = {
@@ -125,7 +132,8 @@ DEFAULTS = {
     "agents": {"tutor": {"api": "commandcode", "model": "deepseek/deepseek-v4.1-flash", "max_tokens": 16000},
                "flash": {"api": "commandcode", "model": "deepseek/deepseek-v4.1-flash-fast", "max_tokens": 4000},
                "coach": {"api": "commandcode", "model": "deepseek/deepseek-v4.1-flash", "max_tokens": 16000},
-               "organizer": {"api": "commandcode", "model": "deepseek/deepseek-v4.1-flash", "max_tokens": 8000}},
+               "organizer": {"api": "commandcode", "model": "deepseek/deepseek-v4.1-flash", "max_tokens": 8000},
+               "builder": {"api": "commandcode", "model": "deepseek/deepseek-v4.1-flash", "max_tokens": 32000}},
     "timeout": 120, "temperature": 0.35,
     # Seconds a notebook cell, a file run and an agent's shell command may take.
     "kernel_timeout": 120, "run_timeout": 120, "shell_timeout": 60,
@@ -277,6 +285,9 @@ class Config:
                         result["web"][name] = part
             elif key in DEFAULTS and key not in ("agents", "web", "ui"):
                 result[key] = value
+        # The app builder came later: until it is given a lane of its own, it uses the tutor's connection and model.
+        if "builder" not in (saved.get("agents") if isinstance(saved.get("agents"), dict) else {}):
+            result["agents"]["builder"].update(api=result["agents"]["tutor"]["api"], model=result["agents"]["tutor"]["model"])
         saved_apis = result["apis"] if isinstance(result["apis"], dict) else {}
         result["apis"] = {}
         # Every provider is always listed, filled in or not; then the learner's own custom connections.
@@ -591,6 +602,8 @@ class ApiWorker(QThread):
         self.tools, self.tool_results, self.partial = tools or [], queue.Queue(), ""
         # What the model thought before each answer or tool round, and for how long; shown folded to the learner.
         self.thoughts, self.think_seconds = [], 0.0
+        # The one-line notes written before a tool round ("先看看学习库里有什么"): where the reply has got to, kept apart from the answer.
+        self.steps = []
         self.cancelled = threading.Event()
         self.response = None
         self.loop = None
@@ -779,15 +792,19 @@ class ApiWorker(QThread):
                         try:
                             content, reasoning, calls, finish, part_usage = await self._stream(client, headers, payload, bool(body) and not continuing)
                         except (httpx.HTTPError, ValueError) as exc:
-                            # Tried again after a short wait, up to three times; what was already written stays, and the
-                            # model is asked to go on from there.
-                            if self.cancelled.is_set() or retries >= 3 or not retryable(exc):
+                            # Tried again after a short wait, up to three times in a row (five, over about two minutes, for
+                            # the agents working in the background, where nobody waits on them); what was already written
+                            # stays, and the model is asked to go on from there.
+                            waits = (1, 3, 8, 30, 75) if self.agent in BACKGROUND else (1, 3, 8)
+                            if self.cancelled.is_set() or retries >= len(waits) or not retryable(exc):
                                 raise
                             retries += 1
                             got = self.partial
                             usage = self._cut_short(usage)
                             self.partial = ""
-                            wait = (1, 3, 8)[retries - 1]
+                            wait = waits[retries - 1]
+                            LOG.warning("API worker %s: request failed (%s), trying again in %ss (%s/%s)", self.thread,
+                                        clean_error(exc, self.api_key)[:200], wait, retries, len(waits))
                             self.emit("retrying", attempt=retries, wait=wait, message=clean_error(exc, self.api_key)[:300])
                             await asyncio.sleep(wait)
                             if self.cancelled.is_set():
@@ -799,11 +816,18 @@ class ApiWorker(QThread):
                             continue
                         self.asked = None
                         self.partial = ""
+                        # A request that went through: the next failure starts counting again, so a long turn of many
+                        # tool rounds is not ended by a few brief failures spread over it.
+                        retries = 0
                         # Every request of the turn counts (each tool round is one); a service that reports nothing is estimated.
                         used = usage_of(part_usage)
                         usage = add_usage(usage, used or self._estimate(payload, content + reasoning + json.dumps(calls, ensure_ascii=False)), not used)
                         thought = thought or bool(reasoning)
-                        body += ("\n\n" if body and content and not continuing else "") + content
+                        if calls and not continuing and is_step(content):
+                            self.steps.append(content.strip())
+                            self.emit("step", text=content.strip())
+                        else:
+                            body += ("\n\n" if body and content and not continuing else "") + content
                         continuing = False
                         if finish == "cancelled" or self.cancelled.is_set():
                             stop_reason = "cancelled"
@@ -856,5 +880,5 @@ class ApiWorker(QThread):
                 thinking = "\n\n".join(t.strip() for t in self.thoughts if t.strip())
                 if usage:
                     usage.update(api=self.config.get("api"), model=self.config.get("model"))
-                self.emit("finished", text=body, stop_reason=stop_reason, usage=usage,
+                self.emit("finished", text=body, stop_reason=stop_reason, usage=usage, **({"steps": self.steps} if self.steps else {}),
                           **({"thinking": thinking[-200_000:], "think_seconds": round(self.think_seconds, 1)} if thinking else {}))
