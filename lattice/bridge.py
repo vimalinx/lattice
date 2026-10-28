@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 
-from . import agents, skills, tools
+from . import __version__, agents, skills, tools
 from .envs import Envs, missing_module
 from .index import dump, uid
 from .model import Lattice, STAGES, outside_code, readable_outputs, text
@@ -292,7 +292,7 @@ class Bridge(QObject):
     def rpc_bootstrap(self):
         state = self._local_state()
         returned, self.returned_windows = self.returned_windows, []
-        return {**self.rpc_state(), "vault": str(self.root), "layout": state.get("layout"), "returned_windows": returned, "config": self.config.public(),
+        return {**self.rpc_state(), "version": __version__, "vault": str(self.root), "layout": state.get("layout"), "returned_windows": returned, "config": self.config.public(),
                 "sandbox": {"ok": self.sandbox.available(), "isolated": self.sandbox.isolated, "why": self.sandbox.why_not()}, "migrated": self.lattice.migrated,
                 "problems": self.lattice.index.problems[:20]}
 

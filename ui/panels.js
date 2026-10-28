@@ -178,7 +178,7 @@ async function renderSettings(node,page){
  const p=Dock.panels[node.dataset.pid];if(p)p.page=page;
  node.querySelector(".settings-nav").innerHTML=SETTINGS_PAGES.map(([k,t,i])=>'<button class="'+(k===page?"on":"")+'" data-action="settings-page" data-page="'+k+'" title="'+esc(t)+'">'+svg(i,14)+'<span>'+esc(t)+'</span></button>').join("")+
   // Settings save as they change; the state of the last save sits under the page list, out of the way.
-  '<span class="save-state nav-save">'+svg("check",13)+' 改了就自动保存</span>';
+  '<span class="save-state nav-save">'+svg("check",13)+' 改了就自动保存</span>'+(S.version?'<span class="nav-version">Lattice '+esc(S.version)+'</span>':"");
  const box=node.querySelector(".settings");box.dataset.page=page;
  box.innerHTML='<div class="loading">…</div>';
  S.config=await rpc("settings");

@@ -32,7 +32,30 @@ def wanted(entry):
     return True
 
 
+def version_file():
+    """Lattice.exe's version, as Windows shows it in the file's properties (a build between releases, x.y.z-dev.N, as
+    x.y.z.N)."""
+    import re
+    import sys
+    from PyInstaller.utils.win32 import versioninfo as vi
+    sys.path.insert(0, str(ROOT))
+    from lattice import __version__
+    numbers = [int(n) for n in re.findall(r"\d+", __version__)][:4]
+    numbers = tuple(numbers + [0] * (4 - len(numbers)))
+    strings = {"CompanyName": "Vimalinx", "FileDescription": "Lattice", "ProductName": "Lattice", "InternalName": "Lattice",
+               "OriginalFilename": "Lattice.exe", "FileVersion": __version__, "ProductVersion": __version__,
+               "LegalCopyright": "MIT License"}
+    info = vi.VSVersionInfo(ffi=vi.FixedFileInfo(filevers=numbers, prodvers=numbers),
+                            kids=[vi.StringFileInfo([vi.StringTable("040904B0", [vi.StringStruct(k, v) for k, v in strings.items()])]),
+                                  vi.VarFileInfo([vi.VarStruct("Translation", [0x0409, 1200])])])
+    path = ROOT / "packaging" / "build" / "version.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(info), encoding="utf-8")
+    return str(path)
+
+
 a.datas = [d for d in a.datas if wanted(d)]
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="Lattice", console=False, icon=str(icon) if icon.exists() else None)
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="Lattice", console=False, icon=str(icon) if icon.exists() else None,
+          version=version_file())
 coll = COLLECT(exe, a.binaries, a.datas, name="Lattice")

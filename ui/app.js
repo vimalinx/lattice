@@ -550,7 +550,7 @@ async function boot(){
    try{
     S.bridge=channel.objects.backend;
     S.bridge.event.connect(raw=>safe(()=>onEvent(JSON.parse(raw))));
-    S.data=await rpc("bootstrap");S.config=S.data.config;S.ui=S.config.ui;
+    S.data=await rpc("bootstrap");S.config=S.data.config;S.ui=S.config.ui;S.version=S.data.version;
     el("#app").innerHTML='<div id="shell"><nav id="activity"></nav><aside id="side"></aside><div id="side-gutter"></div><div id="dock-wrap"><div id="dock"></div><div id="floats"></div></div></div>'+
      '<footer id="status"></footer><div id="organizer" hidden></div><div id="drop-mark"></div><datalist id="doc-titles"></datalist>';
     applyUi();initInteractions();initSideResize();

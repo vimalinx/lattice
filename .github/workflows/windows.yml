@@ -39,13 +39,25 @@ jobs:
       - name: Version
         shell: pwsh
         run: |
-          $version = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "0.0.0-dev.${{ github.run_number }}" }
+          # The version is lattice/__init__.py's; a release's tag has to say the same, a build between releases is a dev one.
+          $init = Get-Content lattice/__init__.py -Raw
+          $base = [regex]::Match($init, '__version__ = "([^"]+)"').Groups[1].Value
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $version = "${{ github.ref_name }}".TrimStart("v")
+            if ($version -ne $base) { throw "the tag ${{ github.ref_name }} does not match lattice/__init__.py ($base)" }
+          } else { $version = "$base-dev.${{ github.run_number }}" }
+          Set-Content lattice/__init__.py ($init -replace '__version__ = "[^"]+"', "__version__ = `"$version`"") -NoNewline
           "VERSION=$version" >> $env:GITHUB_ENV
       - run: pip install -r requirements.txt pyinstaller pillow
       - name: Icon
         run: python packaging/make_icon.py
       - name: Lattice.exe
-        run: pyinstaller packaging/lattice.spec --noconfirm --distpath dist --workpath packaging/build/pyinstaller
+        shell: pwsh
+        run: |
+          pyinstaller packaging/lattice.spec --noconfirm --distpath dist --workpath packaging/build/pyinstaller
+          $shown = (Get-Item dist/Lattice/Lattice.exe).VersionInfo
+          Write-Output "Lattice.exe: $($shown.ProductVersion) ($($shown.FileVersion))"
+          if ($shown.ProductVersion -ne $env:VERSION) { throw "Lattice.exe says $($shown.ProductVersion), not $env:VERSION" }
       - name: uv and MinGit beside it
         shell: pwsh
         run: |
@@ -106,4 +118,8 @@ jobs:
       - name: Release
         if: github.ref_type == 'tag'
         shell: pwsh
-        run: gh release create "${{ github.ref_name }}" (Get-ChildItem dist/Lattice-*-setup.exe).FullName (Get-ChildItem dist/Lattice-*-windows-x64.zip).FullName --title "Lattice ${{ github.ref_name }}" --generate-notes
+        run: |
+          # The release's notes are docs/releases/<tag>.md when written, else GitHub's list of changes.
+          $notes = "docs/releases/${{ github.ref_name }}.md"
+          $about = if (Test-Path $notes) { @("--notes-file", $notes) } else { @("--generate-notes") }
+          gh release create "${{ github.ref_name }}" (Get-ChildItem dist/Lattice-*-setup.exe).FullName (Get-ChildItem dist/Lattice-*-windows-x64.zip).FullName --title "Lattice ${{ github.ref_name }}" @about

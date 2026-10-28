@@ -955,7 +955,8 @@ select{appearance:none;padding-right:28px;background-image:linear-gradient(45deg
 .prov-head{flex-wrap:wrap}.prov-head .chip{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .settings-nav{grid-template-rows:auto}
 .nav-save{margin-top:12px;justify-self:start;font-size:11px;padding:4px 9px;white-space:normal;line-height:1.4}
-@container (max-width:620px){.nav-save{display:none}}
+.nav-version{justify-self:start;padding:6px 9px 2px;font-size:11px;color:var(--subtle);user-select:text}
+@container (max-width:620px){.nav-save,.nav-version{display:none}}
 /* themes */
 .theme-list{display:grid;gap:4px;margin-bottom:10px}
 .theme-item{display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid var(--line-soft);border-radius:9px}

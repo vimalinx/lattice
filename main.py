@@ -15,7 +15,7 @@ from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngin
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from lattice.bridge import APP_HOME, Bridge
-from lattice import appscheme
+from lattice import __version__, appscheme
 
 ROOT=appscheme.host.APP
 # Apps get a scheme of their own; it has to be known before the application object exists.
@@ -174,11 +174,13 @@ class MainWindow(QMainWindow):
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--screenshot",help="Capture the actual Qt window for visual verification")
+    p.add_argument("--version",action="version",version="Lattice "+__version__)
     # parse_known_args: Qt's own flags (-platform offscreen, -style …) pass through.
     args,_=p.parse_known_args()
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app=QApplication(sys.argv)
     app.setApplicationName("Lattice Studio")
+    app.setApplicationVersion(__version__)
     app.setDesktopFileName("lattice-studio")
     # Single instance: a second launch asks the running window to raise itself
     # instead of splitting UI state across two processes (one store, one set
