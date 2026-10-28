@@ -135,6 +135,7 @@ addEventListener("message",e=>{
   AppChecks[d.lattice_check].remove();delete AppChecks[d.lattice_check];
   const {lattice_check,...result}=d;return rpc("ui_done",{request:lattice_check,result});
  }
+ if(d.lattice_live&&AppLive[d.lattice_live]){const {lattice_live,...live}=d;AppLive[lattice_live](live);return;}
  if(d.lattice==="ask"){
   const frame=all("iframe.app-frame").find(f=>f.contentWindow===e.source);if(!frame)return;
   const pid=frame.closest(".panel")?.dataset.pid,title=Apps[pid]?.data?.title||"应用";
@@ -145,6 +146,18 @@ addEventListener("message",e=>{
   go();
  }
 });
+/* What an app shows right now, for an agent reading its tab: its page answers with its text and its controls' values. */
+const AppLive={};
+function appLive(pid){
+ const frame=Dock.els[pid]?.querySelector("iframe.app-frame");
+ if(!frame?.contentWindow)return Promise.resolve({live_error:"这个应用还没打开"});
+ const id=newId("l");
+ return new Promise(resolve=>{
+  const t=setTimeout(()=>{delete AppLive[id];resolve({live_error:"应用没有回应（可能还在加载，或者卡住了）"});},2500);
+  AppLive[id]=live=>{clearTimeout(t);delete AppLive[id];resolve({live});};
+  frame.contentWindow.postMessage({lattice_live:id},"*");
+ });
+}
 async function appAction(kind,a){
  const pid=a.dataset.pid;
  if(kind==="open-apps")return openPanel({type:"app"});

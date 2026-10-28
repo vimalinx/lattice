@@ -11,7 +11,8 @@ panelType("chat",{side:"ai",icon:p=>AGENT_ICON[p.agent]||"bot",
  title(p,node){
   const st=Chat[node?.dataset.pid],head=st?.data?.head;
   if(p.agent==="coach"||head?.trial)return head?.title||"练习";
-  const topic=head?.topic;return agentTitle(p.agent)+(topic?" · "+topicTitle(topic):"");
+  // The quick answer belongs to no topic.
+  const topic=p.agent==="flash"?null:head?.topic;return agentTitle(p.agent)+(topic?" · "+topicTitle(topic):"");
  },
  mount(p,node,pid){
   Chat[pid]={input:"",stream:"",live:[],waiting:"",error:"",data:null,cache:{},attach:[],quote:"",opened:new Set(),thoughts:{},...freshThinking()};
@@ -37,8 +38,8 @@ async function loadChat(pid,keepScroll=true){
  renderChat(pid,keepScroll);refreshTab(pid);
 }
 /* ---- a topic's conversations, listed under their topics in the sidebar. Opening one makes its topic the one being
-   learned and it the conversation that topic opens, in every panel following along; the quick answer beside it goes
-   with it. Rename (double-click), archive or delete in place. ------------------------------------------------------- */
+   learned and it the conversation that topic opens, in every panel following along. The quick answer is one
+   conversation of its own, about whatever is on screen. Rename (double-click), archive or delete in place. ------------------------------------------------------- */
 const SESSION_AGENTS=new Set(["tutor","flash"]);
 function sessionMeta(x){return (x.busy?'<i class="ss-busy"></i>':"")+x.messages+' 条';}
 function sessionTip(x){return fmtDate(x.updated,true)+" · "+(x.summary?shorten(x.summary,160):x.last?"最近问："+x.last:"还没有消息");}
@@ -162,7 +163,7 @@ function anchorQuestion(pid){
 }
 function chatWelcome(agent){
  if(agent==="coach")return '<h3>练习开始了</h3><p>教练会一步步带你写。</p>';
- if(agent==="flash")return '<h3>小问题，不必打断大思路。</h3><p>选中任何地方的文字或代码再问，快答会结合你正在看的内容来解释。</p>';
+ if(agent==="flash")return '<h3>小问题，不必打断大思路。</h3><p>界面上开着的标签它都能去读，不用另外说明在看什么；选中文字再问，就针对那一段解释。</p>';
  return '<h3>想到什么，直接说。</h3><p>值得长期深入的内容，主会话会整理成主题，并定一条主干路线。</p>';
 }
 /* Where to start, from what is actually in the vault and on screen. */
@@ -189,6 +190,8 @@ function chatHead(pid){
  const topic=d.head?.topic;
  const tools=iconButton("edit","chat-new",p.agent==="flash"?"清空快答，重新开始（主会话不变）":"开新会话",'data-pid="'+pid+'"')+
   iconButton("dots","chat-more","显示和更多",'data-pid="'+pid+'"');
+ // The quick answer is about whatever is on screen, not one topic.
+ if(p.agent==="flash")return '<span class="head-title quiet">'+svg("spark",12)+' 能读界面上所有标签</span><div class="chat-tools">'+tools+'</div>';
  return '<button class="topic-chip'+(topic?"":" quiet")+'" data-action="chat-topic-menu" data-pid="'+pid+'" title="这段对话属于哪个主题">'+svg(topic?"map":"bot",12)+'<span>'+esc(topic?topicTitle(topic):"默认对话")+'</span>'+svg("chevrondown",11)+'</button>'+
   '<div class="chat-tools">'+tools+'</div>';
 }
@@ -485,6 +488,8 @@ async function chatSend(pid,text,extra={}){
  st.error="";st.stream="";st.live=[];st.waiting="";Object.assign(st,freshThinking());
  try{
   const skill=text==null?st.skill:null;st.liveSkill=skill?{slug:skill.slug,title:skill.title}:null;
+  // The screen as it is now, so the tab directory sent along says what the learner was just using.
+  clearTimeout(screenTimer);await safe(sendScreen);
   const r=await rpc("send",{agent:p.agent,message,thread:st.thread,selection,task:extra.task||"",note:screenNote(),answer:extra.answer||null,attach,model:p.model||null,skill:skill?.slug||null,effort:p.effort||null});
   st.thread=r.thread;if(extra.selection==null)st.quote="";if(text==null){st.attach=[];st.skill=null;}
   st.data.messages.push({id:"pending",role:"user",content:message||({check:"我写好了，帮我看看我的代码和运行结果。",hint:"我卡住了，给我一点提示，先别直接给答案。",capture:"把我们讨论过的内容整理成知识卡。"})[extra.task]||"",meta:{selection,answer:extra.answer,attach,skill:skill?.slug,skill_title:skill?.title},at:new Date().toISOString()});

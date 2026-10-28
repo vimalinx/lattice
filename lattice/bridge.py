@@ -1069,6 +1069,59 @@ class Bridge(QObject):
         files = [f for state in (self.screen, *self.window_screens.values()) for f in (state.get("mine") or {}).get("files") or []]
         return time.monotonic() - self.edits.get(rel, -99) < 10 or any(f.get("path") == rel and f.get("dirty") for f in files)
 
+    # ---- every tab in the interface, for the agents to look into ----------------------------------------
+    TAB_KINDS = {"file": "文件", "web": "网页", "app": "应用", "home": "开始页", "map": "知识图", "journal": "学习轨迹", "review": "回顾",
+                 "library": "卡片库", "memory": "记忆", "noteinfo": "大纲与链接", "skills": "技能商城", "settings": "设置",
+                 "skillchange": "改技能", "compare": "技能两版对比"}
+
+    def tab_list(self, own=None):
+        """Every tab open in the main window (in any workspace) and in the separate windows, each with the id that tab
+        reads it by; `own` is the asking conversation's thread, whose own panel is left out."""
+        out = []
+        for window, state in ((None, self.screen), *self.window_screens.items()):
+            for t in state.get("tabs") or []:
+                if t.get("type") == "chat" and own and t.get("thread") == own:
+                    continue
+                kind = AGENT_NAMES.get(t.get("agent"), "对话") if t.get("type") == "chat" else self.TAB_KINDS.get(t.get("type"), t.get("type"))
+                out.append({**t, "id": f"{window}/{t['id']}" if window else t["id"], "kind": kind,
+                            **({"window": (state.get("layout") or {}).get("title") or "单独窗口"} if window else {})})
+        return out
+
+    def tab_directory(self, own=None):
+        """The tabs in brief, one line each, sent with every message to the quick answer."""
+        tabs = self.tab_list(own)
+        if not tabs:
+            return "界面上的标签：（界面还没报告）"
+        lines = []
+        for t in tabs[:50]:
+            ref = t.get("path") or t.get("url") or ""
+            flags = [x for x in ("学习者正在用" if t.get("focused") else "", "在前台" if t.get("showing") and not t.get("focused") else "",
+                                 "有没保存的修改" if t.get("dirty") else "", f"在单独窗口「{t['window']}」" if t.get("window") else "",
+                                 f"在「{t['space']}」工作区" if t.get("space") else "") if x]
+            lines.append(f"- {t['id']} {t['kind']}「{t.get('title') or ''}」" + (f" {ref}" if ref and ref not in (t.get("title") or "") else "")
+                         + (f"（{'，'.join(flags)}）" if flags else ""))
+        more = f"\n- 还有 {len(tabs) - 50} 个，用 tabs 看全部" if len(tabs) > 50 else ""
+        return "界面上开着的标签（要看哪个的内容，用 tab 按 id 读；选中的文字已经附在上面）：\n" + "\n".join(lines) + more
+
+    def tab_find(self, ident, own=None):
+        """A tab by its id, or else by its title or path."""
+        ident = str(ident or "").strip()
+        tabs = self.tab_list(own)
+        found = next((t for t in tabs if t["id"] == ident), None) or \
+            next((t for t in tabs if ident and ident in (t.get("title") or "", t.get("path") or "", t.get("url") or "")), None)
+        if not found:
+            raise ValueError(f"界面上没有「{ident}」这个标签；用 tabs 看现在开着哪些")
+        window, _, panel = found["id"].rpartition("/")
+        return window or None, panel, found
+
+    def ui_ask(self, event, done, wait=8000):
+        """Ask the interface (the window `event["window"]` names, or the main one) for something only it has; done()
+        gets its answer."""
+        ident = uid()
+        self.ui_waiters[ident] = done
+        self.announce({**event, "request": ident})
+        QTimer.singleShot(wait, lambda: self.ui_waiters.pop(ident, None) and done({"error": "界面没有响应"}))
+
     def screen_state(self):
         l = self.lattice
         topic = l.active_topic()
@@ -1544,10 +1597,10 @@ class Bridge(QObject):
         topic = self.lattice.active_topic() if topic is None else (topic or None)
         name = self.lattice.topic(topic)["title"] if topic else None
         if agent == "flash":
-            # A fresh quick answer beside the tutor's conversation there; it replaces the one that was beside it.
-            return {"thread": self.lattice.flash_for(self.lattice.thread_for("tutor", topic), fresh=True)}
+            # The quick answer starts over; it belongs to no topic.
+            topic = name = None
         ident = self.lattice.thread_new(agent, topic, AGENT_NAMES[agent] + (" · " + name if name else ""))["id"]
-        if agent == "tutor":
+        if agent in ("tutor", "flash"):
             self.lattice.thread_pick(ident)
         return {"thread": ident}
 
@@ -1566,9 +1619,10 @@ class Bridge(QObject):
     def rpc_session_open(self, id):
         """Learn in this conversation: its topic becomes the one being learned, and it the conversation that topic opens."""
         head = self.lattice.thread_head(id)
-        if head.get("agent") == "flash" and head.get("pair"):
-            # A quick answer opens with the conversation it goes with.
-            id, head = head["pair"], self.lattice.thread_head(head["pair"])
+        if head.get("agent") == "flash" and not head.get("practice") and not head.get("trial"):
+            # The quick answer's conversation is about no topic: opening one leaves the topic being learned as it is.
+            self.lattice.thread_pick(id)
+            return {"topic": self.lattice.active_topic() or ""}
         if head.get("practice") or head.get("trial") or head.get("agent") != "tutor":
             raise ValueError("练习和试用的对话不在会话列表里")
         left = self.lattice.current_thread(head["agent"], self.lattice.active_topic())
@@ -1624,6 +1678,9 @@ class Bridge(QObject):
                 thread = l.thread_for(agent, topic)
             else:
                 topic = l.thread_head(thread).get("topic")
+            if agent == "flash":
+                # The quick answer's conversation belongs to no topic; it works where the learner is now.
+                topic = l.active_topic()
             message = text(message, 18000).strip() or agents.TASKS.get(task, ("", ""))[0]
         if not message:
             raise ValueError("请输入想说的话")
@@ -1647,7 +1704,7 @@ class Bridge(QObject):
             extra += ("\n\n（这是学习者在回答主会话讲解里出的一个小问题：" + str(answer.get("question") or "")[:1500] +
                       "\n请判断回答对不对、哪里对哪里偏，点出关键的一两句；简短。不要接着往下讲主会话的主线，主会话会接着讲。）")
         l.append_message(thread, "user", message, meta)
-        l.record("answered" if answer else "asked", {"text": message[:600], "agent": agent, **({"question": answer.get("question", "")[:400]} if answer else {}),
+        l.record("answered" if answer else "asked", {"text": message[:600], "agent": agent, "topic": topic, **({"question": answer.get("question", "")[:400]} if answer else {}),
                                                     **({"source": source, "message": answer.get("message"), "block": answer.get("block")} if source else {}),
                                                     **({"screen": note[:300]} if note else {})}, "me", [thread, *([source] if source else []), *([topic] if topic else [])])
         user, system = self._compose(definition, thread, topic, practice, message, task, selection, attach, note, extra, picked)
@@ -1675,16 +1732,23 @@ class Bridge(QObject):
             except (OSError, UnicodeDecodeError, VaultError):
                 content = None
             (inline.append((rel, content)) if content is not None and len(content) <= 30_000 else listed.append(rel))
-        notes = "；".join(x for x in (note.strip(), ("附上了这些文件，需要时用 read 读：" + "、".join(listed)) if listed else "",
+        flash = definition["name"] == "flash"
+        notes = "；".join(x for x in ("" if flash else note.strip(), ("附上了这些文件，需要时用 read 读：" + "、".join(listed)) if listed else "",
                                       ("附上了图片（你看不到图里的内容，需要时请学习者描述）：" + "、".join(images)) if images else "",
                                       ("选中了这段内容：\n" + selection.strip()[:5000]) if selection.strip() else "") if x)
         if notes:
             user += "\n\n（界面附注：" + notes + "）"
         if definition["name"] == "tutor":
             user += self._since(thread, topic)
+        if flash:
+            user += "\n\n（" + self.tab_directory(thread) + "）"
         for rel, content in inline:
             user += f"\n\n（学习者附上的「{rel}」，全文如下）\n```\n{content}\n```"
-        where = self._topic_brief(definition["name"], thread, topic) if topic else "这是默认对话，不属于任何主题。"
+        if flash:
+            where = ("快答不属于哪个主题或主会话，学习者在哪里有小问题就在这里问。" +
+                     (f"学习者现在在学的主题是「{l.topic(topic)['title']}」（topic:{topic}）。" if topic else "学习者现在在默认对话里，没有在学哪个主题。"))
+        else:
+            where = self._topic_brief(definition["name"], thread, topic) if topic else "这是默认对话，不属于任何主题。"
         context = f"现在是 {tools.today()}。{where}对话 id：{thread}。" + self._imported(thread) + self._earlier(thread, definition["history"])
         if practice:
             context += (f"\n\n这次练习：practice:{thread}「{practice['title']}」，练习文件：{practice['file']}。"
@@ -1735,10 +1799,12 @@ class Bridge(QObject):
         last = l.index.one("SELECT at FROM messages WHERE thread=? AND role='assistant' ORDER BY id DESC LIMIT 1", (thread,))
         if not last:
             return ""
-        side = l.paired_flash(thread)
-        asked = [e["data"].get("text", "") for e in l.journal("asked", side, last["at"], limit=8)] if side else []
+        # The quick answer belongs to no topic: what was put to it while this topic was the one being learned.
+        here = [e for e in l.journal(["asked", "action"], None, last["at"], limit=60)
+                if e["data"].get("agent", e["actor"]) == "flash" and (e["data"].get("topic") or None) == topic]
+        asked = [e["data"].get("text", "") for e in here if e["type"] == "asked"][:8]
         judged = l.journal("judged", thread, last["at"], limit=6)
-        handed = [e["data"]["handoff"] for e in l.journal("action", side, last["at"], limit=4) if e["data"].get("handoff")] if side else []
+        handed = [e["data"]["handoff"] for e in here if e["data"].get("handoff")][:4]
         parts = []
         if asked:
             parts.append("在快答里问了" + "；".join(f"「{q[:160]}」" for q in reversed(asked)))

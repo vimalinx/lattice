@@ -25,6 +25,8 @@ function sideOf(pid){const p=Dock.panels[pid];return p?(Dock.types[p.type]?.side
 function hosts(pid){const p=Dock.panels[pid];return !!p&&Dock.types[p.type]?.host!==false;}
 function remember(pid){
  const s=stackOf(pid);if(s&&hosts(pid))Dock.lastStack[sideOf(pid)]=s.id;
+ // The learner's own panel last used: what "this" means when they then type to an AI.
+ if(sideOf(pid)==="mine")Dock.lastMine=pid;
  if(typeof noteFollow==="function")noteFollow();
 }
 

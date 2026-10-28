@@ -59,7 +59,14 @@ def prelude(query, extra=""):
                      if k in LOOK and isinstance(v, str) and not re.search(r"[;{}<>\\]", v) and len(v) < 200)
     return ('<meta charset="utf-8"><style id="lattice-look">:root{' + tokens + "color-scheme:" + theme + "}</style>"
             "<script>document.documentElement.dataset.theme=" + json.dumps(theme) + ";"
-            'window.lattice={ask(text){parent.postMessage({lattice:"ask",text:String(text).slice(0,4000)},"*");}};</script>' + extra)
+            'window.lattice={ask(text){parent.postMessage({lattice:"ask",text:String(text).slice(0,4000)},"*");}};'
+            # Asked by Lattice when an agent reads this app's tab: what it shows, and what each control is set to.
+            'addEventListener("message",e=>{if(e.source!==parent||!e.data||!e.data.lattice_live)return;'
+            'const label=c=>(c.labels&&c.labels[0]&&c.labels[0].innerText||c.getAttribute("aria-label")||c.name||c.id||c.placeholder||"").trim().slice(0,80);'
+            'const controls=[...document.querySelectorAll("input,select,textarea")].slice(0,60).map(c=>({label:label(c),type:c.type||c.tagName.toLowerCase(),'
+            'value:c.type==="checkbox"||c.type==="radio"?c.checked:String(c.value).slice(0,300),...(c.type==="range"?{min:c.min,max:c.max}:{})}));'
+            'parent.postMessage({lattice_live:e.data.lattice_live,title:document.title,text:(document.body&&document.body.innerText||"").slice(0,12000),controls,'
+            'canvases:document.querySelectorAll("canvas").length,svgs:document.querySelectorAll("svg").length},"*");});</script>' + extra)
 
 
 def with_prelude(html, pre):

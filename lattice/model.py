@@ -875,46 +875,34 @@ class Lattice:
         return head
 
     def thread_for(self, agent, topic=None):
-        """The conversation an agent is having about a topic (None: the default conversation). The quick answer's is the
-        one that goes with the tutor's conversation there."""
+        """The conversation an agent is having about a topic (None: the default conversation). The quick answer has one
+        conversation whatever is being learned: it is about what is on screen, and looks there when it needs to."""
         if agent == "flash":
-            return self.flash_for(self.thread_for("tutor", topic))
+            topic = None
         current = self.current_thread(agent, topic)
         if current:
             return current
         name = self.doc(topic, "topic")["title"] if topic else None
         return self.thread_new(agent, topic, ({"tutor": "主会话", "flash": "快答"}.get(agent, agent)) + (" · " + name if name else ""))["id"]
 
-    def paired_flash(self, tutor):
-        """The quick-answer conversation beside one of the tutor's (the newest, when a fresh one was started), if any."""
-        row = self.index.one("SELECT id FROM threads WHERE agent='flash' AND json_extract(head,'$.pair')=? ORDER BY created DESC LIMIT 1", (tutor,))
-        return row["id"] if row else None
-
-    def flash_for(self, tutor, fresh=False):
-        """Each of the tutor's conversations has a quick-answer conversation of its own beside it, made when first
-        needed (or again, fresh, when the learner starts it over)."""
-        found = None if fresh else self.paired_flash(tutor)
-        if found:
-            return found
-        topic = self.thread_head(tutor).get("topic")
-        name = self.doc(topic, "topic")["title"] if topic else None
-        return self.thread_new("flash", topic, "快答" + (" · " + name if name else ""), {"pair": tutor})["id"]
-
     def current_thread(self, agent, topic=None):
-        """The one the learner last opened about this topic, while it is still there and not archived; else the newest."""
+        """The one the learner last opened about this topic, while it is still there and not archived; else the newest.
+        The quick answer's is the one last opened or started, about whatever topic."""
         # Practice conversations and skill trials are threads of their own, never the conversation itself.
-        live = ("agent=? AND topic IS ? AND json_extract(head,'$.practice') IS NULL AND json_extract(head,'$.trial') IS NULL "
+        anywhere = agent == "flash"
+        live = ("agent=? AND " + ("" if anywhere else "topic IS ? AND ") + "json_extract(head,'$.practice') IS NULL AND json_extract(head,'$.trial') IS NULL "
                 "AND COALESCE(json_extract(head,'$.archived'),0)=0")
-        picked = (self.setting("current_threads") or {}).get(f"{agent}:{topic or ''}")
-        row = (picked and self.index.one(f"SELECT id FROM threads WHERE id=? AND {live}", (picked, agent, topic))
-               or self.index.one(f"SELECT id FROM threads WHERE {live} ORDER BY created DESC LIMIT 1", (agent, topic)))
+        args = (agent,) if anywhere else (agent, topic)
+        picked = (self.setting("current_threads") or {}).get(f"{agent}:{'' if anywhere else topic or ''}")
+        row = (picked and self.index.one(f"SELECT id FROM threads WHERE id=? AND {live}", (picked, *args))
+               or self.index.one(f"SELECT id FROM threads WHERE {live} ORDER BY created DESC LIMIT 1", args))
         return row["id"] if row else None
 
     def thread_pick(self, ident):
-        """Open a conversation as its agent's one about its topic, until another is picked."""
+        """Open a conversation as its agent's one about its topic (the quick answer's, about any), until another is picked."""
         head = self.thread_head(ident)
         picked = self.setting("current_threads") or {}
-        picked[f"{head['agent']}:{head.get('topic') or ''}"] = ident
+        picked[f"{head['agent']}:{'' if head['agent'] == 'flash' else head.get('topic') or ''}"] = ident
         self.set_setting("current_threads", picked)
         return head
 
@@ -943,8 +931,9 @@ class Lattice:
 
     def file_map(self):
         """Every file of the vault by where it came up: under its topic, in the conversations it was written, changed,
-        opened, attached, noted or built in (a quick answer's, a practice's or an app build's count as the tutor
-        conversation they go with); the rest by folder. Newest first everywhere."""
+        opened, attached, noted or built in (a practice's or an app build's count as the tutor conversation they go
+        with, and so does an older quick answer's, from when each stood beside one; a quick answer's now, which belongs
+        to no topic, goes under the topic being learned then); the rest by folder. Newest first everywhere."""
         docs = {r["path"]: r for r in self.index.rows("SELECT id, path, kind, title, topic, attrs, updated FROM docs")}
         by_id = {r["id"]: r["path"] for r in docs.values()}
         paths = [r["path"] for r in self.index.rows("SELECT path FROM files")

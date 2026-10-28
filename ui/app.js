@@ -153,9 +153,48 @@ function sendScreen(){
  const state={layout:{stacks,focused:Dock.focus||null,nesting:layoutShape(Dock.layout.root),windows},ai:{panels:ai},mine:{files:mine.filter(x=>x.type==="file"),other:mine.filter(x=>x.type!=="file")},
   look:{base:S.ui.theme,theme:S.ui.theme_custom||"默认",...(activeTheme()?{vars:activeTheme().vars,font:activeTheme().font||undefined,css:activeTheme().css?activeTheme().css.slice(0,600):undefined}:{}),saved:Object.keys(S.ui.themes||{})},
   workspace:{now:currentSpace().name,sidebar:sideOpen()?(currentSpace().side||[]):"收起",all:visibleSpaces().map(x=>x.name)},theme:S.ui.theme,
-  open_but_hidden:stacks.flatMap(s=>s.tabs).filter(t=>!shown.includes(t.id)).map(t=>t.title),recent_files:Dwell.recent.slice(0,20),selection:Sel.text?shorten(Sel.text,600):undefined};
+  open_but_hidden:stacks.flatMap(s=>s.tabs).filter(t=>!shown.includes(t.id)).map(t=>t.title),recent_files:Dwell.recent.slice(0,20),selection:Sel.text?shorten(Sel.text,600):undefined,
+  tabs:tabList(shown)};
  if(WINDOW)state.layout.title=windowTitleShown;
  return rpc("screen",{state,...(WINDOW?{window:WINDOW}:{})});
+}
+/* Every tab, in every workspace, for the agents' tab directory: what it is, where, and for one on show what it shows. */
+function tabList(shown){
+ const here=new Set();eachStack(s=>s.tabs.forEach(pid=>here.add(pid)));
+ // In use: the learner's panel in focus, or, while they type to an AI, the one of theirs they used last.
+ const using=sideOf(Dock.focus)==="mine"?Dock.focus:Dock.lastMine;
+ const spaceOfTab=pid=>{for(const [id,l] of Object.entries(Dock.spaces)){let found=false;eachStack(s=>{if(s.tabs.includes(pid))found=true;},l);if(found)return spaceOf(id)?.name||id;}return null;};
+ return Object.keys(Dock.panels).map(pid=>{
+  const p=Dock.panels[pid],type=Dock.types[p.type],on=shown.includes(pid);
+  let view;if(on){const {panel,type:_,title,...rest}=screenOf(pid);view=rest;}
+  return {id:pid,type:p.type,title:panelTitle(pid),...(p.type==="chat"?{agent:p.agent,thread:Chat[pid]?.thread||p.thread||null}:{}),
+   ...(p.path?{path:p.path}:{}),...(p.url?{url:p.url}:{}),showing:on,focused:pid===using&&on,
+   ...(type?.dirty?.(p,Dock.els[pid])?{dirty:true}:{}),...(here.has(pid)?{}:{space:spaceOfTab(pid)}),...(view?{view}:{})};
+ });
+}
+/* What a tab holds, when an agent reads it with the tab tool: files and conversations by where they are (the vault has
+   them whole), the rest as they are on screen. */
+async function tabRead(evt){
+ if((evt.window||null)!==(WINDOW||null))return;
+ const pid=evt.panel,p=Dock.panels[pid],node=Dock.els[pid];
+ const answer=result=>rpc("ui_done",{request:evt.request,result});
+ if(!p)return answer({error:"这个标签已经关掉了"});
+ const view=safe(()=>{const {panel,type,title,...rest}=screenOf(pid);return rest;});
+ try{
+  if(p.type==="file"){
+   const st=Files[pid];let draft;
+   if(st?.dirty)draft=st.raw||!st.fields?st.text:(st.fields.body??null);
+   else if(st?.cellDrafts?.size)draft=[...st.cellDrafts].map(([id,src])=>"# 单元格 "+id+"（没保存）\n"+String(src)).join("\n\n");
+   return answer({type:"file",path:p.path,view,...(draft!=null?{draft:String(draft)}:{})});
+  }
+  if(p.type==="chat")return answer({type:"chat",thread:Chat[pid]?.thread||p.thread||null,draft:Chat[pid]?.input||""});
+  if(p.type==="web"){const page=Reader[pid]?.page;return answer({type:"web",url:page?.url||p.url,view,markdown:page?.markdown||""});}
+  if(p.type==="app"){
+   if(!p.path)return answer({type:"app",live:{text:shorten(node?.innerText||"",8000)}});
+   return answer({type:"app",file:p.path,...await appLive(pid)});
+  }
+  return answer({type:p.type,view,text:(node?.innerText||node?.textContent||"").replace(/\n{3,}/g,"\n\n").trim()});
+ }catch(e){return answer({error:String(e?.message||e)});}
 }
 /* The split tree in brief, so an agent can see how the panels sit before it rearranges them. */
 function layoutShape(n){return n.t==="stack"?{tabs:n.tabs}:{split:n.dir,sizes:n.sizes.map(x=>+x.toFixed(2)),parts:n.kids.map(layoutShape)};}
@@ -196,6 +235,7 @@ async function onEvent(evt){
  if(evt.type==="agent")return chatEvent(evt);
  if(evt.type==="app_build")return appBuildEvent(evt);
  if(evt.type==="import")return importEvent(evt);
+ if(evt.type==="tab_read")return tabRead(evt);
  if(evt.type==="app_check")return appCheck(evt);
  if(evt.type==="skill_change"){skillsChanged();return skillChangeEvent(evt);}
  if(evt.type==="saved"){sideChanged([]);return;}
