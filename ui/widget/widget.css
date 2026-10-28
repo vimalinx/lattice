@@ -1,0 +1,36 @@
+/* A ChatGPT widget inside Lattice: Lattice's colors and type (handed over in the query, see runtime.js). */
+:root{--bg:#0d1117;--panel:#121820;--surface:#1a232e;--surface-hover:#22303b;--line:#29333f;--text:#e7edf2;--muted:#95a1af;--subtle:#7e8b99;
+ --accent:#8bdcc5;--accent-ink:#12382f;--accent-glow:rgba(139,220,197,.1);--ai:#b5a8fa;--amber:#ecc994;--red:#f3a09b;--green:#86dbc0;
+ --sans:Inter,"Noto Sans CJK SC","Microsoft YaHei UI",system-ui,sans-serif;--mono:"JetBrains Mono",Consolas,monospace}
+*{box-sizing:border-box}
+/* The same light or dark as the page around it, or the frame gets an opaque backdrop of its own. */
+:root[data-theme="dark"]{color-scheme:dark}:root[data-theme="light"]{color-scheme:light}
+html,body{margin:0;background:transparent;color:var(--text);font:13.5px/1.6 var(--sans);-webkit-font-smoothing:antialiased;overflow:hidden}
+#root{padding:2px}
+.dw-svg{display:block;max-width:100%;height:auto}
+.dw-grid{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+@media (max-width:420px){.dw-grid{grid-template-columns:1fr!important}}
+.dw-card{border:1px solid var(--line);border-radius:12px;padding:12px}
+.dw-seg{display:inline-flex;gap:2px;padding:3px;border-radius:9px;background:var(--surface);width:fit-content}
+.dw-seg.block{display:flex;width:100%}.dw-seg.block button{flex:1}
+.dw-seg button,.dw-button{font:inherit;font-size:12.5px;color:var(--muted);background:transparent;border:0;border-radius:7px;padding:4px 12px;cursor:pointer}
+.dw-seg button.on{background:var(--panel);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.18);font-weight:500}
+.dw-button{background:var(--surface);color:var(--text);border:1px solid var(--line)}
+.dw-button.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.dw-slider{display:flex;align-items:center;gap:10px}
+.dw-slider input{flex:1;accent-color:var(--accent)}
+.dw-slider output{font:12px var(--mono);color:var(--muted);min-width:3em;text-align:right;font-variant-numeric:tabular-nums}
+.dw-check{display:flex;align-items:center;gap:6px;color:var(--text)}
+.dw-check input{accent-color:var(--accent)}
+.dw-badge{display:inline-block;padding:1px 8px;border-radius:999px;background:var(--surface)}
+select,input[type=text],input[type=number]{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:4px 8px}
+hr{border:0;border-top:1px solid var(--line);margin:8px 0}
+code{font-family:var(--mono);font-size:.9em;background:var(--surface);padding:0 4px;border-radius:4px}
+.dw-fault{color:var(--amber);font-size:12.5px}
+.dw-math{text-align:center;overflow-x:auto}
+.dw-icon{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+strong{font-weight:600}
+/* Widgets draw their pictures in colors meant for a light page. On a dark one the picture's lightness is turned round
+   and its hues kept (light blue becomes deep blue, dark text light); currentColor is set dark first, so that it comes
+   out light like the text around it. */
+:root[data-theme="dark"] .dw-svg{color:#1b2b30;filter:invert(.9) hue-rotate(180deg)}

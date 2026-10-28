@@ -60,3 +60,27 @@ function importedDivider(st){
  return {after:list[last].id,html:'<div class="import-divider"><span>以上 '+(head.count||last+1)+' 条从 '+esc(source)+' 导入'+
   (head.url?' · <a data-action="open-url" data-url="'+esc(head.url)+'">原对话</a>':"")+'，从这里接着聊</span></div>'};
 }
+/* What ChatGPT writes into its answers beyond Markdown, made to work here: a widget (a small interface in its markup,
+   starting at a line with <box>, <row>, <grid>…) becomes a block that runs it; an <Entity> is just its name; a <Cite>
+   is dropped, as a share page does not say what it cites. The stored answer stays as it came. */
+const WIDGET_TOP=/^[ \t]*<(box|row|grid|column|card|stack)\b/;
+function adaptImported(text){
+ text=String(text).replace(/<Entity\b[^>]*?\bvalue=(["'])(.*?)\1[^>]*?\/>/g,"$2").replace(/<Cite\b[^>]*?\/>/g,"");
+ const lines=text.split("\n"),out=[];
+ for(let i=0;i<lines.length;i++){
+  const m=WIDGET_TOP.exec(lines[i]);if(!m){out.push(lines[i]);continue;}
+  // It ends where its outermost tag closes: as many </name> as <name> (self-closing ones aside).
+  const open=new RegExp("<"+m[1]+"\\b(?![^>]*/>)","g"),close=new RegExp("</"+m[1]+">","g");let depth=0,j=i;
+  for(;j<lines.length;j++){depth+=(lines[j].match(open)||[]).length-(lines[j].match(close)||[]).length;if(depth<=0)break;}
+  if(j>=lines.length){out.push(lines[i]);continue;}
+  out.push("```lattice:widget",JSON.stringify({source:lines.slice(i,j+1).join("\n")}),"```");i=j;
+ }
+ return out.join("\n");
+}
+// A widget's frame asks for its source once it is ready, and says how tall it has become.
+addEventListener("message",e=>{
+ const d=e.data;if(!d||typeof d!=="object"||!("lattice_widget_ready" in d||"lattice_widget_height" in d))return;
+ const frame=all("iframe.widget-frame").find(f=>f.contentWindow===e.source);if(!frame)return;
+ if(d.lattice_widget_ready)frame.contentWindow.postMessage({lattice_widget:frame.dataset.source},"*");
+ if(d.lattice_widget_height)frame.style.height=Math.min(2400,Number(d.lattice_widget_height)||0)+"px";
+});

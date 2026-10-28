@@ -64,6 +64,13 @@ const BLOCKS={
     }).join("")+'</ol>'+
     (ctx.live?'':'<div class="quiz-actions">'+button("跳过，直接讲","survey-skip",'data-key="'+esc(key)+'"',"ghost sm")+button("交给 AI","survey-send",'data-key="'+esc(key)+'"',"primary sm")+'</div>'));
  },
+ // A widget from an imported ChatGPT answer, run in a sandboxed frame of its own (ui/widget/runtime.js).
+ widget(d,node){
+  const frame=document.createElement("iframe");
+  frame.className="widget-frame";frame.setAttribute("sandbox","allow-scripts allow-same-origin");frame.setAttribute("scrolling","no");frame.title="ChatGPT 的交互小部件";
+  frame.dataset.source=String(d.source||"");frame.src=appUrl("lattice-app://widget/_lattice/widget/index.html");
+  node.replaceChildren(frame);
+ },
  async cards(d,node,ctx){
   const refs=(d.cards||[]).slice(0,30);
   node.innerHTML='<div class="block-pending">读取知识卡…</div>';

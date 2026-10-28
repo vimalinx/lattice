@@ -21,7 +21,8 @@ from . import host
 from PySide6.QtWebEngineCore import QWebEngineUrlRequestInterceptor, QWebEngineUrlRequestJob, QWebEngineUrlScheme, QWebEngineUrlSchemeHandler
 
 SCHEME = b"lattice-app"
-VENDOR = host.APP / "ui" / "vendor"
+# Lattice's own files an app's site may load: bundled libraries, and the runtime for ChatGPT's widgets.
+SHARED = {"vendor": host.APP / "ui" / "vendor", "widget": host.APP / "ui" / "widget"}
 # The look Lattice is in, handed to each app as these variables (see the app-design skill).
 LOOK = ("bg", "panel", "panel-hi", "surface", "surface-hover", "line", "line-soft", "text", "muted", "subtle", "accent", "accent-ink",
         "accent-glow", "ai", "ai-glow", "amber", "red", "green", "code-bg", "code-text", "shadow", "mono", "sans")
@@ -98,8 +99,8 @@ class AppScheme(QWebEngineUrlSchemeHandler):
         url = job.requestUrl()
         path, host = url.path(), url.host()
         try:
-            if path.startswith("/_lattice/vendor/"):
-                body, mime = self._vendor(path[len("/_lattice/vendor/"):])
+            if path.startswith("/_lattice/"):
+                body, mime = self._shared(path[len("/_lattice/"):])
             else:
                 body, mime = self._app(host, path.lstrip("/"), parse_qs(url.query()))
         except (OSError, ValueError, UnicodeDecodeError):
@@ -110,9 +111,11 @@ class AppScheme(QWebEngineUrlSchemeHandler):
         job.reply(mime.encode(), buffer)
 
     @staticmethod
-    def _vendor(rel):
-        target = (VENDOR / rel).resolve()
-        if not target.is_relative_to(VENDOR) or not target.is_file():
+    def _shared(rel):
+        folder, _, rest = rel.partition("/")
+        base = SHARED.get(folder)
+        target = (base / rest).resolve() if base else None
+        if not target or not target.is_relative_to(base.resolve()) or not target.is_file():
             raise ValueError(rel)
         return target.read_bytes(), mimetypes.guess_type(target.name)[0] or "application/octet-stream"
 

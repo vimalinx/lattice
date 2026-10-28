@@ -207,7 +207,7 @@ function messageEl(pid,m,answers){
  let cached=st.cache[m.id];
  if(!cached||cached.key!==key){
   const mine=m.role==="user";
-  const r=mine?{html:markdown(m.content),blocks:[]}:replyHtml(m.content);
+  const r=mine?{html:markdown(m.content),blocks:[]}:replyHtml(meta.imported?adaptImported(m.content):m.content);
   const incomplete=!mine&&meta.stop_reason&&meta.stop_reason!=="end_turn";
   const foot='<div class="msg-foot">'+(mine?"":'<span>'+esc(meta.imported||agentTitle(meta.agent||p.agent))+'</span>')+'<time>'+esc(fmtDate(m.at,true))+'</time>'+(mine?"":usageLabel(meta.usage))+
    (m.content.trim()?iconButton("copy","msg-copy","复制",'data-pid="'+pid+'" data-mid="'+m.id+'"'):"")+(!mine&&m.content.trim()?messageTools(pid,m):"")+'</div>';
