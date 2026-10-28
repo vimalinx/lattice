@@ -178,7 +178,8 @@ function typeset(el, p, size, weight, color) {
 }
 const call = (fn, ...args) => { if (typeof fn === "function") fn(...args); };
 // A listener that calls whatever handler the latest drawing gave the element (see morph): a handler closes over the
-// state of the drawing that made it.
+// state of the drawing that made it. It reads the element through the event, never its own: the element on show is
+// the one from the first drawing, not the one the handler was made with.
 function on(el, type, fn) {
  (el.__h ||= {})[type] = fn;
  (el.__on ||= new Set());
@@ -264,7 +265,7 @@ function build(node, svg) {
    const input = document.createElement("input"); input.type = "range";
    for (const k of ["min", "max", "step"]) if (p[k] !== undefined) input[k] = p[k];
    input.value = p.value ?? 0;
-   on(input, "input", () => call(p.onChange, Number(input.value)));
+   on(input, "input", e => call(p.onChange, Number(e.currentTarget.value)));
    if (p.label) { const l = document.createElement("span"); l.textContent = p.label; el.append(l); }
    el.append(input);
    if (p.showValue !== false) { const out = document.createElement("output"); out.textContent = p.value ?? ""; el.append(out); }
@@ -278,19 +279,19 @@ function build(node, svg) {
   case "switch": case "toggle": case "checkbox": {
    el = document.createElement("label"); el.className = "dw-check";
    const input = document.createElement("input"); input.type = "checkbox"; input.checked = !!(p.checked ?? p.value);
-   on(input, "change", () => call(p.onChange, input.checked));
+   on(input, "change", e => call(p.onChange, e.currentTarget.checked));
    el.append(input); if (p.label) el.append(" " + p.label); break;
   }
   case "select": {
    el = document.createElement("select");
    for (const o of options(p)) { const op = document.createElement("option"); op.value = String(o.value); op.textContent = o.label ?? o.value; el.append(op); }
-   el.value = String(p.value ?? ""); on(el, "change", () => { const o = options(p).find(x => String(x.value) === el.value); call(p.onChange, o ? o.value : el.value); });
+   el.value = String(p.value ?? ""); on(el, "change", e => { const v = e.currentTarget.value, o = options(p).find(x => String(x.value) === v); call(p.onChange, o ? o.value : v); });
    return el;
   }
   case "input": case "text-input": case "number-input": case "textfield": {
    el = document.createElement("input"); el.type = name === "number-input" || p.type === "number" ? "number" : "text"; el.value = p.value ?? "";
    if (p.placeholder) el.placeholder = p.placeholder;
-   on(el, "input", () => call(p.onChange, el.type === "number" ? Number(el.value) : el.value)); return el;
+   on(el, "input", e => call(p.onChange, e.currentTarget.type === "number" ? Number(e.currentTarget.value) : e.currentTarget.value)); return el;
   }
   default: el = document.createElement("div");
  }
