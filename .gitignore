@@ -3,7 +3,7 @@ __pycache__/
 .pytest_cache/
 .benchmarks/
 runtime/node_modules/
-releases/
+/releases/
 
 # Windows build (packaging/)
 packaging/build/
