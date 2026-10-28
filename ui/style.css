@@ -1246,3 +1246,12 @@ body.separate-window #activity,body.separate-window #side,body.separate-window #
 body.separate-window .tab-btn{display:none}
 .tab-return{display:flex;align-items:center;gap:5px;margin:0 6px;padding:3px 10px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--muted);font-size:12px;white-space:nowrap}
 .tab-return:hover{color:var(--text);background:var(--surface-hover)}
+/* A conversation brought in from an AI on the web: the window that reads it, and where its imported part ends. */
+.import-row{display:flex;gap:8px;margin:10px 0}
+.import-url{flex:1;min-width:0;font-family:var(--mono);font-size:12.5px}
+.import-preview{min-height:40px}
+.import-card{display:grid;gap:5px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.import-card small{color:var(--subtle)}
+.import-card p{margin:2px 0;color:var(--muted);white-space:pre-wrap}
+.import-divider{display:flex;align-items:center;gap:10px;margin:18px 0;color:var(--subtle);font-size:12px}
+.import-divider::before,.import-divider::after{content:"";flex:1;border-top:1px dashed var(--line)}

@@ -1082,12 +1082,12 @@ class Lattice:
             r["meta"] = json.loads(r["meta"])
         return rows
 
-    def append_message(self, thread, role, content, meta=None):
+    def append_message(self, thread, role, content, meta=None, at=None):
         row = self.index.one("SELECT path FROM threads WHERE id=?", (thread,))
         if not row:
             raise ValueError("会话不存在")
         ident = (self.db.execute("SELECT MAX(id) FROM messages").fetchone()[0] or 0) + 1
-        message = {"id": ident, "role": role, "content": content, "meta": meta or {}, "at": now()}
+        message = {"id": ident, "role": role, "content": content, "meta": meta or {}, "at": at or now()}
         self.vault.append_line(row["path"], message)
         self.db.execute("INSERT INTO messages VALUES(?,?,?,?,?,?)", (ident, thread, role, content, dump(meta or {}), message["at"]))
         self.db.execute("UPDATE threads SET updated=? WHERE id=?", (message["at"], thread))

@@ -118,7 +118,8 @@ function renderChat(pid,keepScroll=true){
  const msgs=st.data.messages,empty=!msgs.length&&!st.data.busy;
  node.querySelector(".chat").classList.toggle("blank",empty);
  if(empty)scroll.appendChild(h('<div class="chat-welcome">'+chatWelcome(p.agent)+'</div>'));
- msgs.forEach(m=>scroll.appendChild(messageEl(pid,m,answers)));
+ const divider=importedDivider(st);
+ msgs.forEach(m=>{scroll.appendChild(messageEl(pid,m,answers));if(divider&&m.id===divider.after)scroll.appendChild(h(divider.html));});
  scroll.appendChild(h('<div class="live-slot"></div>'));scroll.appendChild(h('<div class="chat-spacer"></div>'));
  renderLive(pid);
  node.querySelector(".chat-starters").innerHTML=empty?chatStarters(pid):"";
@@ -208,7 +209,7 @@ function messageEl(pid,m,answers){
   const mine=m.role==="user";
   const r=mine?{html:markdown(m.content),blocks:[]}:replyHtml(m.content);
   const incomplete=!mine&&meta.stop_reason&&meta.stop_reason!=="end_turn";
-  const foot='<div class="msg-foot">'+(mine?"":'<span>'+esc(agentTitle(meta.agent||p.agent))+'</span>')+'<time>'+esc(fmtDate(m.at,true))+'</time>'+(mine?"":usageLabel(meta.usage))+
+  const foot='<div class="msg-foot">'+(mine?"":'<span>'+esc(meta.imported||agentTitle(meta.agent||p.agent))+'</span>')+'<time>'+esc(fmtDate(m.at,true))+'</time>'+(mine?"":usageLabel(meta.usage))+
    (m.content.trim()?iconButton("copy","msg-copy","复制",'data-pid="'+pid+'" data-mid="'+m.id+'"'):"")+(!mine&&m.content.trim()?messageTools(pid,m):"")+'</div>';
   const html=mine?'<div class="msg from-me" data-mid="'+m.id+'"><div class="bubble">'+
     (meta.skill_title?'<div class="msg-skill"'+(meta.skill?' data-skill-open="'+esc(meta.skill)+'" data-tip="看看、改改这个技能"':"")+'>'+svg("store",11)+' 按技能「'+esc(meta.skill_title)+'」</div>':"")+

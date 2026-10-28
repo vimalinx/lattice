@@ -33,7 +33,7 @@ from .runner import RunWorker, command_for, missing_tool, runner_for, tool_hint
 from . import accel, appscheme, host
 from .netproxy import NetProxy
 from .sandbox import MPL, Sandbox, on_gpu
-from .vault import APPEND_ONLY, VAULT_PATH, VaultError, kind_of, slug as vault_slug, split_frontmatter
+from .vault import APPEND_ONLY, VAULT_PATH, VaultError, kind_of, now, slug as vault_slug, split_frontmatter
 
 LOG = logging.getLogger("lattice")
 DATA_HOME = host.data_home()
@@ -152,6 +152,7 @@ class Bridge(QObject):
         self.runs, self.kernels, self.kernel_states, self.batches = {}, {}, {}, {}
         self.screen, self.edits, self.last_write = {}, {}, 0.0
         self.window_screens = {}   # what each separate window shows, by its id
+        self.imports_read = {}     # conversations read to be imported, by request
         # Panels left in windows of their own when Lattice last closed: they come back into the main window.
         self.returned_windows = [{"params": w["params"], "origin": w.get("origin") or {}} for w in (self.lattice.setting("separate_windows") or {}).values()
                                  if isinstance(w, dict) and w.get("params")]
@@ -849,6 +850,47 @@ class Bridge(QObject):
         entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
         return {"path": str(folder), "parent": str(folder.parent) if folder.parent != folder else None,
                 "entries": entries[:3000], "more": max(0, len(entries) - 3000), "places": _places()}
+
+    # ---- conversations had with an AI on the web, brought in to go on with --------------------------------
+    def rpc_import_read(self, url):
+        """Read a shared conversation (off the GUI thread); it arrives as an "import" event to look at before bringing it in."""
+        from . import imports, web
+        url = str(url or "").strip()
+        if not imports.is_share_link(url):
+            raise ValueError("现在能导入的是 ChatGPT 的分享链接（chatgpt.com/share/…）。在 ChatGPT 里点对话右上角的「分享」，复制链接贴进来")
+        request = uid()
+
+        def then(result):
+            if isinstance(result, Exception):
+                return self.announce({"type": "import", "request": request, "error": str(result)[:400]})
+            self.imports_read[request] = result
+            messages = result["messages"]
+            self.announce({"type": "import", "request": request, "title": result["title"], "source": result["source"], "url": url,
+                           "created": result["created"], "count": len(messages), "turns": sum(m["role"] == "user" for m in messages),
+                           "first": next((m["content"][:300] for m in messages if m["role"] == "user"), "")})
+        self.background(lambda: imports.from_share(url, web.page_bytes), then)
+        return {"request": request}
+
+    def rpc_import_save(self, request, topic=None):
+        """Bring a conversation read with import_read in as one of the tutor's, under the topic being learned, and open
+        it there to go on with. Its messages keep their times and the model's thinking; the conversation is saved (a
+        summary of it written) so the tutor knows what was said before the part it sees."""
+        found = self.imports_read.pop(request, None)
+        if not found:
+            raise ValueError("这段对话还没读好，或者已经导入过了")
+        l = self.lattice
+        topic = l.active_topic() if topic is None else (topic or None)
+        meta = {"source": found["source"], "url": found["url"], "at": now(), "count": len(found["messages"])}
+        thread = l.thread_new("tutor", topic, found["title"], {"imported": meta, "named": True})["id"]
+        for m in found["messages"]:
+            extra = {"thinking": m["thinking"], "think_seconds": m.get("think_seconds") or None} if m.get("thinking") else {}
+            l.append_message(thread, m["role"], m["content"], {"agent": "tutor", "imported": found["source"], **extra}, m.get("at"))
+        l.thread_pick(thread)
+        l.focus(topic)
+        l.record("imported", {"title": found["title"], "source": found["source"], "url": found["url"], "messages": len(found["messages"])},
+                 "me", [thread, *([topic] if topic else [])])
+        self.save_later(thread)
+        return {"thread": thread, "topic": topic or ""}
 
     def rpc_web_open(self, url, refresh=False):
         """A web page or PDF for the learner's reader. Pages read once are kept on this computer, so a cited page opens
@@ -1643,7 +1685,7 @@ class Bridge(QObject):
         for rel, content in inline:
             user += f"\n\n（学习者附上的「{rel}」，全文如下）\n```\n{content}\n```"
         where = self._topic_brief(definition["name"], thread, topic) if topic else "这是默认对话，不属于任何主题。"
-        context = f"现在是 {tools.today()}。{where}对话 id：{thread}。" + self._earlier(thread, definition["history"])
+        context = f"现在是 {tools.today()}。{where}对话 id：{thread}。" + self._imported(thread) + self._earlier(thread, definition["history"])
         if practice:
             context += (f"\n\n这次练习：practice:{thread}「{practice['title']}」，练习文件：{practice['file']}。"
                         + (f"\n目标：{practice['goal']}" if practice.get("goal") else "") + "\n\n练习依据的讲解：\n" + practice["seed"])
@@ -1668,6 +1710,14 @@ class Bridge(QObject):
                              "；".join(f"「{x['title']}」(thread {x['id']}，{x['messages']} 条，" +
                                       (f"存档摘要：{x['summary'][:300]}" if x["summary"] else f"最近问：{x['last'][:60]}；最近讲的开头：{x['answer'][:120]}") + ")" for x in others))
         return "\n".join(lines) + "\n"
+
+    def _imported(self, thread):
+        """A conversation brought in from another AI: which part was said there, so the tutor goes on from it as itself."""
+        found = self.lattice.thread_head(thread).get("imported")
+        if not found:
+            return ""
+        return (f"\n\n这段对话开头的 {found.get('count', 0)} 条是学习者从 {found.get('source')} 导入的（{found.get('url')}）：那里的回答是另一个 AI 说的，"
+                "不是你。学习者想在这里接着聊；先接住那边讲到的地方和 TA 最后的问题，用你自己的方式往下讲，那边讲错或讲得不清楚的地方直接指出来。")
 
     def _earlier(self, thread, history):
         """What a conversation said before the stretch the model sees: its saved summary, once it runs past that stretch."""

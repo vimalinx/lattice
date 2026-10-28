@@ -267,6 +267,11 @@ def _download(url, cap=None):
     raise WebError("重定向次数太多")
 
 
+def page_bytes(url, cap=30_000_000):
+    """A whole page, however long (a shared conversation's page carries all of it)."""
+    return _download(url, cap)
+
+
 def asset(url, cap=20_000_000):
     """A file from the internet, whole: final url, content type, bytes."""
     return _download(url, cap)

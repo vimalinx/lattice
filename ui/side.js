@@ -77,7 +77,7 @@ async function topicsSection(){
   (open(t.id)?sessions(t.id,depth+1)+tree(t.id,depth+1,state).join(""):"");
  const tree=(parent,depth,state)=>topics.filter(t=>(t.parent||null)===parent&&t.state===state).map(t=>node(t,depth,state));
  const roots=state=>topics.filter(t=>t.state===state&&(!t.parent||!topics.some(x=>x.id===t.parent&&x.state===state))).map(t=>node(t,0,state));
- return {tools:iconButton("network","open-map","知识图"),body:head("","bot","默认对话（不属于任何主题）",0)+(open("")?sessions("",1):"")+
+ return {tools:iconButton("download","import-chat","导入网页上的 AI 对话（ChatGPT 分享链接）")+iconButton("network","open-map","知识图"),body:head("","bot","默认对话（不属于任何主题）",0)+(open("")?sessions("",1):"")+
   sideGroup("进行中",roots("active"),"还没有主题。和主会话聊着聊着，它会把值得深入的内容建成主题。")+sideGroup("先放一放",roots("parked"))+sideGroup("学完了",roots("completed"))};
 }
 // Topics folded or unfolded by hand; the one being learned is open unless folded.

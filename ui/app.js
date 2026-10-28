@@ -60,7 +60,8 @@ const OPEN_ITEMS=[["主会话","open-agent","bot",'data-agent="tutor"'],["快答
 function openMenuHtml(){
  const item=([t,a,i,d,x])=>'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+(d?'<small>'+esc(d)+'</small>':"")+'</span></button>';
  return '<div class="menu-label">新建</div><div class="menu-grid">'+NEW_ITEMS.slice(0,4).map(([t,a,i,d,x])=>item([t,a,i,"",x])).join("")+
-  '<button data-action="note-new" data-folder="">'+svg("notenew",14)+'<span>新笔记</span></button></div>'+
+  '<button data-action="note-new" data-folder="">'+svg("notenew",14)+'<span>新笔记</span></button>'+
+  '<button data-action="import-chat">'+svg("download",14)+'<span>导入 AI 对话</span></button></div>'+
   '<hr/><div class="menu-label">打开窗口</div><div class="menu-grid">'+OPEN_ITEMS.map(([t,a,i,x])=>'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+'</span></button>').join("")+'</div>'+
   '<hr/><button data-action="note-switcher">'+svg("search",14)+'<span>打开一篇笔记或文件… <small>Ctrl O</small></span></button>'+
   '<button data-action="space-new">'+svg("layout",14)+'<span>新工作区…</span></button>';
@@ -194,6 +195,7 @@ async function onEvent(evt){
  if(evt.type==="agent"&&evt.agent==="builder"){appAgentEvent(evt);if(evt.kind==="finished")refreshState();return;}
  if(evt.type==="agent")return chatEvent(evt);
  if(evt.type==="app_build")return appBuildEvent(evt);
+ if(evt.type==="import")return importEvent(evt);
  if(evt.type==="app_check")return appCheck(evt);
  if(evt.type==="skill_change"){skillsChanged();return skillChangeEvent(evt);}
  if(evt.type==="saved"){sideChanged([]);return;}
@@ -221,6 +223,8 @@ async function onAction(a){
  case "dock-close":return closePanel(pid);
  case "dock-float":return float(pid);
  case "dock-window":return toWindow(pid);
+ case "import-chat":return importChat("",a.dataset.pid||null);
+ case "import-read":case "import-save":case "import-paste":return importAction(kind);
  case "dock-unfloat":return unfloat(pid);
  case "window-return":return rpc("window_return",{window:WINDOW});
  case "modal-close":return closeModal();
