@@ -30,13 +30,13 @@ from .model import Lattice, STAGES, outside_code, readable_outputs, text
 from .notebook import NotebookWorker
 from .providers import AGENT_NAMES, ApiWorker, Config
 from .runner import RunWorker, command_for, missing_tool, runner_for, tool_hint
-from . import accel, appscheme
+from . import accel, appscheme, host
 from .netproxy import NetProxy
 from .sandbox import MPL, Sandbox, on_gpu
 from .vault import APPEND_ONLY, VAULT_PATH, VaultError, kind_of, slug as vault_slug, split_frontmatter
 
 LOG = logging.getLogger("lattice")
-DATA_HOME = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
+DATA_HOME = host.data_home()
 # Machine-local state that is not learning data: logs, web profile, the pre-vault database.
 APP_HOME = DATA_HOME / "lattice"
 LEGACY_DB = APP_HOME / "lattice.db"
@@ -57,7 +57,7 @@ def _places():
              "PROJECTS": ("项目", "Projects"), "PICTURES": ("图片", "Pictures")}
     found = {}
     try:
-        for line in (Path(os.environ.get("XDG_CONFIG_HOME", home / ".config")) / "user-dirs.dirs").read_text(encoding="utf-8").splitlines():
+        for line in (host.config_home() / "user-dirs.dirs").read_text(encoding="utf-8").splitlines():
             m = re.match(r'XDG_(\w+)_DIR="(.*)"', line.strip())
             if m and m.group(1) in names:
                 found[m.group(1)] = Path(m.group(2).replace("$HOME", str(home)))
@@ -130,7 +130,7 @@ class Bridge(QObject):
             self.lattice.index.sync()
             self.lattice.vault.commit("建立默认的 Python 环境定义", "lattice")
         # The sandbox's way out to the internet; its socket lives outside the vault (a socket's path has to be short).
-        self.netproxy = NetProxy(Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / f"lattice-net-{os.getpid()}.sock")
+        self.netproxy = NetProxy(host.runtime_dir() / f"lattice-net-{os.getpid()}.sock")
         self.sandbox = Sandbox(self.root, self.lattice.projects, lambda: self.config.read()["sandbox_paths"],
                                network=lambda: self.config.read()["agent_network"], proxy=self.netproxy)
         self.workers, self.turns, self.contexts, self.busy, self.status = {}, {}, {}, set(), {}
@@ -292,7 +292,7 @@ class Bridge(QObject):
         state = self._local_state()
         returned, self.returned_windows = self.returned_windows, []
         return {**self.rpc_state(), "vault": str(self.root), "layout": state.get("layout"), "returned_windows": returned, "config": self.config.public(),
-                "sandbox": {"ok": self.sandbox.available(), "why": self.sandbox.why_not()}, "migrated": self.lattice.migrated,
+                "sandbox": {"ok": self.sandbox.available(), "isolated": self.sandbox.isolated, "why": self.sandbox.why_not()}, "migrated": self.lattice.migrated,
                 "problems": self.lattice.index.problems[:20]}
 
     def catalog(self, kind, **filters):
@@ -1042,8 +1042,11 @@ class Bridge(QObject):
                 "active_practices": [p for p in l.practices() if p["state"] == "active"],
                 "agent_may_run_code": bool(self.config.read()["agent_auto_run"]), "sandbox": self.sandbox.available(), "today": tools.today(),
                 # Facts about where things run, so an agent does not have to guess why something failed.
-                "where_things_run": {"sandbox_network": "能上互联网（经过 Lattice 的代理），连不了这台电脑和局域网" if self.config.read()["agent_network"]
-                                     else "学习者在设置里关掉了沙箱联网", "install_network": True,
+                "where_things_run": {"system": "Windows" if host.WINDOWS else "Linux", "shell": host.shell_name(),
+                                     "sandbox": "有：bubblewrap 隔离" if self.sandbox.isolated else "没有：AI 的命令和运行用学习者的权限直接运行",
+                                     "sandbox_network": ("能上互联网（经过 Lattice 的代理），连不了这台电脑和局域网" if self.config.read()["agent_network"]
+                                                         else "学习者在设置里关掉了沙箱联网") if self.sandbox.isolated else "能联网（没有沙箱）",
+                                     "install_network": True,
                                      "gpu": ("能用：shell 或 run 带 gpu=true" if self.gpu_ready() else "学习者在设置里关掉了显卡"
                                              if self.accel()["preferred"] != "cpu" else "这台电脑上没有能用来计算的显卡，只能用 CPU"),
                                      "accelerator": self.accel_brief(),
@@ -1171,7 +1174,7 @@ class Bridge(QObject):
         # Unix sockets in a private folder, never loopback TCP, whichever permissions the kernel runs with.
         sockets.mkdir(parents=True, exist_ok=True)
         sockets.chmod(0o700)
-        if mode == "sandbox":
+        if mode == "sandbox" and self.sandbox.isolated:
             extra = {"IPYTHONDIR": "/tmp/ipython", "JUPYTER_RUNTIME_DIR": "/tmp/jupyter", "JUPYTER_DATA_DIR": "/tmp/jupyter-data", "PYTHONUNBUFFERED": "1"}
             wrap = lambda command: self.sandbox.argv(command, cwd, extra, writable=[sockets], gpu=gpu)
         elif gpu:
@@ -1333,8 +1336,8 @@ class Bridge(QObject):
         if rel is None:
             folder = absolute.parent
             while folder != folder.parent:
-                if (folder / ".venv/bin/python").exists():
-                    return str(folder / ".venv/bin/python")
+                if host.venv_python(folder / ".venv").exists():
+                    return str(host.venv_python(folder / ".venv"))
                 if any(folder == Path(p["path"]) for p in self.lattice.projects()):
                     break
                 folder = folder.parent
@@ -1343,9 +1346,8 @@ class Bridge(QObject):
     def agent_shell(self, command, timeout, gpu=False):
         """One agent shell command in the sandbox, with the vault's default Python environment on PATH (runs off the GUI thread)."""
         python = Path(self.envs.ensure("default"))
-        env = {"PATH": f"{python.parent}:" + ":".join([*(p for p in self.sandbox.visible() if p.endswith("bin")), "/usr/local/bin", "/usr/bin"]),
-               "VIRTUAL_ENV": str(python.parent.parent), "MPLBACKEND": "Agg"}
-        return self.sandbox.shell(command, timeout, env=env, gpu=self.gpu_for_run() if gpu else None)
+        env = {"VIRTUAL_ENV": str(python.parent.parent), "MPLBACKEND": "Agg"}
+        return self.sandbox.shell(command, timeout, env=env, gpu=self.gpu_for_run() if gpu else None, bins=[python.parent])
 
     def run_file(self, path, by="me", sandboxed=False, cwd=None, attempt=0, gpu=False, timeout=None):
         l = self.lattice
@@ -1370,12 +1372,10 @@ class Bridge(QObject):
             command = command_for(template, absolute, python, scratch)
             figures = {"MPLBACKEND": "module://lattice_figures", "PYTHONPATH": str(MPL), "LATTICE_FIGURES": str(scratch / "figures"), "PYTHONUNBUFFERED": "1"}
             if sandboxed:
-                venv = Path(python).parent.parent
-                env = {**figures, "VIRTUAL_ENV": str(venv), "PATH": f"{Path(python).parent}:" + ":".join(
-                    [*(p for p in self.sandbox.visible() if p.endswith("bin")), "/usr/local/bin", "/usr/bin"])}
-                return self.sandbox.argv(["bash", "-c", command], workdir, env, writable=[scratch], gpu=accelerated), None
-            env = {**os.environ, **figures, "PYTHONPATH": os.pathsep.join(x for x in (str(MPL), os.environ.get("PYTHONPATH")) if x)}
-            return (on_gpu(["bash", "-c", command], accelerated) if accelerated else ["bash", "-c", command]), env
+                return self.sandbox.launch(host.runner_argv(command), workdir, {**figures, "VIRTUAL_ENV": str(Path(python).parent.parent)},
+                                           writable=[scratch], gpu=accelerated, bins=[Path(python).parent])
+            env = {**os.environ, **host.UTF8, **figures, "PYTHONPATH": os.pathsep.join(x for x in (str(MPL), os.environ.get("PYTHONPATH")) if x)}
+            return (on_gpu(host.runner_argv(command), accelerated) if accelerated else host.runner_argv(command)), env
         scratch.mkdir(parents=True, exist_ok=True)
         worker = RunWorker(run_id, None, str(workdir), None, max(self.config.read()["run_timeout"], int(timeout or 0)), scratch, prepare)
         self.runs[run_id] = {"path": shown, "by": by, "sandbox": sandboxed, "gpu": gpu, "worker": worker, "waiters": [], "attempt": attempt, "timeout": timeout,

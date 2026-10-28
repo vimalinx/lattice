@@ -21,6 +21,8 @@ import httpx
 import logging
 from PySide6.QtCore import QThread, Signal
 
+from . import host
+
 LOG = logging.getLogger("lattice")
 
 # Connections are the learner's own list: each one is an OpenAI-compatible Chat Completions endpoint with its own key,
@@ -181,14 +183,15 @@ LOCALROUTER_URLS = ["http://127.0.0.1:8317", "http://127.0.0.1:29317"]
 
 
 def LOCALROUTER_FILE():
-    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "lattice/localrouter.toml"
+    return host.config_home() / "lattice" / "localrouter.toml"
 
 
 def token_of(path):
-    """The token in a LocalRouter token file, or "" when the file is missing, readable by others or not one line."""
+    """The token in a LocalRouter token file, or "" when the file is missing, readable by others or not one line (Windows
+    has no such permission bits; there the file sits in the user's own profile)."""
     try:
         file = Path(str(path or "")).expanduser()
-        if not path or not file.is_file() or file.stat().st_mode & 0o077:
+        if not path or not file.is_file() or (not host.WINDOWS and file.stat().st_mode & 0o077):
             return ""
         lines = [l for l in file.read_text(encoding="utf-8").splitlines() if l.strip()]
         return lines[0].strip() if len(lines) == 1 else ""
@@ -260,7 +263,7 @@ def model_label(model):
 
 class Config:
     def __init__(self, path=None):
-        self.path = Path(path) if path else Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "lattice/providers.json"
+        self.path = Path(path) if path else host.config_home() / "lattice" / "providers.json"
 
     def read(self):
         result = copy.deepcopy(DEFAULTS)

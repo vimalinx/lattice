@@ -1,6 +1,10 @@
-"""The agents' sandbox: bubblewrap with the vault writable and mounted folders read-only. It has no network of its
+"""Where the agents' commands, runs and notebook kernels run.
+
+On Linux that is a sandbox: bubblewrap with the vault writable and mounted folders read-only. It has no network of its
 own; when the learner allows it (on by default), what runs inside reaches the internet through Lattice's proxy
-(netproxy.py), never this machine or the local network. Downloads are cached in the vault's .lattice/cache.
+(netproxy.py), never this machine or the local network. Elsewhere (Windows) there is no such isolation, and they run
+with the learner's own permissions, in the same environment otherwise. Either way downloads are cached in the vault's
+.lattice/cache, and launch() gives the command line and environment to start a program with.
 
 A run that asks for the GPU also gets the device nodes of the accelerator found here (see accel.py), and is wrapped in
 this machine's launcher when it has one (nvidia-run wakes the GPU for that run only and puts it back to sleep). Runs are
@@ -19,11 +23,10 @@ import glob
 import os
 from pathlib import Path
 import shutil
-import signal
 import subprocess
-import threading
 import time
 
+from . import host
 from .netproxy import PORT
 
 # Just enough of /etc for programs to run: libraries, fonts, certificates, time zone, user names.
@@ -41,37 +44,21 @@ def on_gpu(command, gpu):
     return [*(gpu.get("prefix") or []), *command]
 
 
-def stop_group(proc, grace=20, wait=True):
-    """End a process and everything it started: asked first, killed only if it is still there after `grace` seconds.
-    With wait=False the waiting happens on a thread of its own."""
-    def finish():
-        try:
-            proc.wait(grace)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                proc.kill()
-    if proc.poll() is not None:
-        return
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        proc.terminate()
-    if wait:
-        finish()
-    else:
-        threading.Thread(target=finish, daemon=True).start()
-
-
 class Sandbox:
     def __init__(self, root, projects=lambda: [], extra=lambda: [], network=lambda: False, proxy=None):
         self.root = Path(root).resolve()
         self.projects, self.extra, self.network, self.proxy = projects, extra, network, proxy
-        self.bwrap = shutil.which("bwrap")
+        self.bwrap = None if host.WINDOWS else shutil.which("bwrap")
         self._ok = None
 
+    @property
+    def isolated(self):
+        """Whether what runs here is kept apart from the rest of this computer (bubblewrap on Linux)."""
+        return not host.WINDOWS and self.available()
+
     def available(self):
+        if host.WINDOWS:
+            return True
         if self._ok is None:
             self._ok = bool(self.bwrap) and subprocess.run([self.bwrap, "--unshare-all", "--ro-bind", "/usr", "/usr", "--symlink", "usr/bin", "/bin",
                                                             "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib", "/lib64", "true"],
@@ -99,7 +86,7 @@ class Sandbox:
                     paths.add(str(Path(line[7:]).resolve().parent))
         return sorted(p for p in paths if Path(p).exists())
 
-    def argv(self, command, cwd, env=None, writable=(), gpu=None):
+    def argv(self, command, cwd, env=None, writable=(), gpu=None, bins=()):
         """bwrap command line running `command` (a list) in `cwd` with `env` added to a clean environment; with gpu
         (accel.detect()'s description) the accelerator's device nodes are inside and it runs in the machine's launcher."""
         if not self.available():
@@ -145,10 +132,10 @@ class Sandbox:
         args += ["--ro-bind", str(MPL), str(MPL), "--chdir", str(cwd), "--clearenv"]
         base = {"HOME": "/tmp/home", "LANG": os.environ.get("LANG", "C.UTF-8"), "TERM": "dumb", "TMPDIR": "/tmp",
                 "MPLCONFIGDIR": "/tmp/mpl", "GOCACHE": "/tmp/go-cache", "GOPATH": "/tmp/go", "CARGO_HOME": "/tmp/cargo",
-                "PATH": ":".join([*(p for p in self.visible() if p.endswith("bin")), "/usr/local/bin", "/usr/bin"])}
+                "PATH": ":".join([*map(str, bins), *(p for p in self.visible() if p.endswith("bin")), "/usr/local/bin", "/usr/bin"])}
         if (Path.home() / ".rustup").as_posix() in self.visible():
             base["RUSTUP_HOME"] = str(Path.home() / ".rustup")
-        base.update({"XDG_CACHE_HOME": str(cache), "HF_HOME": str(cache / "huggingface"), "TORCH_HOME": str(cache / "torch")})
+        base.update(self.caches())
         if online:
             proxy = "http://127.0.0.1:%d" % PORT
             base.update({"HTTP_PROXY": proxy, "HTTPS_PROXY": proxy, "http_proxy": proxy, "https_proxy": proxy, "NODE_USE_ENV_PROXY": "1",
@@ -158,16 +145,35 @@ class Sandbox:
             args += ["--setenv", key, str(value)]
         return [*((gpu or {}).get("prefix") or [])] + args + ["--", *command]
 
-    def shell(self, command, timeout=60, limit=24000, cwd=None, env=None, gpu=None):
-        """Run one shell command; returns its combined output, exit code and whether it was cut short."""
+    def caches(self):
+        """Downloaded models and datasets stay between runs (inside the sandbox home is in memory and gone after each)."""
+        cache = self.root / ".lattice" / "cache"
+        return {"XDG_CACHE_HOME": str(cache), "HF_HOME": str(cache / "huggingface"), "TORCH_HOME": str(cache / "torch")}
+
+    def launch(self, command, cwd, env=None, writable=(), gpu=None, bins=()):
+        """How to start `command` (a list) here: its command line, and the environment to start it with (None: the
+        command line sets its own). `bins` go first on PATH (an environment's interpreter)."""
+        if self.isolated:
+            return self.argv(command, cwd, env, writable, gpu, bins), None
+        if not self.available():
+            raise RuntimeError(self.why_not())
+        for path in writable:
+            Path(path).mkdir(parents=True, exist_ok=True)
+        path = os.pathsep.join([*map(str, bins), os.environ.get("PATH", "")])
+        return [*((gpu or {}).get("prefix") or []), *command], {**os.environ, **host.UTF8, **self.caches(), **(env or {}), "PATH": path}
+
+    def shell(self, command, timeout=60, limit=24000, cwd=None, env=None, gpu=None, bins=()):
+        """Run one command in the shell agents write for (host.shell_name()); returns its combined output, exit code and
+        whether it was cut short."""
         started = time.monotonic()
-        proc = subprocess.Popen(self.argv(["bash", "-c", command], cwd or self.root, env, gpu=gpu), stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, start_new_session=True)
+        argv, environ = self.launch(host.shell_argv(command), cwd or self.root, env, gpu=gpu, bins=bins)
+        proc = subprocess.Popen(argv, cwd=str(cwd or self.root), env=environ, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                stdin=subprocess.DEVNULL, **host.GROUP)
         try:
             stdout, stderr = proc.communicate(timeout=timeout)
             code, out, timed_out = proc.returncode, stdout + (b"\n" + stderr if stderr else b""), False
         except subprocess.TimeoutExpired:
-            stop_group(proc)
+            host.stop_group(proc)
             stdout, stderr = proc.communicate()
             code, out, timed_out = None, (stdout or b"") + (stderr or b""), True
         text = out.decode("utf-8", "replace")

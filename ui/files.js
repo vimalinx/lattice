@@ -267,7 +267,9 @@ function notebookView(pid){
  const st=Files[pid],d=st.data,nb=d.notebook,k=d.kernel||{},sandboxed=d.mode!=="mine";
  const state={offline:"内核未启动",starting:"正在启动",ready:"就绪",busy:"运行中",restarting:"重启中",error:"内核出错",queued:"排队中",installing:"正在装包"}[k.state]||k.state||"内核未启动";
  return '<div class="nb-bar"><span class="kernel-chip k-'+esc(k.state||"offline")+'" data-kernel-chip="'+pid+'">'+svg("terminal",12)+' '+esc(state)+(k.message?' · '+esc(k.message):"")+'</span>'+
-  '<button class="chip toggle'+(sandboxed?" on":"")+'" data-action="kernel-mode" data-pid="'+pid+'" title="'+(sandboxed?"内核在沙箱里：看不到家目录，能上互联网但连不了这台电脑和局域网；AI 也能在里面运行。点一下改成用你的权限":"内核用你的权限运行（能联网、能读你的文件），AI 不能在里面运行。点一下改回沙箱")+'">'+(sandboxed?svg("shield",12)+" 沙箱":"我的权限")+'</button>'+
+  '<button class="chip toggle'+(sandboxed?" on":"")+'" data-action="kernel-mode" data-pid="'+pid+'" title="'+(!S.data.sandbox?.isolated?(sandboxed?"AI 也能在这个内核里运行（这台电脑上没有沙箱，它用你的权限）。点一下改成只有你能用":"只有你能在这个内核里运行，AI 不能。点一下改成和 AI 共用")
+   :sandboxed?"内核在沙箱里：看不到家目录，能上互联网但连不了这台电脑和局域网；AI 也能在里面运行。点一下改成用你的权限":"内核用你的权限运行（能联网、能读你的文件），AI 不能在里面运行。点一下改回沙箱")+'">'+
+   (sandboxed?svg(S.data.sandbox?.isolated?"shield":"bot",12)+(S.data.sandbox?.isolated?" 沙箱":" 和 AI 共用"):"我的权限")+'</button>'+
   (d.gpu_ready||d.gpu?'<button class="chip toggle'+(d.gpu?" on":"")+'" data-action="kernel-gpu" data-pid="'+pid+'" title="'+(d.gpu?"内核在显卡上（经 nvidia-run）：训练、CUDA 都能用；空闲 15 分钟自动关掉让显卡休眠。点一下改回只用 CPU":"内核只用 CPU。点一下换到显卡上（内核会重启，变量要重新算）")+'">'+svg("spark",12)+(d.gpu?" 显卡":" CPU")+'</button>':"")+
   '<span class="chip" title="Python 环境">'+esc(d.env||"default")+'</span><span class="grow"></span>'+
   button(svg("play",13)+" 全部运行","nb-run-all",'data-pid="'+pid+'"',"primary sm")+iconButton("stop","nb-interrupt","中断",'data-pid="'+pid+'"')+iconButton("refresh","nb-restart","重启内核（清空变量）",'data-pid="'+pid+'"')+'</div>'+

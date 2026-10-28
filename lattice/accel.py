@@ -1,7 +1,7 @@
 """What this computer has for computing beyond the CPU, and how to use it, found without waking anything.
 
-Everything here is read from sysfs, /dev and PATH: never nvidia-smi, lspci or a CUDA call, which can wake a sleeping
-GPU just to look at it. The result is a description agents read (which accelerator, its driver, how a run gets it,
+On Linux everything here is read from sysfs, /dev and PATH: never nvidia-smi, lspci or a CUDA call, which can wake a
+sleeping GPU just to look at it. Windows has no such files; there nvidia-smi, which comes with the driver, is asked. The result is a description agents read (which accelerator, its driver, how a run gets it,
 which build of a library fits) plus what the sandbox needs: which device nodes to let in, and the command a GPU run
 is wrapped in. Machines differ, so the launcher is a setting: "auto" picks one, or the learner (or an agent on their
 behalf) names the command that runs a program on the GPU here.
@@ -15,8 +15,11 @@ import platform
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 import time
+
+from . import host
 
 # The newest CUDA a driver can run, by the driver's major version (from NVIDIA's compatibility table).
 CUDA_BY_DRIVER = [(580, "13.0"), (575, "12.9"), (570, "12.8"), (560, "12.6"), (550, "12.4"), (535, "12.2"), (530, "12.1"), (525, "12.0"),
@@ -79,17 +82,12 @@ def detect(launcher="auto"):
         apple = platform.machine() == "arm64"
         found.append({"kind": "apple", "name": "Apple 芯片（Metal / MPS）" if apple else "Mac（Intel）", "usable": apple,
                       "torch": "PyPI 默认的 torch 就带 MPS：device='mps'" if apple else "Intel Mac 上 torch 只能用 CPU"})
+    if host.WINDOWS:
+        found += _windows_nvidia()
     for d in _pci():
         if d["vendor"] == "0x10de" and d["driver"] == "nvidia":
             driver = _read("/sys/module/nvidia/version") or (re.search(r"Kernel Module\s+(?:for\s+\S+\s+)?([\d.]+)", _read("/proc/driver/nvidia/version")) or [None, ""])[1]
-            cuda = _cuda_max(driver)
-            arch, needs = _arch(d["device"])
-            tags = [t for t in TORCH_CUDA if cuda and float(f"{t[2:-1]}.{t[-1]}") <= float(cuda) and (not needs or float(f"{t[2:-1]}.{t[-1]}") >= float(needs))]
-            found.append({"kind": "nvidia", "name": "NVIDIA " + (arch or "显卡") + f"（设备号 {d['device']}）", "driver": driver, "cuda_max": cuda,
-                          "usable": os.path.exists("/dev/nvidiactl"), "asleep": d["power"] == "suspended",
-                          "torch": (f"PyPI 默认的 torch 在 Linux 上自带较新的 CUDA 运行库，驱动支持到 CUDA {cuda} 时一般直接能用；要指定 CUDA 版本，"
-                                    f"install 的 index_url 用 https://download.pytorch.org/whl/<{'|'.join(tags[-3:]) or 'cuXYZ'}>（不超过驱动支持的版本"
-                                    + (f"，这块卡至少要 CUDA {needs}" if needs else "") + "）。装好后用 torch.cuda.is_available() 确认")})
+            found.append(_nvidia(d["device"], driver, os.path.exists("/dev/nvidiactl"), d["power"] == "suspended"))
         elif d["vendor"] == "0x1002" and d["driver"] == "amdgpu":
             found.append({"kind": "amd", "name": f"AMD 显卡（设备号 {d['device']}）", "usable": os.path.exists("/dev/kfd"),
                           "torch": "ROCm 版的 torch：index_url 用 https://download.pytorch.org/whl/rocmX.Y（按装的 ROCm 版本）；没有 /dev/kfd 说明没装 ROCm 驱动"})
@@ -106,6 +104,38 @@ def detect(launcher="auto"):
              "devices": _devices(best["kind"]) if best else [], "prefix": run or []}
     _cache.update(at=time.monotonic(), value=value)
     return value
+
+
+def _nvidia(device, driver, usable, asleep=False, name=None):
+    """An NVIDIA GPU as agents read it: which generation, the newest CUDA its driver runs, and which torch build fits."""
+    cuda = _cuda_max(driver)
+    arch, needs = _arch(device)
+    tags = [t for t in TORCH_CUDA if cuda and float(f"{t[2:-1]}.{t[-1]}") <= float(cuda) and (not needs or float(f"{t[2:-1]}.{t[-1]}") >= float(needs))]
+    index = (f"install 的 index_url 用 https://download.pytorch.org/whl/<{'|'.join(tags[-3:]) or 'cuXYZ'}>（不超过驱动支持的版本"
+             + (f"，这块卡至少要 CUDA {needs}" if needs else "") + "）")
+    torch = (f"Windows 上 PyPI 默认的 torch 只有 CPU 版，要用显卡必须装 CUDA 版：{index}。" if host.WINDOWS else
+             f"PyPI 默认的 torch 在 Linux 上自带较新的 CUDA 运行库，驱动支持到 CUDA {cuda} 时一般直接能用；要指定 CUDA 版本，{index}。")
+    return {"kind": "nvidia", "name": name or "NVIDIA " + (arch or "显卡") + f"（设备号 {device}）", "driver": driver, "cuda_max": cuda,
+            "usable": usable, "asleep": asleep, "torch": torch + "装好后用 torch.cuda.is_available() 确认"}
+
+
+def _windows_nvidia():
+    """NVIDIA GPUs as their driver's nvidia-smi lists them (Windows)."""
+    smi = shutil.which("nvidia-smi")
+    if not smi:
+        return []
+    try:
+        out = subprocess.run([smi, "--query-gpu=name,driver_version,pci.device_id", "--format=csv,noheader"], capture_output=True,
+                             text=True, timeout=15, **host.QUIET).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    found = []
+    for line in out.splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) == 3:
+            # pci.device_id reads 0xDDDDVVVV: the device id, then the vendor's.
+            found.append(_nvidia("0x" + parts[2][2:6].lower(), parts[1], True, name=f"NVIDIA {parts[0]}"))
+    return found
 
 
 def _launcher(best, setting):

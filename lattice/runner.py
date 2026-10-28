@@ -11,7 +11,6 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 import queue
-import shlex
 import shutil
 import subprocess
 import threading
@@ -19,7 +18,8 @@ import time
 
 from PySide6.QtCore import QThread, Signal
 
-from .sandbox import stop_group
+from . import host
+from .host import stop_group
 
 RUNNERS = {
     ".py": "{python} -u {file}",
@@ -67,7 +67,8 @@ def tool_hint(program):
 
 
 def command_for(template, path, python, scratch):
-    q = shlex.quote
+    """A runner's command line for one file, its paths quoted for the shell that runs it (host.runner_argv)."""
+    q = host.quote
     return template.format(file=q(str(path)), dir=q(str(Path(path).parent)), stem=q(Path(path).stem),
                            out=q(str(Path(scratch) / Path(path).stem)), python=q(str(python)))
 
@@ -109,7 +110,7 @@ class RunWorker(QThread):
             self.figures.mkdir(parents=True, exist_ok=True)
             self.emit("status", message="")
             self.proc = subprocess.Popen(self.argv, cwd=self.cwd, env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                         stderr=subprocess.PIPE, start_new_session=True)
+                                         stderr=subprocess.PIPE, **host.GROUP)
             pieces = queue.Queue()
 
             def pump(stream, name):

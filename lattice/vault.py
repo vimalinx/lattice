@@ -16,6 +16,8 @@ import subprocess
 
 import yaml
 
+from . import host
+
 VAULT_PATH = Path(os.environ.get("LATTICE_VAULT") or Path.home() / "Lattice")
 # Markdown kinds take their meaning from the folder they sit in; everything else is a plain file.
 MD_KINDS = {"topics": "topic", "cards": "card", "lessons": "lesson", "notes": "note", "insights": "insight"}
@@ -256,9 +258,13 @@ class Vault:
 
     # ---- history ---------------------------------------------------------------------
     def git(self, *args, check=True):
-        cmd = ["git", "-C", str(self.root), "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
-               "-c", "core.quotepath=false", *args]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        # No hooks (an empty folder of them), no signing, paths as they are (not escaped), and files as they are: line endings
+        # are never converted, so what an agent edits is what is committed.
+        hooks = self.root / ".lattice" / "no-hooks"
+        hooks.mkdir(parents=True, exist_ok=True)
+        cmd = [host.tool("git") or "git", "-C", str(self.root), "-c", f"core.hooksPath={hooks}", "-c", "commit.gpgsign=false",
+               "-c", "core.quotepath=false", "-c", "core.autocrlf=false", "-c", "core.safecrlf=false", *args]
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60, **host.QUIET)
         if check and result.returncode != 0:
             raise VaultError((result.stderr or result.stdout).strip()[:400] or "git 失败")
         return result.stdout

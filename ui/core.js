@@ -13,7 +13,7 @@ function fmtDate(iso,full=false){
  return full?d.toLocaleString("zh-CN",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):d.toLocaleDateString("zh-CN",{month:"short",day:"numeric"});
 }
 function shorten(t,n=70){t=String(t||"").replace(/\s+/g," ");return t.length>n?t.slice(0,n)+"…":t;}
-function baseName(p){return String(p||"").split("/").pop();}
+function baseName(p){return String(p||"").split(/[\\/]/).pop();}
 function svg(name,size=18){
  const paths={
   home:'<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-6v-7H10v7H4a1 1 0 0 1-1-1z"/>',

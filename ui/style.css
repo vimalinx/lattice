@@ -3,8 +3,8 @@
  --line:#29333f;--line-soft:#1e2731;--text:#e7edf2;--muted:#95a1af;--subtle:#7e8b99;
  --accent:#8bdcc5;--accent-ink:#12382f;--accent-glow:rgba(139,220,197,.1);--ai:#b5a8fa;--ai-glow:rgba(181,168,250,.09);
  --amber:#ecc994;--red:#f3a09b;--green:#86dbc0;--code-bg:#0b1016;--code-text:#c0e3dd;
- --shadow:0 18px 55px rgba(0,0,0,.28);--mono:"JetBrains Mono","Noto Sans Mono CJK SC",monospace;
- --sans:Inter,"Noto Sans CJK SC","Noto Sans",system-ui,sans-serif;
+ --shadow:0 18px 55px rgba(0,0,0,.28);--mono:"JetBrains Mono","Cascadia Mono",Consolas,"Noto Sans Mono CJK SC","Microsoft YaHei UI",monospace;
+ --sans:Inter,"Noto Sans CJK SC","Noto Sans","Microsoft YaHei UI","PingFang SC",system-ui,sans-serif;
  color-scheme:dark;font-family:var(--sans);
 }
 :root{--select-bg:rgba(123,214,188,.22);--active-line:rgba(255,255,255,.025);

@@ -17,7 +17,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from lattice.bridge import APP_HOME, Bridge
 from lattice import appscheme
 
-ROOT=Path(__file__).resolve().parent
+ROOT=appscheme.host.APP
 # Apps get a scheme of their own; it has to be known before the application object exists.
 appscheme.register()
 

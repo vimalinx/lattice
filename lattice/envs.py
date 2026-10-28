@@ -15,6 +15,8 @@ import shutil
 import subprocess
 import threading
 
+from . import host
+
 BASE = ["ipykernel", "numpy", "matplotlib"]
 # Import names whose package on PyPI is called something else.
 PACKAGES = {"cv2": "opencv-python", "sklearn": "scikit-learn", "PIL": "pillow", "yaml": "pyyaml", "bs4": "beautifulsoup4",
@@ -41,8 +43,9 @@ class EnvError(RuntimeError):
 class Envs:
     def __init__(self, vault, python=None):
         self.vault, self.root = vault, vault.root
-        self.uv = shutil.which("uv")
-        self.python_base = python or shutil.which("python3") or "python3"
+        self.uv = host.tool("uv")
+        # Without a Python of the system's own (Windows), uv brings one of its own the first time.
+        self.python_base = python or (None if host.WINDOWS else shutil.which("python3")) or "3.12"
         self.locks = {}
 
     def lock(self, name):
@@ -81,7 +84,7 @@ class Envs:
         return self.root / ".lattice" / "venvs" / name
 
     def python(self, name):
-        return self.venv(name) / "bin" / "python"
+        return host.venv_python(self.venv(name))
 
     def ready(self, name):
         return self.python(name).exists()
@@ -92,7 +95,8 @@ class Envs:
     def _run(self, args, timeout=900):
         if not self.uv:
             raise EnvError("没有找到 uv。安装方法：curl -LsSf https://astral.sh/uv/install.sh | sh，或用系统包管理器安装 uv")
-        proc = subprocess.run([self.uv, *args], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        proc = subprocess.run([self.uv, *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+                              stdin=subprocess.DEVNULL, **host.GROUP)
         if proc.returncode != 0:
             raise EnvError((proc.stderr or proc.stdout).strip()[-1500:] or "uv 失败")
         return proc.stdout + proc.stderr
@@ -127,8 +131,8 @@ class Envs:
         """uv with its output read as it comes, so a long install can say how far it is."""
         if not self.uv:
             raise EnvError("没有找到 uv。安装方法：curl -LsSf https://astral.sh/uv/install.sh | sh，或用系统包管理器安装 uv")
-        proc = subprocess.Popen([self.uv, *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL,
-                                start_new_session=True)
+        proc = subprocess.Popen([self.uv, *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+                                stdin=subprocess.DEVNULL, **host.GROUP)
         timer = threading.Timer(timeout, proc.kill)
         timer.start()
         lines, sizes, done = [], {}, set()

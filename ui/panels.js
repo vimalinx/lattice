@@ -314,7 +314,8 @@ const SETTINGS_RENDER={
    '<label>这个环境里的包（一行一个，可以带版本）<textarea rows="6" data-env-text>'+esc(env.wanted.join("\n"))+'</textarea></label>'+
    '<div class="inline"><input data-env-install placeholder="现在就装：包名，空格分开"/>'+button("安装","env-install","","ghost sm")+'</div>'+
    (env.installed.length?'<details><summary class="muted">已经装了 '+env.installed.length+' 个包</summary><p class="small muted">'+env.installed.map(x=>esc(x.name+" "+x.version)).join("、")+'</p></details>':""):"")+
-   '<h3>沙箱</h3><p class="'+(S.data.sandbox?.ok?"muted":"warn")+'">'+(S.data.sandbox?.ok?svg("shield",13)+" 沙箱可用（bubblewrap）。AI 的命令和运行都在里面：学习库可写，挂载的目录只读，看不到家目录的其余部分；能不能上网看上面「运行」里的开关。":esc(S.data.sandbox?.why||""))+'</p>'+
+   '<h3>沙箱</h3><p class="'+(S.data.sandbox?.ok?"muted":"warn")+'">'+(S.data.sandbox?.isolated?svg("shield",13)+" 沙箱可用（bubblewrap）。AI 的命令和运行都在里面：学习库可写，挂载的目录只读，看不到家目录的其余部分；能不能上网看上面「运行」里的开关。":
+    S.data.sandbox?.ok?svg("play",13)+" 这台电脑上没有沙箱：AI 的命令和运行用你的权限直接运行，能联网，也碰得到学习库以外的文件。它们改动的学习库文件照样一步一步记进历史，可以撤销。":esc(S.data.sandbox?.why||""))+'</p>'+
    '<label>沙箱里额外可见的只读路径 <small>一行一个，比如装在家目录里的工具链</small><textarea rows="2" data-cfg="sandbox_paths">'+esc((c.sandbox_paths||[]).join("\n"))+'</textarea></label>';
  },
  vault(c){

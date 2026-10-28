@@ -20,7 +20,8 @@ function renderStatus(){
  const busy=(S.data.busy||[]).length,running=(S.data.running||[]).length,topic=S.data.active_topic;
  bar.innerHTML=(topic?'<a data-action="open-doc" data-id="'+esc(topic)+'" title="正在学的主题">'+svg("map",12)+' '+esc(topicTitle(topic))+'</a>':'<span>'+svg("bot",12)+' 默认对话</span>')+
   (busy?'<span class="working">'+svg("bot",12)+' '+busy+' 个 AI 在工作</span>':"")+(running?'<span class="working">'+svg("play",12)+' '+running+' 个运行中</span>':"")+
-  '<span class="grow"></span>'+(S.data.sandbox?.ok?'<span title="AI 的命令和运行都在沙箱里">'+svg("shield",12)+' 沙箱</span>':'<span class="warn">'+svg("shield",12)+' 沙箱不可用</span>')+
+  '<span class="grow"></span>'+(S.data.sandbox?.isolated?'<span title="AI 的命令和运行都在沙箱里">'+svg("shield",12)+' 沙箱</span>':
+   S.data.sandbox?.ok?'<span title="这台电脑上没有沙箱：AI 的命令和运行用你的权限直接运行">'+svg("play",12)+' 直接运行</span>':'<span class="warn">'+svg("shield",12)+' 沙箱不可用</span>')+
   '<a data-action="open-vault" title="在系统里打开学习库">'+svg("folder",12)+' '+esc(S.data.vault||"")+'</a>';
 }
 function renderTop(){renderStatus();renderActivity();}

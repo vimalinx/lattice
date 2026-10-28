@@ -1,0 +1,102 @@
+# Lattice for Windows: the tests on Windows, then the build (a folder with Lattice.exe, uv and MinGit beside it), a
+# start of the built program that has to come up and draw its window, and the installer. A tag v* publishes a release.
+name: Windows
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - name: Tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+
+  build:
+    needs: test
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Version
+        shell: pwsh
+        run: |
+          $version = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "0.0.0-dev.${{ github.run_number }}" }
+          "VERSION=$version" >> $env:GITHUB_ENV
+      - run: pip install -r requirements.txt pyinstaller pillow
+      - name: Icon
+        run: python packaging/make_icon.py
+      - name: Lattice.exe
+        run: pyinstaller packaging/lattice.spec --noconfirm --distpath dist --workpath packaging/build/pyinstaller
+      - name: uv and MinGit beside it
+        shell: pwsh
+        run: |
+          $bin = "dist/Lattice/bin"
+          New-Item -ItemType Directory -Force $bin, packaging/build/tools | Out-Null
+          gh release download --repo astral-sh/uv --pattern "uv-x86_64-pc-windows-msvc.zip" --dir packaging/build/tools
+          Expand-Archive packaging/build/tools/uv-x86_64-pc-windows-msvc.zip -DestinationPath packaging/build/tools/uv
+          Copy-Item (Get-ChildItem packaging/build/tools/uv -Recurse -Filter uv.exe | Select-Object -First 1).FullName $bin
+          gh release download --repo git-for-windows/git --pattern "MinGit-*-64-bit.zip" --dir packaging/build/tools
+          $mingit = Get-ChildItem packaging/build/tools -Filter "MinGit-*-64-bit.zip" | Where-Object { $_.Name -notmatch "busybox" } | Select-Object -First 1
+          Expand-Archive $mingit.FullName -DestinationPath "$bin/git"
+          & "$bin/uv.exe" --version
+          & "$bin/git/cmd/git.exe" --version
+      - name: Start it once
+        shell: pwsh
+        run: |
+          $vault = Join-Path $env:RUNNER_TEMP "lattice-vault"
+          $env:LATTICE_VAULT = $vault
+          $shot = Join-Path $env:RUNNER_TEMP "lattice-windows.png"
+          Start-Process dist/Lattice/Lattice.exe -ArgumentList "--screenshot", $shot -Wait
+          if (-not (Test-Path $shot)) { throw "Lattice did not draw its window" }
+          if (-not (Test-Path (Join-Path $vault ".git"))) { throw "the vault was not set up with git" }
+          New-Item -ItemType Directory -Force smoke | Out-Null
+          Copy-Item $shot smoke/
+          Copy-Item "$env:LOCALAPPDATA/lattice/*.log" smoke/ -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke
+          path: smoke/
+      - name: Installer
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6"
+            if (-not (Test-Path "$iscc\ISCC.exe")) { choco install innosetup -y --no-progress }
+            $env:PATH = "$iscc;$env:PATH"
+          }
+          $languages = Join-Path (Split-Path (Get-Command iscc).Source) "Languages"
+          $chinese = Get-ChildItem $languages -Recurse -Filter ChineseSimplified.isl -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($chinese) { Copy-Item $chinese.FullName packaging/windows/ }
+          else { Invoke-WebRequest https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseSimplified.isl -OutFile packaging/windows/ChineseSimplified.isl }
+          iscc /DVersion=$env:VERSION packaging/windows/lattice.iss
+          Compress-Archive dist/Lattice/* "dist/Lattice-$env:VERSION-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lattice-${{ env.VERSION }}-windows
+          path: |
+            dist/Lattice-*-setup.exe
+            dist/Lattice-*-windows-x64.zip
+      - name: Release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: gh release create "${{ github.ref_name }}" (Get-ChildItem dist/Lattice-*-setup.exe).FullName (Get-ChildItem dist/Lattice-*-windows-x64.zip).FullName --title "Lattice ${{ github.ref_name }}" --generate-notes

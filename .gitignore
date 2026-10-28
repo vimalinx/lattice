@@ -4,3 +4,8 @@ __pycache__/
 .benchmarks/
 runtime/node_modules/
 releases/
+
+# Windows build (packaging/)
+packaging/build/
+packaging/windows/ChineseSimplified.isl
+dist/

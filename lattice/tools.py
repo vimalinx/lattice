@@ -16,7 +16,7 @@ import shlex
 import time
 from pathlib import Path
 
-from . import agents
+from . import agents, host
 from . import skills as skillbook
 from .model import AGENT_RECORDS, CARD_TYPES, LINK_KINDS, readable_outputs, text, title_of
 from .vault import APPEND_ONLY, KEPT, ME, kind_of, now, slug, split_frontmatter
@@ -320,8 +320,16 @@ def due(ctx):
 
 # ---- the shell ------------------------------------------------------------------------------------
 
-@tool("shell", {"tutor", "coach", "organizer", "builder"}, "在沙箱里运行一条 bash 命令，工作目录是学习库：用来查看、搜索、分析和按规矩组织文件（ls、rg、cat、head、git log、python…）。学习库可写，挂载的外部目录只读，看不到家目录的其余部分。"
-      "能上互联网（经过 Lattice 的代理：pip、requests、curl、git、下载数据集都行；连不了这台电脑和局域网，结果里会列出访问了哪些网站）；下载的模型和数据集缓存在 .lattice/cache，超过 50MB 的新文件留在学习库里但不进历史。Python 用学习库的环境。命令有时限，输出过长会截断。命令改动的文件会作为一次可撤销的操作提交；改到只归学习者的部分会被自动退回。"
+# Where an agent's commands run here, as its tools describe it.
+WHERE = ("在沙箱里运行一条 bash 命令，工作目录是学习库：用来查看、搜索、分析和按规矩组织文件（ls、rg、cat、head、git log、python…）。学习库可写，挂载的外部目录只读，看不到家目录的其余部分。"
+         "能上互联网（经过 Lattice 的代理：pip、requests、curl、git、下载数据集都行；连不了这台电脑和局域网，结果里会列出访问了哪些网站）；"
+         if not host.WINDOWS else
+         f"在这台 Windows 电脑上运行一条 {host.shell_name()} 命令（按这个 shell 的语法写），工作目录是学习库：用来查看、搜索、分析和按规矩组织文件、跑 python。"
+         "这里没有沙箱：命令用学习者的权限运行，能联网，也碰得到学习库以外的文件，所以只动学习库里的东西；")
+
+
+@tool("shell", {"tutor", "coach", "organizer", "builder"}, WHERE +
+      "下载的模型和数据集缓存在 .lattice/cache，超过 50MB 的新文件留在学习库里但不进历史。Python 用学习库的环境。命令有时限，输出过长会截断。命令改动的文件会作为一次可撤销的操作提交；改到只归学习者的部分会被自动退回。"
       "要用 NVIDIA 显卡（CUDA、torch.cuda…）时 gpu 设为 true：这条命令运行时显卡被唤醒、结束就回到休眠；不需要显卡时别设。",
       {"command": S, "timeout": I, "gpu": {"type": "boolean"}}, ["command"])
 def shell(ctx, command, timeout=None, gpu=False):
@@ -796,7 +804,7 @@ def write_cell(ctx, source, kind="code", notebook=None, cell=None, after=None):
     return {"notebook": rel, "cell": ident}
 
 
-@tool("run", {"tutor", "coach", "builder"}, "运行一个文件并等它结束，取回真实输出：.py、.ipynb（cells 指定单元格，不给就全部）、.c、.cpp、.rs、.go、.js、.ts、.sh 等。在沙箱里执行（能上互联网，连不了这台电脑和局域网）；缺 Python 包时会自动装上再跑一次。学习者关掉了「允许 AI 运行代码」时会拒绝，这时请学习者自己点运行。"
+@tool("run", {"tutor", "coach", "builder"}, "运行一个文件并等它结束，取回真实输出：.py、.ipynb（cells 指定单元格，不给就全部）、.c、.cpp、.rs、.go、.js、.ts、.sh 等。" + ("在沙箱里执行（能上互联网，连不了这台电脑和局域网）" if not host.WINDOWS else "直接用学习者的权限运行（这台 Windows 电脑上没有沙箱）") + "；缺 Python 包时会自动装上再跑一次。学习者关掉了「允许 AI 运行代码」时会拒绝，这时请学习者自己点运行。"
       "要用 NVIDIA 显卡（训练、CUDA）时 gpu 设为 true：显卡只在这次运行时被唤醒，结束就回到休眠；实验笔记会换到用显卡的内核（之前的变量没了），"
       "这个内核空闲 15 分钟后自动关掉。训练这类跑得久的，用 timeout 给够秒数（最多 3600）。",
       {"file": S, "cells": LIST, "gpu": {"type": "boolean"}, "timeout": I}, ["file"])

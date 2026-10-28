@@ -67,6 +67,19 @@ python3 run.py
 
 需要 Python 3.11+、PySide6（含 QtWebEngine）、jupyter_client、ipykernel、httpx、PyYAML、numpy、matplotlib；运行代码和 AI 沙箱另需 [`uv`](https://github.com/astral-sh/uv) 与 `bubblewrap`。编译型语言按需安装（gcc、rustc、go、node……），缺什么运行时会直接告诉你。目前主要在 Arch Linux / Wayland 上开发和测试。
 
+### Windows
+
+到 [Releases](https://github.com/vimalinx/lattice/releases) 下载 `Lattice-<版本>-setup.exe` 安装（装在你自己的用户目录下，不需要管理员权限），或者下载 zip 解压直接运行 `Lattice.exe`。安装包里带着 git 和 uv，不需要另外装 Python：第一次运行代码时 uv 会下载一份自己的 Python 来建学习库的环境。
+
+和 Linux 版的不同：
+
+- **没有沙箱。** AI 的命令和运行用你的权限直接运行，能联网，也碰得到学习库以外的文件；它改动的学习库文件照样一步一步记进历史、可以撤销。状态栏显示「直接运行」。
+- **AI 的命令用什么 shell。** 装了 Git for Windows 就用它带的 bash，否则用 PowerShell；AI 从界面信息里知道是哪一个，按它的写法写命令。运行器的命令在 `cmd` 里执行，`.sh` 文件需要 Git Bash。
+- 显卡用驱动自带的 `nvidia-smi` 识别；Windows 上 PyPI 默认的 torch 只有 CPU 版，AI 会按显卡装 CUDA 版。
+- 设置和日志在 `%APPDATA%\lattice`、`%LOCALAPPDATA%\lattice`，学习库默认还是用户目录下的 `Lattice`。
+
+Windows 版由 GitHub Actions 构建（`.github/workflows/windows.yml`）：每次推到 main 都在 Windows 上跑测试、打包、真正启动一次打好的程序并截图（结果在 Actions 的 artifacts 里）；推一个 `v*` 标签就发布安装包和 zip。打包配置在 `packaging/`：`lattice.spec`（PyInstaller）和 `windows/lattice.iss`（Inno Setup）。
+
 ## 详细说明
 
 ### 界面

@@ -16,10 +16,12 @@ import re
 from urllib.parse import parse_qs
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+
+from . import host
 from PySide6.QtWebEngineCore import QWebEngineUrlRequestInterceptor, QWebEngineUrlRequestJob, QWebEngineUrlScheme, QWebEngineUrlSchemeHandler
 
 SCHEME = b"lattice-app"
-VENDOR = Path(__file__).resolve().parents[1] / "ui" / "vendor"
+VENDOR = host.APP / "ui" / "vendor"
 # The look Lattice is in, handed to each app as these variables (see the app-design skill).
 LOOK = ("bg", "panel", "panel-hi", "surface", "surface-hover", "line", "line-soft", "text", "muted", "subtle", "accent", "accent-ink",
         "accent-glow", "ai", "ai-glow", "amber", "red", "green", "code-bg", "code-text", "shadow", "mono", "sans")

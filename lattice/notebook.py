@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import os
 from pathlib import Path
 import queue
 import threading
@@ -16,6 +17,8 @@ import time
 import uuid
 
 from PySide6.QtCore import QThread, Signal
+
+from . import host
 
 LOG = logging.getLogger("lattice")
 MAX_OUTPUT = 8_000_000
@@ -72,7 +75,8 @@ class NotebookWorker(QThread):
                 command = [python, "-m", "ipykernel_launcher", "-f", self.connection_file]
                 return wrap(command) if wrap else command
         options = {}
-        if self.sockets:
+        # Unix sockets where there are (a private folder, never loopback TCP); Windows has only TCP on loopback.
+        if self.sockets and not host.WINDOWS:
             Path(self.sockets).mkdir(parents=True, exist_ok=True)
             options = {"transport": "ipc", "ip": str(Path(self.sockets) / self.epoch[:8]),
                        "connection_file": str(Path(self.sockets) / (self.epoch[:8] + ".json"))}
@@ -82,7 +86,7 @@ class NotebookWorker(QThread):
             self.km.shutdown_wait_time = 25
         # Interrupts travel as a message, so they reach a kernel inside the sandbox too.
         self.km._kernel_spec = KernelSpec(argv=[], display_name="Python", language="python", interrupt_mode="message", env={})
-        self.km.start_kernel(cwd=str(self.directory))
+        self.km.start_kernel(cwd=str(self.directory), **({"env": {**os.environ, **host.UTF8}, **host.QUIET} if host.WINDOWS else {}))
         self.client = self.km.blocking_client()
         self.client.start_channels()
         self.client.wait_for_ready(timeout=30)
