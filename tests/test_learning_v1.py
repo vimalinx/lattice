@@ -1,5 +1,6 @@
 """Deterministic persistence, ownership and configuration acceptance tests."""
 import json
+import os
 from pathlib import Path
 import stat
 import sys
@@ -18,8 +19,8 @@ def model(tmp_path):
 def test_files_are_the_truth_and_the_index_rebuilds(model):
     note=model.docs('note')[0]
     assert model.vault.read_md(note['path'])[1]=='不能丢失'
-    (model.root/'.lattice'/'index.db').unlink()
     model.db.close()
+    (model.root/'.lattice'/'index.db').unlink()
     again=Lattice(model.root)
     assert again.docs('note')[0]['body']=='不能丢失'
     again.db.close()
@@ -90,7 +91,7 @@ def test_config_private_permissions_masking_and_url(tmp_path,monkeypatch):
     c=Config(tmp_path/'providers.json')
     public=c.save({'apis':{'commandcode':{'api_key':'sk-not-a-real-key','base_url':'http://127.0.0.1:1234/v1','extra_body':{}}}})
     assert public['agents']['tutor']['ready'] and 'sk-not-a-real-key' not in json.dumps(public)
-    assert stat.S_IMODE(c.path.stat().st_mode)==0o600
+    if os.name!='nt':assert stat.S_IMODE(c.path.stat().st_mode)==0o600
     c.save({'apis':{'commandcode':{'api_key':''}}});assert c.key('commandcode')=='sk-not-a-real-key'
     c.save({'apis':{'commandcode':{'clear_key':True}}});assert not c.key('commandcode')
     with pytest.raises(ValueError):c.save({'apis':{'commandcode':{'base_url':'https://user:pass@evil.example'}}})

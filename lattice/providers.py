@@ -460,14 +460,16 @@ class Config:
         apis = {k: _changed(k, v) for k, v in updated.get("apis", {}).items() if k != LOCALROUTER}
         updated = {**updated, "apis": {k: v for k, v in apis.items() if len(v) > 1 or k not in PRESETS}}
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Readable by this user only, where files have permission bits (on Windows it sits in the user's own profile).
         tmp = self.path.with_name(self.path.name + ".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
+            with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as f:
+                if not host.WINDOWS:
+                    os.fchmod(f.fileno(), 0o600)
                 f.write(json.dumps(updated, ensure_ascii=False, indent=2))
             os.replace(tmp, self.path)
-            self.path.chmod(0o600)
+            if not host.WINDOWS:
+                self.path.chmod(0o600)
         except Exception:
             tmp.unlink(missing_ok=True)
             raise
