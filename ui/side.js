@@ -10,13 +10,13 @@ const SIDE_SECTIONS={
  lessons:{title:"课程",icon:"book",render:lessonsSection},
  work:{title:"实验与代码",icon:"flask",render:workSection},
  practice:{title:"练习与薄弱点",icon:"code",render:practiceSection},
- files:{title:"全部文件",icon:"folder",render:filesSection},
+ files:{title:"文件",icon:"folder",render:filesSection},
  search:{title:"搜索",icon:"search",render:searchSection},
  skills:{title:"技能",icon:"store",render:()=>skillsSection()},
 };
 // Things that belong to a list live in its header (知识图 under 主题, 回顾 under 知识卡); only the rest sit at the bottom.
 const SIDE_LAUNCH=[["search","搜索 · Ctrl K","palette"],["history","学习轨迹","open-journal"],["home","开始","open-home"]];
-const Side={entries:{},open:new Set(["code","notebooks","data"]),topicOpen:new Set(),topicShut:new Set(),archOpen:new Set(),query:"",hits:null,stage:"",cardQuery:""};
+const Side={entries:{},fileMap:null,fileQuery:"",fileOpen:new Set(),fileShut:new Set(),open:new Set(["code","notebooks","data"]),topicOpen:new Set(),topicShut:new Set(),archOpen:new Set(),query:"",hits:null,stage:"",cardQuery:""};
 function renderActivity(){
  const bar=el("#activity");if(!bar)return;
  bar.innerHTML='<div class="act-logo" title="Lattice">'+logo()+'</div>'+
@@ -110,8 +110,47 @@ function practiceSection(){
   sideGroup("主会话正在留意的薄弱点",weak.map(i=>sideRow("bulb",i.title,'data-action="open-doc" data-id="'+esc(i.id)+'"',"",'<button class="row-btn" data-action="insight-resolve" data-id="'+esc(i.id)+'" title="已克服">'+svg("check",12)+'</button>')),"还没有。")+
   sideGroup("做过的",ps.filter(p=>p.state==="done").map(row))};
 }
+/* Every file by where it came up: under its topic, in the conversations it was written, changed, opened, attached,
+   noted or built in; the rest by folder. A filter finds a file by name and says where it belongs. The folders as
+   they are on disk are one switch away. */
 async function filesSection(){
- return {tools:iconButton("link","project-add","挂载一个本地目录（AI 只读）")+iconButton("folder","open-vault","在系统里打开学习库"),body:await treeRows("",0)};
+ const folders=S.ui.files_view==="folders";
+ const tools=iconButton(folders?"map":"list","files-view",folders?"按主题和会话看":"按文件夹看")+iconButton("link","project-add","挂载一个本地目录（AI 只读）")+iconButton("external","open-vault","在系统里打开学习库");
+ if(folders)return {tools,body:await treeRows("",0)};
+ if(!Side.fileMap)Side.fileMap=await safe(()=>rpc("file_map"))||{topics:[],loose:[]};
+ const m=Side.fileMap,q=Side.fileQuery.trim().toLowerCase();
+ const input='<input class="side-input" data-side-input="files" placeholder="按文件名找…" value="'+esc(Side.fileQuery)+'"/>';
+ const row=(f,depth)=>sideRow(fileIcon(f.path),f.title,'data-action="open-file" data-path="'+esc(f.path)+'" style="--d:'+depth+'"',esc(fmtDate(f.at)));
+ if(q){
+  // Each file once, with every place it came up.
+  const found=new Map(),add=(f,where)=>{if(!(f.title+" "+f.path).toLowerCase().includes(q))return;const x=found.get(f.path)||{f,where:[]};if(!x.where.includes(where))x.where.push(where);found.set(f.path,x);};
+  for(const t of m.topics){for(const c of t.threads)c.files.forEach(f=>add(f,t.title+" › "+c.title));t.files.forEach(f=>add(f,t.title));}
+  for(const g of m.loose)g.files.forEach(f=>add(f,"没有归属 · "+(FOLDER_NAME[g.folder]||g.folder||"学习库根目录")));
+  const hits=[...found.values()].sort((a,b)=>a.f.at<b.f.at?1:-1).slice(0,200);
+  return {tools,body:input+(hits.map(x=>row(x.f,0)+'<p class="side-excerpt">'+esc(shorten(x.where.join("；"),120))+'</p>').join("")||'<p class="side-empty">没有找到。</p>')};
+ }
+ const open=(key,first)=>Side.fileOpen.has(key)||(first&&!Side.fileShut.has(key));
+ const fold=(key,on,icon,title,count,depth)=>sideRow(on?"chevrondown":icon,title,'data-action="files-fold" data-key="'+esc(key)+'" data-on="'+(on?1:0)+'" style="--d:'+depth+'"',String(count));
+ // Within a conversation or a topic, the files worked on come first; the many cards noted along the way are folded.
+ const listed=(key,files,depth)=>{const cards=files.filter(f=>f.kind==="card"),rest=files.filter(f=>f.kind!=="card");
+  let out=rest.map(f=>row(f,depth)).join("");
+  if(cards.length){const on=open("k:"+key,!rest.length);out+=fold("k:"+key,on,"card","记下的知识卡",cards.length,depth);if(on)out+=cards.map(f=>row(f,depth+1)).join("");}
+  return out;};
+ let body="";
+ for(const t of m.topics){
+  const count=new Set([...t.files,...t.threads.flatMap(c=>c.files)].map(f=>f.path)).size,on=open("t:"+t.id,t.active);
+  body+=fold("t:"+t.id,on,t.id?"map":"bot",t.title,count,0);
+  if(!on)continue;
+  t.threads.forEach((c,i)=>{const cOn=open("c:"+c.id,c.current||(i===0&&!t.threads.some(x=>x.current)));
+   body+=fold("c:"+c.id,cOn,"bot",c.title,c.files.length,1);if(cOn)body+=listed(c.id,c.files,2);});
+  if(t.files.length){const oOn=open("o:"+t.id,!t.threads.length);body+=fold("o:"+t.id,oOn,"folder",t.threads.length?"不在某段会话里的":"这个主题的文件",t.files.length,1);if(oOn)body+=listed("o"+t.id,t.files,2);}
+ }
+ if(m.loose.length){
+  const on=open("loose",!m.topics.length),total=m.loose.reduce((n,g)=>n+g.files.length,0);
+  body+=fold("loose",on,"folder","没有归属的文件",total,0);
+  if(on)for(const g of m.loose){const gOn=open("f:"+g.folder,false);body+=fold("f:"+g.folder,gOn,"folder",FOLDER_NAME[g.folder]||g.folder||"学习库根目录",g.files.length,1);if(gOn)body+=g.files.map(f=>row(f,2)).join("");}
+ }
+ return {tools,body:input+(body||'<p class="side-empty">还没有文件。</p>')};
 }
 function searchSection(){
  return {tools:iconButton("cmd","palette","命令 · Ctrl K"),body:'<input class="side-input" data-side-input="search" placeholder="搜标题、正文、文件名和以往对话…" value="'+esc(Side.query)+'"/>'+
@@ -133,11 +172,13 @@ async function treeRows(path,depth){
 }
 const FOLDER_NAME={topics:"主题",cards:"知识卡",lessons:"课程",notes:"笔记",insights:"薄弱点",notebooks:"实验笔记",code:"代码",data:"数据",envs:"环境",threads:"对话",journal:"轨迹",agents:"AI 的规则",skills:"技能"};
 function sideChanged(paths){
+ Side.fileMap=null;
  for(const path of paths||[]){const parts=path.split("/");for(let i=0;i<parts.length;i++)delete Side.entries[parts.slice(0,i).join("/")];}
  clearTimeout(Side.timer);Side.timer=setTimeout(()=>safe(renderSide),300);
 }
 function sideInput(t){
  if(t.dataset.sideInput==="cards"){Side.cardQuery=t.value;renderSide();return true;}
+ if(t.dataset.sideInput==="files"){Side.fileQuery=t.value;renderSide();return true;}
  if(t.dataset.sideInput==="notes"){Notes.query=t.value;renderSide();return true;}
  if(t.dataset.sideInput==="skills"){SkillSide.query=t.value;renderSide();return true;}
  if(t.dataset.sideInput==="search"){Side.query=t.value;clearTimeout(Side.stimer);Side.stimer=setTimeout(async()=>{Side.hits=t.value.trim()?await safe(()=>rpc("search",{query:t.value})):null;renderSide();},300);return true;}

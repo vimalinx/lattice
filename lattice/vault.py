@@ -22,6 +22,7 @@ MD_KINDS = {"topics": "topic", "cards": "card", "lessons": "lesson", "notes": "n
 FOLDERS = (*MD_KINDS, "notebooks", "code", "data", "envs", "threads", "journal")
 SKIP_DIRS = {".git", ".lattice", "__pycache__", "node_modules", ".venv", "venv", "target", ".ipynb_checkpoints"}
 IGNORED = """.lattice/index.db*
+.lattice/cache/
 .lattice/settings.json
 .lattice/state.json
 .lattice/runs/
@@ -85,6 +86,9 @@ def join_frontmatter(attrs, body):
 
 class VaultError(ValueError):
     pass
+
+
+LARGE = 50_000_000   # bytes; new files bigger than this are not committed
 
 
 class Vault:
@@ -270,7 +274,15 @@ class Vault:
         return out
 
     def commit(self, message, actor="me"):
-        """Commit everything changed; returns the commit id, or None when nothing changed."""
+        """Commit everything changed; returns the commit id, or None when nothing changed. A new file over 50MB (a
+        downloaded dataset, a model's weights) stays in the vault but out of its history."""
+        large = [rel for rel in self.git("ls-files", "--others", "--exclude-standard", "-z").split("\0")
+                 if rel and (self.root / rel).is_file() and (self.root / rel).stat().st_size > LARGE]
+        if large:
+            exclude = self.root / ".git" / "info" / "exclude"
+            exclude.parent.mkdir(parents=True, exist_ok=True)
+            with exclude.open("a", encoding="utf-8") as f:
+                f.write("".join("/" + rel.replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?").replace("[", "\\[") + "\n" for rel in large))
         self.git("add", "-A")
         if not self.git("status", "--porcelain").strip():
             self.pending.clear()

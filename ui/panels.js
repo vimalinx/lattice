@@ -219,6 +219,7 @@ const SETTINGS_RENDER={
   const u=S.ui;
   return themeSettings()+'<h3>外观</h3><div class="three"><label>深色还是浅色<select data-ui="theme">'+opt(u.theme,[["dark","深色"],["light","浅色"]])+'</select></label>'+
    '<label>正文字号<input type="number" step="0.5" min="11" max="24" data-ui="font_size" value="'+esc(u.font_size)+'"/></label>'+
+   '<label>笔记字号<input type="number" step="0.5" min="12" max="28" data-ui="note_font_size" value="'+esc(u.note_font_size??16)+'"/></label>'+
    '<label>代码字号<input type="number" step="0.5" min="10" max="24" data-ui="code_font_size" value="'+esc(u.code_font_size)+'"/></label></div>'+
    '<div class="three"><label>行距<input type="number" step="0.05" min="1.3" max="2.4" data-ui="line_height" value="'+esc(u.line_height)+'"/></label>'+
    '<label>密度<select data-ui="density">'+opt(u.density,[["comfortable","舒适"],["compact","紧凑"]])+'</select></label></div>'+
@@ -295,7 +296,8 @@ const SETTINGS_RENDER={
  async run(c){
   const env=await rpc("env_info",{name:Settings.env||"default"}).catch(()=>null),acc=await rpc("accelerator").catch(()=>null);
   const rows=Object.keys({...c.default_runners,...c.runners}).sort().map(ext=>'<div class="runner-row"><code>'+esc(ext)+'</code><input data-runner="'+esc(ext)+'" value="'+esc(c.runners[ext]??"")+'" placeholder="'+esc(c.default_runners[ext]||"")+'"/></div>').join("");
-  return '<h3>运行</h3><label class="check"><input type="checkbox" data-cfg="agent_auto_run"'+(c.agent_auto_run?" checked":"")+'/> 允许 AI 自己运行代码和命令 <small>都在沙箱里：看不到家目录，不联网</small></label>'+
+  return '<h3>运行</h3><label class="check"><input type="checkbox" data-cfg="agent_auto_run"'+(c.agent_auto_run?" checked":"")+'/> 允许 AI 自己运行代码和命令 <small>都在沙箱里：看不到家目录和你的其他文件</small></label>'+
+   '<label class="check"><input type="checkbox" data-cfg="agent_network"'+(c.agent_network!==false?" checked":"")+'/> 沙箱可以上网 <small>经过 Lattice 的代理：能装包下载、拉数据集、调网上的接口，连不了这台电脑和局域网；访问了哪些网站记在学习轨迹里。改了之后新开的运行和内核才按新的来</small></label>'+
    '<label class="check"><input type="checkbox" data-cfg="gpu"'+(c.gpu!==false?" checked":"")+'/> 允许用显卡计算 <small>AI 需要时（训练、CUDA）和你运行导入了 torch / jax 之类的 Python 时用；实验笔记的内核可以单独切到显卡，空闲 15 分钟自动关掉</small></label>'+
    (acc?'<div class="accel-box"><div class="field-label">这台电脑 <small>自动识别，不会唤醒显卡；AI 装 torch 之类的库时按这个选版本</small></div>'+
     (acc.accelerators.length?acc.accelerators.map(a=>'<div class="accel-row'+(a.kind===acc.preferred?" on":"")+'">'+svg(a.kind===acc.preferred?"check":"spark",13)+'<b>'+esc(a.name)+'</b>'+
@@ -312,7 +314,7 @@ const SETTINGS_RENDER={
    '<label>这个环境里的包（一行一个，可以带版本）<textarea rows="6" data-env-text>'+esc(env.wanted.join("\n"))+'</textarea></label>'+
    '<div class="inline"><input data-env-install placeholder="现在就装：包名，空格分开"/>'+button("安装","env-install","","ghost sm")+'</div>'+
    (env.installed.length?'<details><summary class="muted">已经装了 '+env.installed.length+' 个包</summary><p class="small muted">'+env.installed.map(x=>esc(x.name+" "+x.version)).join("、")+'</p></details>':""):"")+
-   '<h3>沙箱</h3><p class="'+(S.data.sandbox?.ok?"muted":"warn")+'">'+(S.data.sandbox?.ok?svg("shield",13)+" 沙箱可用（bubblewrap）。AI 的命令和运行都在里面：学习库可写，挂载的目录只读，看不到家目录的其余部分，不联网。":esc(S.data.sandbox?.why||""))+'</p>'+
+   '<h3>沙箱</h3><p class="'+(S.data.sandbox?.ok?"muted":"warn")+'">'+(S.data.sandbox?.ok?svg("shield",13)+" 沙箱可用（bubblewrap）。AI 的命令和运行都在里面：学习库可写，挂载的目录只读，看不到家目录的其余部分；能不能上网看上面「运行」里的开关。":esc(S.data.sandbox?.why||""))+'</p>'+
    '<label>沙箱里额外可见的只读路径 <small>一行一个，比如装在家目录里的工具链</small><textarea rows="2" data-cfg="sandbox_paths">'+esc((c.sandbox_paths||[]).join("\n"))+'</textarea></label>';
  },
  vault(c){

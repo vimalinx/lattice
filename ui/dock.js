@@ -105,6 +105,8 @@ function targetStack(side){
  return s;
 }
 function openPanel(params,opts={}){
+ // From a separate window, whatever else is opened opens in the main window.
+ if(WINDOW){const own=findPanel(params);if(own){activate(own);opts.then?.(own);return own;}safe(()=>rpc("open_in_main",{params}));return null;}
  let pid=opts.reuse===false?null:findPanel(params);
  // Already a tab behind a conversation that is on show: bring it out to a free group rather than hide the conversation.
  if(pid&&params.type!=="chat"){const s=stackOf(pid);if(s&&s.active!==pid&&covers(s)){detach(pid);tidy();}}
@@ -139,6 +141,27 @@ function unmountPanel(pid){
  if(type?.unmount)safe(()=>type.unmount(p||{},node));
  node?.remove();
 }
+/* A panel taken out into a window of its own, to make it big or put it on another screen. It leaves this window as it
+   is (its typing written out first); closing that window puts it back. */
+async function toWindow(pid){
+ const p=Dock.panels[pid];if(!p)return;
+ if(Files[pid])await flushFile(pid);
+ // Where to put it back: its group and place, or, a floating one, the floating window as it was.
+ const f=Dock.layout.floats.find(x=>x.stack.tabs.includes(pid));
+ const origin={...placeOf(pid),space:Dock.space,...(f?{float:{x:f.x,y:f.y,w:f.w,h:f.h}}:{})};
+ await rpc("window_open",{params:p,title:panelTitle(pid),origin});
+ detach(pid);unmountPanel(pid);tidy();renderDock();saveLayout();
+}
+// A panel back from its own window, where it was.
+function fromWindow(params,origin={}){
+ if(!params?.type||!Dock.types[params.type])return;
+ const found=findPanel(params);if(found)return activate(found);
+ const pid=newId("p");Dock.panels[pid]=params;mountPanel(pid);
+ if(origin.float){Dock.layout.floats.push({id:newId("f"),...origin.float,stack:stackNode([pid]),origin:{stack:origin.stack,index:origin.index}});tidy();renderDock();saveLayout();return activate(pid);}
+ dockAt(pid,origin);
+}
+let windowTitleShown="";
+function windowTitle(title){if(title!==windowTitleShown){windowTitleShown=title;safe(()=>rpc("window_title",{window:WINDOW,title}));}}
 function mountPanel(pid){
  const p=Dock.panels[pid],type=Dock.types[p.type];
  const node=document.createElement("div");node.className="panel panel-"+p.type;node.dataset.pid=pid;
@@ -146,11 +169,26 @@ function mountPanel(pid){
  if(type)safe(()=>type.mount(p,node,pid));else node.innerHTML=emptyState("info","这个面板打不开","面板类型 "+p.type+" 不存在。");
 }
 function float(pid){
+ const origin=placeOf(pid);
  detach(pid);
  const rect=el("#dock").getBoundingClientRect();
- Dock.layout.floats.push({id:newId("f"),x:Math.round(rect.width*.25),y:70,w:Math.round(Math.max(480,Math.min(760,rect.width*.5))),h:Math.round(rect.height*.7),stack:stackNode([pid])});
+ Dock.layout.floats.push({id:newId("f"),x:Math.round(rect.width*.25),y:70,w:Math.round(Math.max(480,Math.min(760,rect.width*.5))),h:Math.round(rect.height*.7),stack:stackNode([pid]),origin});
  tidy();renderDock();saveLayout();
 }
+// Where a panel sits among the docked groups (a floating one: where it was before it floated), to go back there.
+function placeOf(pid){
+ const f=Dock.layout.floats.find(x=>x.stack.tabs.includes(pid));if(f)return f.origin||{};
+ const s=stackOf(pid);return s?{stack:s.id,index:s.tabs.indexOf(pid)}:{};
+}
+// Back into the group it came from, at its place among the tabs (or wherever its kind opens, if that group is gone).
+function dockAt(pid,origin){
+ let target=origin?.stack&&findStack(origin.stack);
+ if(!target||Dock.layout.floats.some(f=>f.stack===target))target=targetStack(sideOf(pid));
+ detach(pid);
+ target.tabs.splice(origin?.index>=0?Math.min(origin.index,target.tabs.length):target.tabs.length,0,pid);target.active=pid;
+ tidy();renderDock();saveLayout();activate(pid);
+}
+function unfloat(pid){const f=Dock.layout.floats.find(x=>x.stack.tabs.includes(pid));dockAt(pid,f?.origin);}
 /* Size: each kind of panel has a default in the settings; a window can set its own, kept in the layout.
    Line height and reading width likewise fall back to the settings unless the window sets its own. */
 const VIEW_KEYS=["line_height","read_width","composer"];
@@ -186,6 +224,7 @@ function stepZoom(pid,dir){const p=Dock.panels[pid];if(p)setZoom(pid,dir?zoomOf(
 function zoomBadge(pid){const p=Dock.panels[pid];return p?.zoom?Math.round(p.zoom*100)+"%":"";}
 function panelTitle(pid){const p=Dock.panels[pid];return Dock.types[p.type]?.title(p,Dock.els[pid])||p.type;}
 function refreshTab(pid){
+ if(WINDOW&&Dock.panels[pid])windowTitle(panelTitle(pid));
  const tab=el('.tab[data-pid="'+pid+'"] .tab-title');if(!tab)return;
  const p=Dock.panels[pid];tab.textContent=panelTitle(pid);
  const badge=tab.parentElement.querySelector(".tab-zoom");if(badge)badge.textContent=zoomBadge(pid);
@@ -248,10 +287,13 @@ function stackEl(s,floating=null){
   const p=Dock.panels[pid],type=Dock.types[p?.type]||{};
   bar.appendChild(h('<div class="tab'+(pid===s.active?" active":"")+(type.side==="ai"?" ai":"")+'" draggable="true" data-pid="'+pid+'" title="'+esc(panelTitle(pid))+'">'+
    svg(typeof type.icon==="function"?type.icon(p):type.icon||"file",13)+'<span class="tab-title">'+esc(panelTitle(pid))+'</span><small class="tab-zoom" title="这个窗口单独调过大小；右键标签可以恢复">'+zoomBadge(pid)+'</small>'+
-   (floating?"":'<button class="tab-btn" data-action="dock-float" data-pid="'+pid+'" title="浮出">'+svg("float",12)+'</button>')+
+   (WINDOW?"":floating?'<button class="tab-btn" data-action="dock-unfloat" data-pid="'+pid+'" title="放回原处">'+svg("undo",12)+'</button>'+
+    '<button class="tab-btn" data-action="dock-window" data-pid="'+pid+'" title="放大成单独的窗口（能拖到别的屏幕）">'+svg("external",12)+'</button>':
+    '<button class="tab-btn" data-action="dock-float" data-pid="'+pid+'" title="浮出">'+svg("float",12)+'</button>')+
    '<button class="tab-btn" data-action="dock-close" data-pid="'+pid+'" title="关闭">'+svg("close",12)+'</button></div>'));
  });
- bar.appendChild(h('<button class="tab-add" data-action="stack-add" data-stack="'+s.id+'" title="在这一组里新建或打开…">'+svg("plus",13)+'</button>'));
+ if(WINDOW)bar.appendChild(h('<button class="tab-return" data-action="window-return" title="关掉这个窗口，面板回到主窗口里原来的地方">'+svg("undo",12)+'<span>放回主窗口</span></button>'));
+ else bar.appendChild(h('<button class="tab-add" data-action="stack-add" data-stack="'+s.id+'" title="在这一组里新建或打开…">'+svg("plus",13)+'</button>'));
  bar.appendChild(h('<div class="tabs-fill" data-stack="'+s.id+'"'+(floating?' data-float-move="'+floating.id+'"':"")+'></div>'));
  if(s.active&&Dock.els[s.active]){
   node.lastElementChild.appendChild(Dock.els[s.active]);
@@ -264,6 +306,8 @@ function stackEl(s,floating=null){
  return node;
 }
 function saveLayout(){
+ // A separate window shows one panel; the arrangement saved is the main window's.
+ if(WINDOW){if(typeof reportScreen==="function")reportScreen();return;}
  clearTimeout(Dock.saveTimer);
  Dock.saveTimer=setTimeout(()=>safe(()=>rpc("layout_save",{layout:{spaces:Dock.spaces,space:Dock.space,panels:Dock.panels}})),600);
  if(typeof reportScreen==="function")reportScreen();
@@ -287,16 +331,20 @@ function loadLayout(saved){
 }
 
 /* ---- interaction: tabs, dragging, splitters, floats ------------------------------------------------- */
+/* Where a dragged tab goes over a group: its top or bottom quarter splits above or below; anywhere else, the left or
+   right half splits beside it. Dropped on the tab bar, it joins the group as a tab. */
 function dropZone(stackBody,x,y){
  const r=stackBody.getBoundingClientRect(),fx=(x-r.left)/r.width,fy=(y-r.top)/r.height;
- if(fx<.22)return "left";if(fx>.78)return "right";if(fy<.22)return "top";if(fy>.78)return "bottom";return "center";
+ if(fy<.25)return "top";if(fy>.75)return "bottom";return fx<.5?"left":"right";
 }
+const DROP_LABEL={left:"放在左边",right:"放在右边",top:"放在上面",bottom:"放在下面",center:"合并成标签"};
 function showDrop(target,zone){
  const mark=el("#drop-mark");if(!target){mark.style.display="none";return;}
+ mark.textContent=DROP_LABEL[zone]||"";
  const r=target.getBoundingClientRect(),box={left:r.left,top:r.top,width:r.width,height:r.height};
  if(zone==="left")box.width/=2;if(zone==="right"){box.left+=r.width/2;box.width/=2;}
  if(zone==="top")box.height/=2;if(zone==="bottom"){box.top+=r.height/2;box.height/=2;}
- Object.assign(mark.style,{display:"block",left:box.left+"px",top:box.top+"px",width:box.width+"px",height:box.height+"px"});
+ Object.assign(mark.style,{display:"grid",left:box.left+"px",top:box.top+"px",width:box.width+"px",height:box.height+"px"});
 }
 function initDock(){
  document.addEventListener("dragstart",e=>{
@@ -394,8 +442,8 @@ function paramsOf(op){
 }
 function placePanel(pid,where,to){
  where=where||"tab";
- if(where==="float"){detach(pid);const rect=el("#dock").getBoundingClientRect();
-  Dock.layout.floats.push({id:newId("f"),x:Math.round(rect.width*.3),y:60,w:Math.round(Math.max(480,rect.width*.4)),h:Math.round(rect.height*.6),stack:stackNode([pid])});return;}
+ if(where==="float"){const origin=placeOf(pid);detach(pid);const rect=el("#dock").getBoundingClientRect();
+  Dock.layout.floats.push({id:newId("f"),x:Math.round(rect.width*.3),y:60,w:Math.round(Math.max(480,rect.width*.4)),h:Math.round(rect.height*.6),stack:stackNode([pid]),origin});return;}
  const anchor=to&&to!==pid?stackOf(to):null;
  detach(pid);
  const target=anchor||targetStack(sideOf(pid));

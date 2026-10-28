@@ -27,6 +27,14 @@ class WebError(RuntimeError):
     pass
 
 
+def local_address(address):
+    """An address on this machine or the local network. Proxies with fake-IP DNS hand out 198.18.0.0/15, so "not
+    global" alone would refuse every site."""
+    address = ipaddress.ip_address(str(address).split("%")[0])
+    address = getattr(address, "ipv4_mapped", None) or address
+    return address.is_loopback or address.is_link_local or address.is_multicast or address.is_unspecified or any(address in net for net in LOCAL)
+
+
 def _public(url):
     parts = urlsplit(url)
     if parts.scheme not in ("http", "https") or not parts.hostname:
@@ -36,10 +44,7 @@ def _public(url):
     except socket.gaierror as exc:
         raise WebError(f"找不到这个网站：{parts.hostname}") from exc
     for info in infos:
-        address = ipaddress.ip_address(info[4][0].split("%")[0])
-        address = getattr(address, "ipv4_mapped", None) or address
-        # Proxies with fake-IP DNS hand out 198.18.0.0/15, so "not global" alone would refuse every site.
-        if address.is_loopback or address.is_link_local or address.is_multicast or address.is_unspecified or any(address in net for net in LOCAL):
+        if local_address(info[4][0]):
             raise WebError("不读取本机或局域网里的地址")
 
 

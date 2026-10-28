@@ -139,6 +139,8 @@ DEFAULTS = {
     "kernel_timeout": 120, "run_timeout": 120, "shell_timeout": 60,
     # Agents run code and shell commands in the sandbox, never with the learner's own permissions.
     "agent_auto_run": True,
+    # What runs in the sandbox reaches the internet through Lattice's proxy (never this machine or the local network).
+    "agent_network": True,
     # Runs that ask for it (or the learner's own Python that imports torch, jax…) use the NVIDIA GPU through nvidia-run.
     "gpu": True,
     # How a GPU run is started here: "auto" (nvidia-run where there is one, else directly), "none", or a command such as
@@ -161,7 +163,7 @@ DEFAULTS = {
     # Everything about the interface: appearance, the sidebar, workspaces.
     # zoom: each kind of panel's default size ("chat:tutor", "file", ...); a window can still set its own.
     # spaces: the learner's changes to the built-in workspaces and their own ones; side.closed: workspaces whose sidebar is folded.
-    "ui": {"theme": "dark", "thinking": "collapsed", "md_mode": "live", "font_size": 14.5, "code_font_size": 13, "line_height": 1.8, "read_width": 42, "zoom": {"chat:tutor": 1.1},
+    "ui": {"theme": "dark", "thinking": "collapsed", "md_mode": "live", "font_size": 14.5, "note_font_size": 16, "code_font_size": 13, "line_height": 1.8, "read_width": 42, "zoom": {"chat:tutor": 1.1},
            "density": "comfortable", "send_key": "enter",
            "selection_popup": True, "activity_plus": False, "themes": {}, "theme_custom": None, "side": {"width": 270, "closed": []}, "spaces": []},
 }
@@ -529,7 +531,7 @@ class Config:
         for key in ("kernel_timeout", "run_timeout"):
             updated[key] = max(3, min(int(updated[key]), 3600))
         updated["shell_timeout"] = max(3, min(int(updated["shell_timeout"]), 600))
-        for key in ("agent_auto_run", "agent_auto_organize", "auto_cards", "auto_install", "gpu"):
+        for key in ("agent_auto_run", "agent_network", "agent_auto_organize", "auto_cards", "auto_install", "gpu"):
             updated[key] = bool(updated[key])
         if not isinstance(updated["runners"], dict) or not all(re.fullmatch(r"\.[\w+-]{1,12}", k) and isinstance(v, str) for k, v in updated["runners"].items()):
             raise ValueError("运行器应为「扩展名 → 命令」的对象，例如 {\".lua\": \"lua {file}\"}")

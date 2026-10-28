@@ -162,7 +162,7 @@ label.check input{margin:0}
 .float>.stack{flex:1}
 .float .tabs-fill{cursor:move}
 .float-resize{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;z-index:2;background:linear-gradient(135deg,transparent 50%,var(--line) 50%)}
-#drop-mark{position:fixed;display:none;pointer-events:none;background:color-mix(in srgb,var(--accent) 16%,transparent);border:2px solid var(--accent);border-radius:8px;z-index:60;transition:all .06s}
+#drop-mark{position:fixed;display:none;pointer-events:none;place-items:center;color:var(--accent);font-size:13px;font-weight:600;background:color-mix(in srgb,var(--accent) 16%,transparent);border:2px solid var(--accent);border-radius:8px;z-index:60;transition:all .06s}
 .menu{position:fixed;z-index:70;min-width:250px;padding:6px;background:var(--panel-hi);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);display:grid}
 .menu button{display:flex;align-items:center;gap:10px;border:0;background:transparent;text-align:left;padding:7px 9px;border-radius:7px;color:var(--text)}
 .menu button:hover{background:var(--surface)}
@@ -204,7 +204,12 @@ label.check input{margin:0}
 .version{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line-soft)}
 .version div{flex:1;display:grid}
 .version small{color:var(--subtle)}
-.version-text{white-space:pre-wrap;max-height:58vh;overflow:auto;background:var(--code-bg);padding:12px;border-radius:8px;font-size:12px}
+.version.now{background:var(--accent-glow);border-radius:8px;padding-left:8px;padding-right:8px}
+.version-no{flex:0 0 auto;min-width:38px;font:600 12px var(--mono);color:var(--accent)}
+.version-diff{max-height:62vh;background:var(--code-bg);border-radius:8px;padding:6px 0}
+.version-diff i{display:inline-block;width:3.4em;margin-right:6px;text-align:right;color:var(--subtle);font-style:normal;user-select:none}
+.diff .skip{color:var(--subtle);padding:3px 10px;background:var(--surface);font-size:11px}
+.diff-count b{font:600 12px var(--mono);margin-left:6px}.diff-count .add{color:var(--green)}.diff-count .del{color:var(--red)}
 /* ---- markdown ---- */
 .markdown{line-height:var(--line-height,1.8);word-break:break-word}
 .markdown>:first-child{margin-top:0}
@@ -237,29 +242,11 @@ label.check input{margin:0}
 .out-html{padding:6px 10px;overflow:auto;font-size:12px}
 .out-html table{border-collapse:collapse}.out-html td,.out-html th{border:1px solid var(--line);padding:3px 7px}
 /* ---- chat ---- */
-/* a topic's conversations, beside the conversation */
+/* a conversation's panel; the busy dot and renaming in place are for the sidebar's list of conversations */
 .chat-frame{flex:1;display:flex;min-height:0;container:chatframe / inline-size}
 .chat-frame>.chat{min-width:0}
-.chat-sessions{flex:0 0 208px;width:208px;min-width:0;overflow:hidden;display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line-soft);background:var(--panel)}
-.chat-sessions[hidden]{display:none}
-.ss-head{display:flex;align-items:center;gap:2px;padding:10px 6px 6px 12px}
-.ss-head>div{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.35}
-.ss-head b{font-size:12.5px}
-.ss-head small{color:var(--subtle);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ss-list{flex:1;overflow:auto;padding:2px 6px 14px}
-.ss-item{position:relative;display:flex;flex-direction:column;gap:1px;padding:6px 26px 6px 8px;border-radius:7px;cursor:pointer}
-.ss-item:hover{background:var(--surface-hover)}
-.ss-item.on{background:var(--accent-glow);box-shadow:inset 2px 0 0 var(--accent)}
-.ss-title{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ss-item.on .ss-title{font-weight:600}
-.ss-item small{font-size:10.5px;color:var(--subtle);display:flex;align-items:center;gap:4px}
 .ss-busy{width:6px;height:6px;border-radius:50%;background:var(--accent)}
-.ss-more{position:absolute;right:3px;top:5px;opacity:0;padding:3px;border:0;border-radius:5px;background:none;color:var(--muted);cursor:pointer}
-.ss-item:hover .ss-more,.ss-more:focus-visible{opacity:1}
-.ss-more:hover{background:var(--surface)}
 .ss-rename{width:100%;font:inherit;font-size:12.5px;padding:1px 4px}
-.ss-archived summary{font-size:11.5px;color:var(--subtle);padding:10px 8px 4px;cursor:pointer}
-@container chatframe (max-width:620px){.chat-sessions{display:none}}
 .chat{flex:1;display:flex;flex-direction:column;min-height:0;position:relative;container:chat / size;background:linear-gradient(var(--ai-glow),transparent 120px),var(--panel)}
 .chat-head{display:flex;align-items:center;gap:8px;padding:6px 10px;min-height:40px}
 .head-title{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
@@ -503,13 +490,13 @@ label.check input{margin:0}
 .editor.prose{font-size:13.5px;line-height:1.9}
 .md-split{flex:1;min-height:0;display:flex}
 .md-split>div{flex:1;min-width:0;overflow:auto;display:flex}
-.md-preview{padding:12px 22px;display:block!important;border-left:1px solid var(--line-soft)}
-.md-preview>*{max-width:var(--read-width,42em);margin-left:auto!important;margin-right:auto!important}
+.md-preview{padding:12px 22px;display:block!important;border-left:1px solid var(--line-soft);font-size:var(--note-size,16px)}
+.md-preview>*{max-width:calc(var(--read-width,42em) * var(--note-scale,1));margin-left:auto!important;margin-right:auto!important}
 .md-split.mode-live .md-preview,.md-split.mode-source .md-preview,.md-split.mode-preview .md-edit{display:none!important}
 .md-split.mode-preview .md-preview{border-left:0}
 .doc-head{display:flex;align-items:center;gap:10px;padding:10px 14px 4px;flex-wrap:wrap}
-.doc-title{flex:1;min-width:200px;font-size:17px;font-weight:650;border:0;background:transparent;padding:4px 2px}
-.doc-meta{flex-basis:100%;font-size:12px;border:0;background:transparent;padding:2px;color:var(--muted)}
+.doc-title{flex:1;min-width:200px;font-size:calc(var(--note-size,16px) * 1.3);font-weight:650;border:0;background:transparent;padding:4px 2px}
+.doc-meta{flex-basis:100%;font-size:calc(var(--note-size,16px) * .8);border:0;background:transparent;padding:2px;color:var(--muted)}
 .run-out{flex:0 0 auto;max-height:45%;overflow:auto;border-top:1px solid var(--line);background:var(--panel-hi)}
 .run-out.empty{display:none}
 .run-head{display:flex;align-items:center;gap:9px;padding:5px 10px;font-size:11.5px;color:var(--muted);position:sticky;top:0;background:var(--panel-hi)}
@@ -733,8 +720,9 @@ details.api summary span{font-size:11.5px}
 .cm-host{flex:1;min-width:0;display:flex;flex-direction:column;padding:0!important;border:0;background:transparent;overflow:visible!important;white-space:normal!important}
 .cm-host .cm-editor{flex:1;min-height:100%}
 .cm-host:not(.cm-md) .cm-scroller{font-family:var(--mono);font-size:var(--code-size,12.5px);line-height:1.65}
-.cm-host.cm-md .cm-scroller{font-family:inherit;line-height:var(--line-height,1.8)}
-.cm-host.editor.cm-md .cm-content{max-width:calc(var(--read-width,42em) + 48px);width:100%;margin:0 auto;padding:12px 24px 35vh}
+.cm-host.cm-md .cm-scroller{font-family:inherit;font-size:var(--note-size,16px);line-height:var(--line-height,1.8)}
+/* The reading width is counted in characters of the interface's size; at the notes' larger size it widens with them. */
+.cm-host.editor.cm-md .cm-content{max-width:calc(var(--read-width,42em) * var(--note-scale,1) + 48px);width:100%;margin:0 auto;padding:12px 24px 35vh}
 .cm-host.editor .cm-gutters{padding-left:4px}
 .tk-kw{color:var(--tk-kw)}.tk-str{color:var(--tk-str)}.tk-num{color:var(--tk-num)}.tk-com{color:var(--tk-com);font-style:italic}.tk-fn{color:var(--tk-fn)}
 .tk-type{color:var(--tk-type)}.tk-prop{color:var(--tk-prop)}.tk-op,.tk-punc{color:var(--tk-op)}.tk-tag{color:var(--tk-tag)}.tk-attr{color:var(--tk-type)}.tk-bad{color:var(--red)}
@@ -792,8 +780,11 @@ details.api summary span{font-size:11.5px}
 .ni-tag.open>a{background:var(--ai-glow)}
 .ni-body .side-input{width:100%;margin:6px 0}
 .cm-wikilink.cm-unresolved .tk-link{color:inherit}
-.panel-file .file>.doc-head{max-width:calc(var(--read-width,42em) + 48px);width:100%;margin:0 auto;padding-left:24px;padding-right:24px}
-.panel-file .file>.doc-head+.file-tools{max-width:calc(var(--read-width,42em) + 48px);width:100%;margin:0 auto;padding-left:24px}
+.doc-view{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column}
+.doc-view>.md-split{flex:1 0 auto;min-height:auto}
+.doc-view>.md-split>div{overflow:visible}
+.panel-file .doc-view>.doc-head{flex:none;max-width:calc(var(--read-width,42em) * var(--note-scale,1) + 48px);width:100%;margin:0 auto;padding-left:24px;padding-right:24px}
+.panel-file .file>.doc-head+.file-tools{max-width:calc(var(--read-width,42em) * var(--note-scale,1) + 48px);width:100%;margin:0 auto;padding-left:24px}
 .card-view .cm-host.editor .cm-content,.topic-view .cm-host.editor .cm-content{max-width:none;margin:0;padding:10px 14px 24px!important}
 .cm-rb0,.cm-rb0 *{color:var(--rb0)!important}.cm-rb1,.cm-rb1 *{color:var(--rb1)!important}.cm-rb2,.cm-rb2 *{color:var(--rb2)!important}
 .cm-rb-bad,.cm-rb-bad *{color:var(--red)!important;text-decoration:underline wavy var(--red)}
@@ -1250,3 +1241,8 @@ input[type=checkbox],input[type=radio],input[type=range]{accent-color:var(--acce
 .app-card span{font-size:12.5px;color:var(--muted)}
 .app-card small{font-size:11px;color:var(--subtle)}
 .app-card.building{cursor:pointer;width:100%}
+/* A separate window shows one panel, filling it: no activity bar, sidebar or status line. */
+body.separate-window #activity,body.separate-window #side,body.separate-window #side-gutter,body.separate-window #status{display:none!important}
+body.separate-window .tab-btn{display:none}
+.tab-return{display:flex;align-items:center;gap:5px;margin:0 6px;padding:3px 10px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--muted);font-size:12px;white-space:nowrap}
+.tab-return:hover{color:var(--text);background:var(--surface-hover)}

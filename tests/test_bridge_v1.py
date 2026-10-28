@@ -90,5 +90,5 @@ def test_agent_tools_refuse_protected_files_and_typing(bridge):
         tools.call(ctx, {"write"}, "write", {"file": "journal/2026/x.jsonl", "content": "{}"})
     bridge.rpc_typing(rel)
     with pytest.raises(ValueError):
-        tools.call(ctx, {"edit"}, "edit", {"file": rel, "old": "x = 1", "new": "x = 2"})
+        tools.call(ctx, {"edit"}, "edit", {"file": rel, "edits": [{"old": "x = 1", "new": "x = 2"}], "why": "改成 2"})
     assert l.read_file(rel)["content"] == "x = 1\n"

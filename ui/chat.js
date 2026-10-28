@@ -15,7 +15,7 @@ panelType("chat",{side:"ai",icon:p=>AGENT_ICON[p.agent]||"bot",
  },
  mount(p,node,pid){
   Chat[pid]={input:"",stream:"",live:[],waiting:"",error:"",data:null,cache:{},attach:[],quote:"",opened:new Set(),thoughts:{},...freshThinking()};
-  node.innerHTML='<div class="chat-frame"><aside class="chat-sessions" hidden></aside><div class="chat"><div class="chat-head"></div><div class="chat-scroll"><div class="loading">正在打开对话…</div></div><div class="composer"></div><div class="chat-starters"></div></div></div>';
+  node.innerHTML='<div class="chat-frame"><div class="chat"><div class="chat-head"></div><div class="chat-scroll"><div class="loading">正在打开对话…</div></div><div class="composer"></div><div class="chat-starters"></div></div></div>';
   loadChat(pid);
  },
  unmount(p,node){delete Chat[node.dataset.pid];},
@@ -34,31 +34,16 @@ async function loadChat(pid,keepScroll=true){
  if(!data||!Chat[pid])return;
  if(st.thread&&st.thread!==data.thread){st.cache={};st.stream="";st.live=[];st.error="";st.anchored=false;st.bottom=undefined;}
  st.thread=data.thread;st.data=data;
- renderChat(pid,keepScroll);refreshTab(pid);renderSessions(pid);
+ renderChat(pid,keepScroll);refreshTab(pid);
 }
-/* ---- a topic's conversations. The tutor's are listed under their topics in the sidebar; the quick answer's in a column
-   at its panel's left, when opened. Opening one makes its topic the one being learned and it the conversation that topic
-   opens, in every panel following along; rename (double-click), archive or delete in place. ------------------------- */
+/* ---- a topic's conversations, listed under their topics in the sidebar. Opening one makes its topic the one being
+   learned and it the conversation that topic opens, in every panel following along; the quick answer beside it goes
+   with it. Rename (double-click), archive or delete in place. ------------------------------------------------------- */
 const SESSION_AGENTS=new Set(["tutor","flash"]);
-const sessionsOn=pid=>{const p=Dock.panels[pid];return !!p&&p.agent==="flash"&&!p.thread&&!!p.sessions;};
 function sessionMeta(x){return (x.busy?'<i class="ss-busy"></i>':"")+x.messages+' 条';}
 function sessionTip(x){return fmtDate(x.updated,true)+" · "+(x.summary?shorten(x.summary,160):x.last?"最近问："+x.last:"还没有消息");}
-async function renderSessions(pid){
- const node=Dock.els[pid],st=Chat[pid],p=Dock.panels[pid],box=node?.querySelector(".chat-sessions");if(!box||!st)return;
- box.hidden=!sessionsOn(pid);if(box.hidden)return;
- const topic=st.data?.head?.topic||"",r=await safe(()=>rpc("sessions",{agent:p.agent,topic}));if(!r||!Chat[pid])return;
- const item=x=>'<div class="ss-item'+(x.id===st.thread?" on":"")+'" data-action="session-open" data-id="'+esc(x.id)+'" data-tip="'+esc(sessionTip(x))+'">'+
-  '<span class="ss-title" data-session-title="'+esc(x.id)+'">'+esc(x.title)+'</span><small>'+sessionMeta(x)+' · '+esc(fmtDate(x.updated,true))+'</small>'+
-  '<button class="ss-more" data-action="session-more" data-id="'+esc(x.id)+'" data-archived="'+(x.archived?1:0)+'" title="改名、归档、删除">'+svg("dots",13)+'</button></div>';
- const live=r.sessions.filter(x=>!x.archived),kept=r.sessions.filter(x=>x.archived);
- box.innerHTML='<div class="ss-head"><div><b>会话</b><small>'+esc(topic?topicTitle(topic):"默认对话")+'</small></div>'+
-  iconButton("plus","session-new","在这个主题下开新会话",'data-pid="'+pid+'"')+iconButton("sidebar","chat-sessions","收起会话栏",'data-pid="'+pid+'"')+'</div>'+
-  '<div class="ss-list">'+(live.map(item).join("")||'<p class="muted small">还没有会话。</p>')+
-  (kept.length?'<details class="ss-archived"'+(st.archivedOpen?" open":"")+'><summary>已归档 '+kept.length+'</summary>'+kept.map(item).join("")+'</details>':"")+'</div>';
- box.querySelector(".ss-archived")?.addEventListener("toggle",e=>{st.archivedOpen=e.target.open;});
-}
 // Every list of conversations, after one was opened, started, renamed, archived or deleted.
-function sessionsChanged(){sideChanged([]);Object.keys(Chat).forEach(x=>sessionsOn(x)&&renderSessions(x));}
+function sessionsChanged(){sideChanged([]);}
 async function openSession(id){
  const r=await rpc("session_open",{id});S.data.active_topic=r.topic||null;
  await refreshState();followingPanels().forEach(x=>loadChat(x,false));sessionsChanged();
@@ -76,7 +61,6 @@ function renameSession(id){
 document.addEventListener("dblclick",e=>{const t=e.target.closest?.("[data-session-title]");if(!t)return;e.preventDefault();renameSession(t.dataset.sessionTitle);});
 async function sessionAction(kind,a){
  const pid=a.dataset.pid,p=Dock.panels[pid];
- if(kind==="chat-sessions"){if(!p)return;p.sessions=!sessionsOn(pid);saveLayout();return renderSessions(pid);}
  if(kind==="session-new"){
   const agent=a.dataset.agent||p?.agent||"tutor",topic=a.dataset.topic??(Chat[pid]?.data?.head?.topic||S.data.active_topic||"");
   const r=await rpc("thread_new",{agent,topic});await openSession(r.thread);if(!p)showTutor();
@@ -202,7 +186,7 @@ function chatHead(pid){
     button(svg("check",13)+" 结束并复盘","practice-end",'data-pid="'+pid+'"',"primary sm"):'<span class="chip">'+(pr.state==="reviewing"?"主会话复盘中":"已复盘")+'</span>')+'</div>';
  }
  const topic=d.head?.topic;
- const tools=(p.agent==="flash"&&!p.thread&&!sessionsOn(pid)?iconButton("sidebar","chat-sessions","会话列表",'data-pid="'+pid+'"'):"")+iconButton("edit","chat-new","开新会话",'data-pid="'+pid+'"')+
+ const tools=iconButton("edit","chat-new",p.agent==="flash"?"清空快答，重新开始（主会话不变）":"开新会话",'data-pid="'+pid+'"')+
   iconButton("dots","chat-more","显示和更多",'data-pid="'+pid+'"');
  return '<button class="topic-chip'+(topic?"":" quiet")+'" data-action="chat-topic-menu" data-pid="'+pid+'" title="这段对话属于哪个主题">'+svg(topic?"map":"bot",12)+'<span>'+esc(topic?topicTitle(topic):"默认对话")+'</span>'+svg("chevrondown",11)+'</button>'+
   '<div class="chat-tools">'+tools+'</div>';
@@ -625,6 +609,7 @@ function chatMoreMenu(pid,anchor){
   '<hr/><div class="menu-label">所有窗口</div>'+
   row("思考过程",seg("ui-set","thinking",u.thinking||"collapsed",[["collapsed","折叠"],["open","展开"],["hidden","不显示"]]))+
   row("正文字号",step("ui-step","font_size",-1,"−")+'<b>'+(Number(u.font_size)||14.5)+'</b>'+step("ui-step","font_size",1,"+"))+
+  row("笔记字号",step("ui-step","note_font_size",-1,"−")+'<b>'+(Number(u.note_font_size)||16)+'</b>'+step("ui-step","note_font_size",1,"+"))+
   row("代码字号",step("ui-step","code_font_size",-1,"−")+'<b>'+(Number(u.code_font_size)||13)+'</b>'+step("ui-step","code_font_size",1,"+"))+
   row("密度",seg("ui-set","density",u.density||"comfortable",[["comfortable","舒适"],["compact","紧凑"]]))+
   row("明暗",seg("ui-set","theme",u.theme||"dark",[["dark","深色"],["light","浅色"]]))+

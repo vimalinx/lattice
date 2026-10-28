@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMainWindow
@@ -40,6 +40,75 @@ class LatticePage(QWebEnginePage):
             print(f"[Lattice JS] {message} @ {source}:{line}",file=sys.stderr)
 
 
+class WindowBridge(QObject):
+    """What a separate window's page talks to: Lattice's one bridge, its requests passed through and its news passed on
+    (an object is published on one web channel only)."""
+    event=Signal(str)
+
+    def __init__(self,bridge,parent):
+        super().__init__(parent)
+        self.bridge=bridge
+        bridge.event.connect(self.event)
+
+    @Slot(str,result=str)
+    def request(self,payload):
+        return self.bridge.request(payload)
+
+
+def secure(page):
+    """Settings every Lattice page gets. Remote access is on for local content because the apps (lattice-app://, a
+    local scheme so these pages may frame them) use the network; the pages themselves stay off it through the CSP in
+    index.html (default-src 'self'), and the apps stay off this computer and the local network through
+    appscheme.AppGuard. File-URL access must stay on: under Qt's per-file origin model the page's own sibling file://
+    scripts count as other local URLs, and disabling it stops index.html from loading them at all. Kernel HTML output
+    is DOMPurify-sanitized before insertion."""
+    page.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls,True)
+    page.settings().setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows,False)
+
+
+class SeparateWindow(QMainWindow):
+    """One panel in a window of its own, to make it big or put it on another screen: Lattice's page showing just that
+    panel, on the same bridge. Closing it puts the panel back into the main window."""
+    def __init__(self,main,ident,title):
+        super().__init__()
+        self.main,self.ident,self.quitting,self.flushed=main,ident,False,False
+        self.setWindowIcon(main.windowIcon())
+        self.setStyleSheet("QMainWindow{background:#10141a}")
+        self.set_title(title)
+        self.page=LatticePage(main.profile,self)
+        self.view=QWebEngineView(self)
+        self.view.setPage(self.page)
+        self.setCentralWidget(self.view)
+        self.relay=WindowBridge(main.bridge,self)
+        self.channel=QWebChannel(self.page)
+        self.channel.registerObject("backend",self.relay)
+        self.page.setWebChannel(self.channel)
+        secure(self.page)
+        url=QUrl.fromLocalFile(str(ROOT/"ui"/"index.html"))
+        url.setQuery("window="+ident)
+        self.view.load(url)
+        self.resize(main.size())
+
+    def set_title(self,title):
+        self.setWindowTitle((title+" — " if title else "")+"Lattice")
+
+    def closeEvent(self,event):
+        if not self.quitting and not self.flushed:
+            # What is being typed there is written out first; then the panel goes back.
+            self.flushed=True
+            event.ignore()
+            self.page.runJavaScript("typeof flushAll==='function'&&flushAll()",lambda _:QTimer.singleShot(400,self.close))
+            return
+        try:
+            self.main.bridge.event.disconnect(self.relay.event)
+        except (RuntimeError,TypeError):
+            pass
+        if not self.quitting:
+            self.main.bridge.window_closed(self.ident)
+        self.main.windows.pop(self.ident,None)
+        super().closeEvent(event)
+
+
 class MainWindow(QMainWindow):
     def __init__(self,screenshot=None):
         super().__init__()
@@ -62,6 +131,7 @@ class MainWindow(QMainWindow):
         self.view.setPage(self.page)
         self.setCentralWidget(self.view)
         self.bridge=Bridge(self)
+        self.windows={}
         self.apps=appscheme.AppScheme(self.bridge,self)
         self.profile.installUrlSchemeHandler(appscheme.SCHEME,self.apps)
         self.app_guard=appscheme.AppGuard(self)
@@ -69,16 +139,7 @@ class MainWindow(QMainWindow):
         self.channel=QWebChannel(self.page)
         self.channel.registerObject("backend",self.bridge)
         self.page.setWebChannel(self.channel)
-        # Remote access is on for local content because the apps (lattice-app://, a local scheme so this page may frame
-        # them) use the network; this page itself stays off it through the CSP in index.html (default-src 'self'), and
-        # the apps stay off this computer and the local network through appscheme.AppGuard.
-        self.page.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls,True)
-        # File-URL access must stay on: under Qt's per-file origin model the app's
-        # own sibling file:// scripts count as other local URLs, and disabling this
-        # flag stops index.html from loading them at all. Exfiltration is instead
-        # blocked by the CSP connect-src allowlist in index.html, and kernel HTML
-        # output is DOMPurify-sanitized before insertion.
-        self.page.settings().setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows,False)
+        secure(self.page)
         self.view.load(QUrl.fromLocalFile(str(ROOT/"ui"/"index.html")))
         if screenshot:
             self.view.loadFinished.connect(lambda ok:QTimer.singleShot(3500,lambda:self.save_screenshot(screenshot)))
@@ -88,7 +149,24 @@ class MainWindow(QMainWindow):
         print("LATTICE_SCREENSHOT",path,flush=True)
         QApplication.instance().quit()
 
+    def open_window(self,ident,title):
+        window=SeparateWindow(self,ident,title)
+        self.windows[ident]=window
+        window.show()
+
+    def close_window(self,ident):
+        if ident in self.windows:
+            self.windows[ident].close()
+
+    def title_window(self,ident,title):
+        if ident in self.windows:
+            self.windows[ident].set_title(title)
+
     def closeEvent(self,event):
+        # Panels in separate windows stay listed and come back into this window next time.
+        for window in list(self.windows.values()):
+            window.quitting=True
+            window.close()
         self.bridge.shutdown()
         super().closeEvent(event)
 

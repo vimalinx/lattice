@@ -1,4 +1,6 @@
-"""The agents' sandbox: bubblewrap with the vault writable, mounted folders read-only and no network.
+"""The agents' sandbox: bubblewrap with the vault writable and mounted folders read-only. It has no network of its
+own; when the learner allows it (on by default), what runs inside reaches the internet through Lattice's proxy
+(netproxy.py), never this machine or the local network. Downloads are cached in the vault's .lattice/cache.
 
 A run that asks for the GPU also gets the device nodes of the accelerator found here (see accel.py), and is wrapped in
 this machine's launcher when it has one (nvidia-run wakes the GPU for that run only and puts it back to sleep). Runs are
@@ -22,12 +24,15 @@ import subprocess
 import threading
 import time
 
+from .netproxy import PORT
+
 # Just enough of /etc for programs to run: libraries, fonts, certificates, time zone, user names.
 ETC = ["ld.so.cache", "ld.so.conf", "ld.so.conf.d", "fonts", "ssl", "ca-certificates", "localtime", "passwd", "group",
        "nsswitch.conf", "mime.types", "alternatives", "os-release", "java-openjdk", "java21-openjdk", "java17-openjdk", "java11-openjdk"]
 # Inside the vault, these stay read-only for the sandbox.
 PROTECTED = (".git", ".lattice", "threads", "journal", "AGENTS.md", "me.md", "agents")
 MPL = Path(__file__).with_name("mpl")
+FORWARD = Path(__file__).with_name("netfwd.py")
 
 
 def on_gpu(command, gpu):
@@ -60,9 +65,9 @@ def stop_group(proc, grace=20, wait=True):
 
 
 class Sandbox:
-    def __init__(self, root, projects=lambda: [], extra=lambda: []):
+    def __init__(self, root, projects=lambda: [], extra=lambda: [], network=lambda: False, proxy=None):
         self.root = Path(root).resolve()
-        self.projects, self.extra = projects, extra
+        self.projects, self.extra, self.network, self.proxy = projects, extra, network, proxy
         self.bwrap = shutil.which("bwrap")
         self._ok = None
 
@@ -129,15 +134,26 @@ class Sandbox:
         for name in PROTECTED:
             if (self.root / name).exists():
                 args += ["--ro-bind", f"{root}/{name}", f"{root}/{name}"]
-        for path in writable:
+        # Downloaded models and datasets stay between runs (inside the sandbox home is in memory and gone after each).
+        cache = self.root / ".lattice" / "cache"
+        for path in (*writable, cache):
             Path(path).mkdir(parents=True, exist_ok=True)
             args += ["--bind", str(path), str(path)]
+        online = bool(self.proxy) and self.network()
+        if online:
+            args += ["--dir", "/run/lattice", "--bind", str(self.proxy.start()), "/run/lattice/net.sock", "--ro-bind", str(FORWARD), "/run/lattice/forward.py"]
         args += ["--ro-bind", str(MPL), str(MPL), "--chdir", str(cwd), "--clearenv"]
         base = {"HOME": "/tmp/home", "LANG": os.environ.get("LANG", "C.UTF-8"), "TERM": "dumb", "TMPDIR": "/tmp",
                 "MPLCONFIGDIR": "/tmp/mpl", "GOCACHE": "/tmp/go-cache", "GOPATH": "/tmp/go", "CARGO_HOME": "/tmp/cargo",
                 "PATH": ":".join([*(p for p in self.visible() if p.endswith("bin")), "/usr/local/bin", "/usr/bin"])}
         if (Path.home() / ".rustup").as_posix() in self.visible():
             base["RUSTUP_HOME"] = str(Path.home() / ".rustup")
+        base.update({"XDG_CACHE_HOME": str(cache), "HF_HOME": str(cache / "huggingface"), "TORCH_HOME": str(cache / "torch")})
+        if online:
+            proxy = "http://127.0.0.1:%d" % PORT
+            base.update({"HTTP_PROXY": proxy, "HTTPS_PROXY": proxy, "http_proxy": proxy, "https_proxy": proxy, "NODE_USE_ENV_PROXY": "1",
+                         "NO_PROXY": "localhost,127.0.0.1,::1", "no_proxy": "localhost,127.0.0.1,::1"})
+            command = [shutil.which("python3") or "/usr/bin/python3", "-I", "/run/lattice/forward.py", "/run/lattice/net.sock", str(PORT), "--", *command]
         for key, value in {**base, **(env or {})}.items():
             args += ["--setenv", key, str(value)]
         return [*((gpu or {}).get("prefix") or [])] + args + ["--", *command]

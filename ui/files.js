@@ -115,9 +115,10 @@ function mdEditor(pid,text,attrs,opts={}){
  const st=Files[pid];
  return editorHost(text,attrs,{markdown:true,live:st.mode!=="source"&&st.mode!=="split",...editorHooks(pid,{keys:[{key:"Mod-e",run:()=>{safe(()=>toggleReading(pid));return true;}}]}),...opts});
 }
-function mdBody(pid,text,attrs,opts={}){
- const st=Files[pid];
- return '<div class="md-split mode-'+st.mode+'"><div class="md-edit" data-keep-scroll>'+mdEditor(pid,text,'class="editor prose" '+attrs,opts)+'</div><div class="md-preview markdown" data-keep-scroll>'+markdown(text)+'</div></div>';
+// flow: the panes grow with their text and an outer box does the scrolling.
+function mdBody(pid,text,attrs,opts={},flow=false){
+ const st=Files[pid],keep=flow?"":" data-keep-scroll";
+ return '<div class="md-split mode-'+st.mode+'"><div class="md-edit"'+keep+'>'+mdEditor(pid,text,'class="editor prose" '+attrs,opts)+'</div><div class="md-preview markdown"'+keep+'>'+markdown(text)+'</div></div>';
 }
 function textView(pid){
  const st=Files[pid],d=st.data,ext=(d.ext||"").toLowerCase(),isCsv=[".csv",".tsv"].includes(ext);
@@ -144,7 +145,10 @@ function fileMenu(pid,anchor){
   MD_MODES.map(([m,t])=>'<button data-action="file-mode" data-pid="'+pid+'" data-mode="'+m+'"'+(st.raw?" disabled":"")+'>'+svg(mode===m?"check":"document",14)+'<span>'+t+'</span></button>').join("")+
   (st.mode!=="preview"&&!st.raw?'<hr/><button data-action="file-table" data-pid="'+pid+'">'+svg("layout",14)+'<span>插入表格 · Ctrl Shift T</span></button>':"")+
   (form?'<hr/><button data-action="file-raw" data-pid="'+pid+'">'+svg(st.raw?"layout":"code",14)+'<span>'+(st.raw?"回到表单":"编辑原文（包括开头的属性）")+'</span></button>':"")+
+  '<hr/><div class="menu-row"><span>笔记字号</span><div class="ctl"><button class="step" data-action="ui-step" data-pid="'+pid+'" data-key="note_font_size" data-dir="-1">A−</button><b>'+(Number(S.ui.note_font_size)||16)+'</b>'+
+   '<button class="step" data-action="ui-step" data-pid="'+pid+'" data-key="note_font_size" data-dir="1">A+</button></div></div>'+
   '<hr/><button data-action="open-settings" data-page="look">'+svg("sliders",14)+'<span>笔记默认的显示方式…</span></button>',{cls:"menu-wide"});
+ Menus.reopen=()=>fileMenu(pid,anchor);
 }
 function runOutput(pid){
  const r=Files[pid].run;
@@ -192,7 +196,7 @@ function docView(pid){
   (kind==="note"?'<input class="doc-meta" data-field="tags" data-doc-field="tags" value="'+esc((a.tags||[]).join(", "))+'" placeholder="标签，用逗号分开"/>':"")+
   (kind==="lesson"?'<input class="doc-meta" data-field="objective" data-doc-field="objective" value="'+esc(a.objective||"")+'" placeholder="这一节想弄懂什么"/>':"")+
   (kind==="insight"?'<div class="doc-meta">'+(a.insight==="strength"?"做得好的地方":"薄弱点")+' · '+(a.state==="resolved"?"已克服":"主会话正在留意")+(a.state!=="resolved"?button("已克服","insight-resolve",'data-id="'+esc(d.doc.id)+'"',"ghost xs"):"")+'</div>':"");
- return '<div class="doc-head">'+fields+'</div>'+mdBody(pid,d.doc.body,'data-field="body" data-doc-field="body"',{placeholder:"开始写…  [[ 链接别的笔记，# 加标签，粘贴图片直接放进来"})+linksBlock(pid,d.links||[],d.doc.id);
+ return '<div class="doc-view" data-keep-scroll><div class="doc-head">'+fields+'</div>'+mdBody(pid,d.doc.body,'data-field="body" data-doc-field="body"',{placeholder:"开始写…  [[ 链接别的笔记，# 加标签，粘贴图片直接放进来"},true)+'</div>'+linksBlock(pid,d.links||[],d.doc.id);
 }
 function rawView(pid){
  return '<div class="code-wrap" data-keep-scroll>'+editorHost(Files[pid].text,'class="editor code" data-field="text" data-file-text="'+pid+'"',{markdown:true,live:false,...editorHooks(pid)})+'</div>';
@@ -263,7 +267,7 @@ function notebookView(pid){
  const st=Files[pid],d=st.data,nb=d.notebook,k=d.kernel||{},sandboxed=d.mode!=="mine";
  const state={offline:"内核未启动",starting:"正在启动",ready:"就绪",busy:"运行中",restarting:"重启中",error:"内核出错",queued:"排队中",installing:"正在装包"}[k.state]||k.state||"内核未启动";
  return '<div class="nb-bar"><span class="kernel-chip k-'+esc(k.state||"offline")+'" data-kernel-chip="'+pid+'">'+svg("terminal",12)+' '+esc(state)+(k.message?' · '+esc(k.message):"")+'</span>'+
-  '<button class="chip toggle'+(sandboxed?" on":"")+'" data-action="kernel-mode" data-pid="'+pid+'" title="'+(sandboxed?"内核在沙箱里：看不到家目录、不联网；AI 也能在里面运行。点一下改成用你的权限":"内核用你的权限运行（能联网、能读你的文件），AI 不能在里面运行。点一下改回沙箱")+'">'+(sandboxed?svg("shield",12)+" 沙箱":"我的权限")+'</button>'+
+  '<button class="chip toggle'+(sandboxed?" on":"")+'" data-action="kernel-mode" data-pid="'+pid+'" title="'+(sandboxed?"内核在沙箱里：看不到家目录，能上互联网但连不了这台电脑和局域网；AI 也能在里面运行。点一下改成用你的权限":"内核用你的权限运行（能联网、能读你的文件），AI 不能在里面运行。点一下改回沙箱")+'">'+(sandboxed?svg("shield",12)+" 沙箱":"我的权限")+'</button>'+
   (d.gpu_ready||d.gpu?'<button class="chip toggle'+(d.gpu?" on":"")+'" data-action="kernel-gpu" data-pid="'+pid+'" title="'+(d.gpu?"内核在显卡上（经 nvidia-run）：训练、CUDA 都能用；空闲 15 分钟自动关掉让显卡休眠。点一下改回只用 CPU":"内核只用 CPU。点一下换到显卡上（内核会重启，变量要重新算）")+'">'+svg("spark",12)+(d.gpu?" 显卡":" CPU")+'</button>':"")+
   '<span class="chip" title="Python 环境">'+esc(d.env||"default")+'</span><span class="grow"></span>'+
   button(svg("play",13)+" 全部运行","nb-run-all",'data-pid="'+pid+'"',"primary sm")+iconButton("stop","nb-interrupt","中断",'data-pid="'+pid+'"')+iconButton("refresh","nb-restart","重启内核（清空变量）",'data-pid="'+pid+'"')+'</div>'+
@@ -523,15 +527,39 @@ async function fileAction(kind,a){
  case "route-drop":{const r=st.data.topic.route.filter((_,i)=>i!==+a.dataset.i);return saveRoute(pid,r);}
  }
 }
+/* A file's versions, numbered from the first, each with who made it and what it changed (the note an agent writes
+   with each edit). Any version can be compared with the one before it or with the file as it is now, and restored. */
+function versionWho(v){const by=String(v.author||"").replace(/^Lattice · /,"");return who(by==="我"?"me":by);}
+function versionNote(v){
+ // "tutor：改了 a.py：加温度参数" -> "加温度参数" (in a file's own history its name goes without saying); "新建了 a.py：…" -> "新建：…".
+ const s=String(v.subject||"").replace(/^[a-z]+：/,"");if(s==="我的编辑")return "自己改的";
+ const m=/^(改了|新建了|重写了) (.+?)(?:：(.*))?$/.exec(s);if(!m||m[2]!==baseName(v.path))return s;
+ const verb={改了:"改了",新建了:"新建",重写了:"整篇重写"}[m[1]];
+ return m[3]?(m[1]==="改了"?m[3]:verb+"："+m[3]):verb;
+}
 async function showHistory(pid){
  const p=Dock.panels[pid],versions=await rpc("file_history",{path:p.path});
- modal(modalHead("历史版本 · "+baseName(p.path))+'<p class="muted">每一次保存、每一个 AI 动作都是学习库里的一次提交。打开一个版本对照，或者把它恢复成现在的内容。</p>'+
-  (versions.map(v=>'<div class="version"><div><b>'+esc(v.subject)+'</b><small>'+esc(fmtDate(v.at,true))+' · '+esc(v.author)+'</small></div>'+
-   button("查看","version-view",'data-pid="'+pid+'" data-commit="'+esc(v.commit)+'"',"ghost xs")+button("恢复","version-restore",'data-pid="'+pid+'" data-commit="'+esc(v.commit)+'"',"ghost xs")+'</div>').join("")||'<p>还没有更早的版本。</p>'),"large");
+ const unsaved=versions.length&&!versions[0].current;
+ const row=v=>'<div class="version'+(v.current?" now":"")+'"><span class="version-no">v'+v.number+'</span><div><b>'+esc(versionNote(v))+'</b><small>'+esc(versionWho(v))+' · '+esc(fmtDate(v.at,true))+(v.current?' · 现在的内容':'')+'</small></div>'+
+  (v.number>1?button("改了什么","version-diff",'data-pid="'+pid+'" data-commit="'+esc(v.commit)+'" data-against="previous"',"ghost xs"):"")+
+  (v.current?"":button("和现在比","version-diff",'data-pid="'+pid+'" data-commit="'+esc(v.commit)+'" data-against="now"',"ghost xs")+button("恢复","version-restore",'data-pid="'+pid+'" data-commit="'+esc(v.commit)+'"',"ghost xs"))+'</div>';
+ modal(modalHead("历史版本 · "+baseName(p.path))+'<p class="muted">每一次保存、每一个 AI 的修改都是一个版本，AI 改的时候写了这一版改了什么。看每一版和上一版比改了哪里，或者和现在的内容比；恢复以后，现在的内容也还留在历史里。</p>'+
+  (unsaved?'<div class="version now"><span class="version-no">现在</span><div><b>还有没存进历史的修改</b><small>停下打字一会儿就会存成新的一版</small></div></div>':"")+
+  (versions.map(row).join("")||'<p>还没有历史版本。</p>'),"large");
 }
 async function versionAction(kind,a){
- const pid=a.dataset.pid,p=Dock.panels[pid],v=await rpc("file_version",{path:p.path,commit:a.dataset.commit});
- if(kind==="version-view")return modal(modalHead("版本预览")+'<pre class="version-text">'+esc(v.content||"（这个版本里文件不存在）")+'</pre>'+'<div class="modal-actions">'+button("返回","file-history",'data-pid="'+pid+'"',"ghost")+button("恢复这个版本","version-restore",'data-pid="'+pid+'" data-commit="'+esc(a.dataset.commit)+'"',"primary")+'</div>',"large");
+ const pid=a.dataset.pid,p=Dock.panels[pid];
+ if(kind==="version-diff"){
+  const [versions,d]=await Promise.all([rpc("file_history",{path:p.path}),rpc("file_diff",{path:p.path,commit:a.dataset.commit,against:a.dataset.against})]);
+  const v=versions.find(x=>x.commit===a.dataset.commit)||{},now=a.dataset.against==="now";
+  const title=now?"v"+v.number+" → 现在":"v"+(v.number-1)+" → v"+v.number;
+  const line=x=>x.t==="skip"?'<div class="skip">⋯ 第 '+x.n+' 行</div>':'<div class="'+x.t+'"><i>'+(x.t==="del"?x.o:x.n)+'</i>'+(x.t==="add"?"+":x.t==="del"?"−":" ")+' '+esc(x.s)+'</div>';
+  return modal(modalHead(title+" · "+baseName(p.path))+
+   '<p class="muted">'+(now?"从这一版到现在的内容":esc(versionNote(v))+" · "+esc(versionWho(v))+" · "+esc(fmtDate(v.at,true)))+'　<span class="diff-count"><b class="add">+'+d.added+'</b> <b class="del">−'+d.removed+'</b></span></p>'+
+   (d.same?'<p>内容一样，没有改动。</p>':'<div class="diff version-diff">'+d.lines.map(line).join("")+(d.cut?'<div class="skip">后面还有改动，太长没有全部列出</div>':"")+'</div>')+
+   '<div class="modal-actions">'+button("返回历史","file-history",'data-pid="'+pid+'"',"ghost")+(v.current?"":button("恢复成 v"+v.number,"version-restore",'data-pid="'+pid+'" data-commit="'+esc(a.dataset.commit)+'"',"primary"))+'</div>',"large");
+ }
+ const v=await rpc("file_version",{path:p.path,commit:a.dataset.commit});
  if(!await ask("现在的内容会留在历史里。",{title:"把这个文件恢复成这个版本？",ok:"恢复"}))return;
  await rpc("file_write",{path:p.path,content:v.content||""});closeModal();await loadFile(pid);toast("已恢复");
 }

@@ -725,13 +725,17 @@ class Lattice:
         return sorted(names, key=lambda n: (self.ORDER.index(n) if n in self.ORDER else len(self.ORDER), n))
 
     def history(self, path):
+        """A file's versions, newest first, each numbered from the first; the newest is marked current when it is what
+        the file holds now (edits not yet committed make the file newer than every version)."""
         _, rel = self.resolve(path)
         if rel is None:
             return []
         row = self.index.one("SELECT id FROM files WHERE path=? AND kind IN ('topic','card','lesson','note','insight')", (rel,))
         versions = self.vault.history(rel, row["id"] if row else None)
+        for i, v in enumerate(versions):
+            v["number"] = len(versions) - i
         if versions and self.vault.at(versions[0]["commit"], versions[0]["path"]) == (self.vault.read_text(rel) if self.vault.path(rel).exists() else None):
-            versions = versions[1:]  # the newest commit is the version on disk now, not history
+            versions[0]["current"] = True
         return versions
 
     # ---- notebooks: standard .ipynb files ------------------------------------------------------------
@@ -871,12 +875,30 @@ class Lattice:
         return head
 
     def thread_for(self, agent, topic=None):
-        """The conversation an agent is having about a topic (None: the default conversation)."""
+        """The conversation an agent is having about a topic (None: the default conversation). The quick answer's is the
+        one that goes with the tutor's conversation there."""
+        if agent == "flash":
+            return self.flash_for(self.thread_for("tutor", topic))
         current = self.current_thread(agent, topic)
         if current:
             return current
         name = self.doc(topic, "topic")["title"] if topic else None
         return self.thread_new(agent, topic, ({"tutor": "主会话", "flash": "快答"}.get(agent, agent)) + (" · " + name if name else ""))["id"]
+
+    def paired_flash(self, tutor):
+        """The quick-answer conversation beside one of the tutor's (the newest, when a fresh one was started), if any."""
+        row = self.index.one("SELECT id FROM threads WHERE agent='flash' AND json_extract(head,'$.pair')=? ORDER BY created DESC LIMIT 1", (tutor,))
+        return row["id"] if row else None
+
+    def flash_for(self, tutor, fresh=False):
+        """Each of the tutor's conversations has a quick-answer conversation of its own beside it, made when first
+        needed (or again, fresh, when the learner starts it over)."""
+        found = None if fresh else self.paired_flash(tutor)
+        if found:
+            return found
+        topic = self.thread_head(tutor).get("topic")
+        name = self.doc(topic, "topic")["title"] if topic else None
+        return self.thread_new("flash", topic, "快答" + (" · " + name if name else ""), {"pair": tutor})["id"]
 
     def current_thread(self, agent, topic=None):
         """The one the learner last opened about this topic, while it is still there and not archived; else the newest."""
@@ -915,6 +937,122 @@ class Lattice:
                         "last": re.sub(r"\s+", " ", r["last"] or "").strip()[:120],
                         "answer": re.sub(r"\s+", " ", re.sub(r"```.*?(```|$)", "", r["answer"] or "", flags=re.S)).strip()[:160]})
         return out
+
+    # Folders that are Lattice's own records or the learner's settings, not material to look for.
+    UNLISTED = (*APPEND_ONLY, ".lattice/", "agents/", "skills/", "envs/", "apps/assets/", ".git")
+
+    def file_map(self):
+        """Every file of the vault by where it came up: under its topic, in the conversations it was written, changed,
+        opened, attached, noted or built in (a quick answer's, a practice's or an app build's count as the tutor
+        conversation they go with); the rest by folder. Newest first everywhere."""
+        docs = {r["path"]: r for r in self.index.rows("SELECT id, path, kind, title, topic, attrs, updated FROM docs")}
+        by_id = {r["id"]: r["path"] for r in docs.values()}
+        paths = [r["path"] for r in self.index.rows("SELECT path FROM files")
+                 if not r["path"].startswith(self.UNLISTED) and r["path"] not in KEPT and docs.get(r["path"], {"kind": ""})["kind"] != "topic"]
+        threads = {r["id"]: {"agent": r["agent"], "topic": r["topic"], "head": json.loads(r["head"])}
+                   for r in self.index.rows("SELECT id, agent, topic, head FROM threads")}
+        built = {}
+        for r in self.index.rows("SELECT refs FROM journal WHERE type='built'"):
+            refs = json.loads(r["refs"])
+            if len(refs) >= 2:
+                built[refs[1]] = refs[0]
+
+        def tutor_of(thread, depth=0):
+            t = threads.get(thread)
+            if not t or depth > 3:
+                return None
+            head = t["head"]
+            if t["agent"] == "tutor":
+                return None if head.get("trial") else thread
+            if t["agent"] == "flash":
+                return tutor_of(head.get("pair"), depth + 1)
+            if t["agent"] == "builder":
+                return tutor_of(built.get(thread), depth + 1)
+            if t["agent"] == "coach" and head.get("practice", {}).get("source_message"):
+                row = self.index.one("SELECT thread FROM messages WHERE id=?", (head["practice"]["source_message"],))
+                return tutor_of(row["thread"], depth + 1) if row else None
+            return None
+
+        touched, topic_hint = {}, {}
+
+        def touch(path, thread, at, topic=None):
+            path = str(path or "").split("#", 1)[0]
+            if not path:
+                return
+            tutor = tutor_of(thread) if thread else None
+            if tutor:
+                touched.setdefault(path, {})
+                touched[path][tutor] = max(at, touched[path].get(tutor, ""))
+            if topic and path not in topic_hint:
+                topic_hint[path] = topic
+
+        for r in self.index.rows("SELECT at, type, refs, data FROM journal WHERE type IN ('action','wrote','built','carded') ORDER BY at DESC"):
+            data, refs = json.loads(r["data"]), json.loads(r["refs"])
+            if r["type"] == "action":
+                ref = str(data.get("ref") or "")
+                if ref.startswith(("file:", "cell:")):
+                    touch(ref.split(":", 1)[1], data.get("thread"), r["at"], data.get("topic"))
+            elif r["type"] == "wrote":
+                for f in data.get("files") or []:
+                    touch(f.get("file"), data.get("thread"), r["at"], data.get("topic"))
+                if data.get("file"):
+                    touch(data["file"], refs[0] if refs else None, r["at"])
+            elif r["type"] == "built":
+                touch(data.get("file"), refs[0] if refs else None, r["at"])
+            elif r["type"] == "carded":
+                for card in data.get("cards") or []:
+                    touch(by_id.get(card.get("id") if isinstance(card, dict) else card), refs[0] if refs else None, r["at"])
+        for r in self.index.rows("SELECT thread, meta, at FROM messages WHERE meta LIKE '%\"attach\"%'"):
+            for path in json.loads(r["meta"]).get("attach") or []:
+                touch(path, r["thread"], r["at"])
+        for t_id, t in threads.items():
+            practice = t["head"].get("practice")
+            if practice and practice.get("file"):
+                touch(practice["file"], t_id, t["head"].get("created", ""), practice.get("topic"))
+
+        sessions = {s["id"]: s for s in self.sessions("tutor", every=True)}
+        topics = {r["id"]: r for r in docs.values() if r["kind"] == "topic"}
+        tree, loose = {}, {}
+        for path in paths:
+            doc = docs.get(path)
+            try:
+                mtime = datetime.fromtimestamp(self.vault.path(path).stat().st_mtime).astimezone().isoformat(timespec="seconds")
+            except OSError:
+                continue
+            convs = touched.get(path, {})
+            entry = {"path": path, "title": doc["title"] if doc else path.rsplit("/", 1)[-1], "kind": doc["kind"] if doc else kind_of(path),
+                     "at": max([mtime, *convs.values()])}
+            topic = (doc["topic"] if doc and doc["topic"] in topics else None) or next(
+                (sessions[c]["topic"] for c in convs if c in sessions), None) or (topic_hint.get(path) if topic_hint.get(path) in topics else None)
+            if not convs and not topic:
+                loose.setdefault(path.split("/", 1)[0] if "/" in path else "", []).append(entry)
+                continue
+            node = tree.setdefault(topic or "", {"threads": {}, "files": []})
+            listed = False
+            for conv in convs:
+                if conv in sessions and (sessions[conv]["topic"] or "") == (topic or ""):
+                    node["threads"].setdefault(conv, []).append({**entry, "at": convs[conv]})
+                    listed = True
+            if not listed:
+                node["files"].append(entry)
+        newest = lambda files: max((f["at"] for f in files), default="")
+        out, active = [], self.active_topic()
+        for key, node in tree.items():
+            convs = [{"id": c, "title": sessions[c]["title"], "archived": sessions[c]["archived"], "current": False,
+                      "files": sorted(files, key=lambda f: f["at"], reverse=True)} for c, files in node["threads"].items()]
+            convs.sort(key=lambda c: newest(c["files"]), reverse=True)
+            files = sorted(node["files"], key=lambda f: f["at"], reverse=True)
+            topic = topics.get(key)
+            out.append({"id": key, "title": topic["title"] if topic else "默认对话", "path": topic["path"] if topic else None,
+                        "state": json.loads(topic["attrs"]).get("state") if topic else None, "active": (key or None) == active,
+                        "threads": convs, "files": files, "at": max(newest(files), *(newest(c["files"]) for c in convs), "")})
+        out = [t for t in out if t["active"]] + sorted((t for t in out if not t["active"]), key=lambda t: t["at"], reverse=True)
+        current = self.current_thread("tutor", active)
+        for t in out:
+            for c in t["threads"]:
+                c["current"] = c["id"] == current
+        return {"topics": out, "loose": [{"folder": k, "files": sorted(v, key=lambda f: f["at"], reverse=True)}
+                                         for k, v in sorted(loose.items(), key=lambda kv: newest(kv[1]), reverse=True)]}
 
     def unsaved_threads(self):
         """The tutor's conversations with replies since they were last saved, and when the last thing was said in each."""

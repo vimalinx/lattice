@@ -593,6 +593,16 @@ function wrapWith(m){
   return true;
  };
 }
+/* Enter on a list item with nothing in it ends the list, as in Obsidian or Typora: a nested one moves out a level first,
+   one at the top loses its marker. Anything else goes on to the language's Enter, which continues the list. */
+function endEmptyItem(view){
+ const sel=view.state.selection.main;if(!sel.empty)return false;
+ const line=view.state.doc.lineAt(sel.head),m=/^(\s*)([-*+]|\d+[.)])( \[[ xX]\])?\s*$/.exec(line.text);
+ if(!m||sel.head!==line.to)return false;
+ const indent=m[1],out=indent.length?indent.slice(0,Math.max(0,indent.length-4))+line.text.slice(indent.length).trimEnd()+" ":"";
+ view.dispatch({changes:{from:line.from,to:line.to,insert:out},selection:{anchor:line.from+out.length},userEvent:"input"});
+ return true;
+}
 // Ctrl + Enter on a line: tick or untick its checkbox, or make it one.
 function toggleTask(view){
  const st=view.state,changes=[],seen=new Set();
@@ -674,14 +684,16 @@ function createEditor(host,text,opts){
  const keys=[
   ...(opts.keys||[]),
   {key:"Tab",run:CA.acceptCompletion},{key:"Tab",run:tabOut},{key:"Tab",run:tabIndent(md),shift:CC.indentLess},
-  ...(md?[{key:"Mod-Shift-t",run:v=>insertTable(v)},{key:"Mod-b",run:wrapWith("**")},{key:"Mod-i",run:wrapWith("*")},{key:"Mod-Shift-x",run:wrapWith("~~")},{key:"Mod-`",run:wrapWith("`")},{key:"Mod-Enter",run:toggleTask}]:[]),
-  ...CA.closeBracketsKeymap,...CC.defaultKeymap,...CQ.searchKeymap,...CC.historyKeymap,...CL.foldKeymap,
+  ...(md?[{key:"Mod-Shift-t",run:v=>insertTable(v)},{key:"Mod-b",run:wrapWith("**")},{key:"Mod-i",run:wrapWith("*")},{key:"Mod-Shift-x",run:wrapWith("~~")},{key:"Mod-`",run:wrapWith("`")},{key:"Mod-Enter",run:toggleTask},{key:"Enter",run:endEmptyItem}]:[]),
  ];
+ // The standard keys go below the language's own: in Markdown, Enter continues a list (1. → 2., - → -, - [ ] → - [ ])
+ // and Backspace takes a list marker off, before plain newline and delete.
+ const standard=[...CA.closeBracketsKeymap,...CC.defaultKeymap,...CQ.searchKeymap,...CC.historyKeymap,...CL.foldKeymap];
  const ext=[
   CC.history(),CV.drawSelection(),CV.dropCursor(),CS.EditorState.allowMultipleSelections.of(true),CL.indentOnInput(),CL.bracketMatching(),
   CA.closeBrackets(),CQ.highlightSelectionMatches(),CV.rectangularSelection(),CV.crosshairCursor(),CQ.search({top:true}),
   CL.indentUnit.of("    "),CS.EditorState.tabSize.of(4),
-  CS.Prec.highest(CV.keymap.of(keys)),CL.syntaxHighlighting(cmHighlight),cmTheme,...(md?[lang.of([])]:[]),
+  CS.Prec.highest(CV.keymap.of(keys)),CV.keymap.of(standard),CL.syntaxHighlighting(cmHighlight),cmTheme,...(md?[lang.of([])]:[]),
   CV.EditorView.updateListener.of(u=>{if(u.docChanged)opts.onChange?.(host);if(u.selectionSet||u.docChanged)opts.onCursor?.(u.view);}),
  ];
  if(opts.placeholder)ext.push(CV.placeholder(opts.placeholder));

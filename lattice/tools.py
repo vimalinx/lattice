@@ -10,8 +10,10 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import re
 import shutil
 import shlex
+import time
 from pathlib import Path
 
 from . import agents
@@ -130,7 +132,7 @@ def _guard(ctx, path):
 
 # ---- state ------------------------------------------------------------------------------------
 
-@tool("screen", ALL, "学习者此刻的界面：开着哪些面板、哪个在前台、每个文件看到哪一节或哪几格、光标和选中的内容、没保存的草稿、阅读器里开着的网页（哪一页、读到哪一节、顶上那段话）、最近看过的文件和停留时间、正在运行什么和最近一次运行的结果。只有位置和摘要；要看全文用 read、conversation 或 web_fetch。layout.windows 是每个在显示的窗口的位置和大小（占整个窗口区域的比例，x、y 从左上角算）；around_you 是从你这段对话的窗口看出去，其余每个窗口在哪一边（左边、右下方、浮在上面…）、是不是紧挨着你、多大，挨着的排在前面。学习者说「右边那个」「下面的笔记」时照这个找。")
+@tool("screen", ALL, "学习者此刻的界面：开着哪些面板、哪个在前台、每个文件看到哪一节或哪几格、光标和选中的内容、没保存的草稿、阅读器里开着的网页（哪一页、读到哪一节、顶上那段话）、最近看过的文件和停留时间、正在运行什么和最近一次运行的结果。只有位置和摘要；要看全文用 read、conversation 或 web_fetch。layout.windows 是每个在显示的窗口的位置和大小（占整个窗口区域的比例，x、y 从左上角算）；around_you 是从你这段对话的窗口看出去，其余每个窗口在哪一边（左边、右下方、浮在上面…）、是不是紧挨着你、多大，挨着的排在前面。学习者说「右边那个」「下面的笔记」时照这个找。separate_windows 是学习者拿到单独窗口里的面板（常常放大了、在另一块屏幕上），里面的内容和主窗口里的一样能读。")
 def screen(ctx):
     state = ctx.bridge.screen_state()
     around = _around(ctx, (state.get("layout") or {}).get("windows") or [])
@@ -318,18 +320,21 @@ def due(ctx):
 
 # ---- the shell ------------------------------------------------------------------------------------
 
-@tool("shell", {"tutor", "coach", "organizer", "builder"}, "在沙箱里运行一条 bash 命令，工作目录是学习库：用来查看、搜索、分析和按规矩组织文件（ls、rg、cat、head、git log、python…）。学习库可写，挂载的外部目录只读，不联网，看不到家目录的其余部分。Python 用学习库的环境。命令有时限，输出过长会截断。命令改动的文件会作为一次可撤销的操作提交；改到只归学习者的部分会被自动退回。"
+@tool("shell", {"tutor", "coach", "organizer", "builder"}, "在沙箱里运行一条 bash 命令，工作目录是学习库：用来查看、搜索、分析和按规矩组织文件（ls、rg、cat、head、git log、python…）。学习库可写，挂载的外部目录只读，看不到家目录的其余部分。"
+      "能上互联网（经过 Lattice 的代理：pip、requests、curl、git、下载数据集都行；连不了这台电脑和局域网，结果里会列出访问了哪些网站）；下载的模型和数据集缓存在 .lattice/cache，超过 50MB 的新文件留在学习库里但不进历史。Python 用学习库的环境。命令有时限，输出过长会截断。命令改动的文件会作为一次可撤销的操作提交；改到只归学习者的部分会被自动退回。"
       "要用 NVIDIA 显卡（CUDA、torch.cuda…）时 gpu 设为 true：这条命令运行时显卡被唤醒、结束就回到休眠；不需要显卡时别设。",
       {"command": S, "timeout": I, "gpu": {"type": "boolean"}}, ["command"])
 def shell(ctx, command, timeout=None, gpu=False):
     command = text(command, 20000)
     bridge = ctx.bridge
     limit = max(3, min(int(timeout or bridge.config.read()["shell_timeout"]), 600))
+    began = time.monotonic()
 
     def start(done):
         def finish(result):
             if isinstance(result, Exception):
                 return done({"error": str(result)})
+            result = {**result, **_network(ctx, began)}
             restored = ctx.l.police()
             # what the command changed, not what Lattice itself wrote meanwhile and has yet to commit
             changed = [rel for _, rel in ctx.l.vault.changes() if not ctx.l.vault.ours(rel)]
@@ -718,25 +723,59 @@ def _write(ctx, rel, content, summary):
     return {"restored": "理解阶段、回顾安排和「我的理解」只归学习者，这几处已还原"} if restored else {}
 
 
-@tool("edit", {"tutor", "coach", "organizer", "builder"}, "直接改学习库里的一个文件：把 old（必须只出现一次）换成 new。只用于你自己的示例和实验文件、整理学习者刚写完的东西，或者学习者明确让你改的时候；其余情况用 suggest。",
-      {"file": S, "old": S, "new": S}, ["file", "old", "new"])
-def edit(ctx, file, old, new):
+@tool("edit", {"tutor", "coach", "organizer", "builder"}, "改学习库里的一个文件：只改要改的地方，文件的其余部分不动。edits 是一处或好几处修改 [{old, new}]，"
+      "按顺序替换，每个 old 必须在（前面几处改完后的）文件里恰好出现一次。why 用一句话写这一版改了什么、为什么（比如「加上温度参数，看采样怎么变」）："
+      "它就是这个版本的说明，学习者在文件的历史版本里看得到、能和上一版逐行对比。同一个程序一直在原文件上改，不要另存成 _v2、_new、-ext 之类的新文件。"
+      "只用于你自己的示例、实验和应用文件、整理学习者刚写完的东西，或者学习者明确让你改的时候；其余情况用 suggest。",
+      {"file": S, "edits": {"type": "array", "items": {"type": "object", "properties": {"old": S, "new": S}, "required": ["old", "new"]}}, "why": S},
+      ["file", "edits", "why"])
+def edit(ctx, file, edits, why):
     rel = _guard(ctx, _path_of(ctx, file))
     content = ctx.l.vault.read_text(rel)
-    if content.count(old) != 1:
-        raise ValueError("old 必须在文件里恰好出现一次（现在出现了 %d 次）" % content.count(old))
-    return {"file": rel, **_write(ctx, rel, content.replace(old, text(new), 1), "改了 " + rel.rsplit("/", 1)[-1])}
+    if not edits:
+        raise ValueError("edits 至少要有一处修改")
+    for i, change in enumerate(edits, 1):
+        old, new = str(change.get("old") or ""), text(change.get("new") or "")
+        count = content.count(old) if old else 0
+        if count != 1:
+            raise ValueError(f"第 {i} 处修改的 old 必须在文件里恰好出现一次（现在出现了 {count} 次）；整个修改都没有做")
+        content = content.replace(old, new, 1)
+    return {"file": rel, "changes": len(edits), **_write(ctx, rel, content, _version(rel, why, "改了"))}
 
 
-@tool("write", {"tutor", "coach", "organizer", "builder"}, "新建或整篇改写学习库里的一个文件（不给目录时放进 code/）。Markdown 文档要保留开头的属性块。规则同 edit。",
-      {"file": S, "content": S}, ["file", "content"])
-def write(ctx, file, content):
+# A new file named as another version of one beside it: bench.py -> bench_v2.py, bench-ext.py, bench2.py, bench_new.py…
+VARIANT = re.compile(r"^(.+?)[-_ .]*(?:v(?:er)?\d+|\d+|new|ext(?:ended)?|fix(?:ed)?|final|copy|backup|bak|old|alt|"
+                     r"改进?|修改|修正|新版?|副本|备份|版本\d*)$", re.I)
+
+
+def _version(rel, why, verb):
+    """What a version is called in the file's history: the file, and what changed in it."""
+    note = text(why or "", 160).strip()
+    return verb + " " + rel.rsplit("/", 1)[-1] + ("：" + note if note else "")
+
+
+@tool("write", {"tutor", "coach", "organizer", "builder"}, "新建学习库里的一个文件（不给目录时放进 code/）；why 用一句话写它是做什么的。"
+      "已经有的文件用 edit 改，不整篇重写；只有结构全变了、改的比留的多时，rewrite 设为 true 再整篇重写，why 写为什么重写。"
+      "Markdown 文档（笔记、课程）可以整篇改写，要保留开头的属性块。不要把同一个程序另存成 _v2、_new、-ext 这样的新文件：它的每一版都在它自己的历史里。规则同 edit。",
+      {"file": S, "content": S, "why": S, "rewrite": {"type": "boolean"}}, ["file", "content"])
+def write(ctx, file, content, why="", rewrite=False):
     path = str(file).strip()
     if "/" not in path:
         path = "code/" + slug(path, 120)
     rel = _guard(ctx, path)
-    existed = ctx.l.vault.path(rel).exists()
-    return {"file": rel, "created": not existed, **_write(ctx, rel, text(content, 2_000_000), ("改写了 " if existed else "新建了 ") + rel.rsplit("/", 1)[-1])}
+    target = ctx.l.vault.path(rel)
+    existed = target.exists()
+    if existed and not rewrite and target.suffix.lower() != ".md":
+        raise ValueError(f"{rel} 已经有了：用 edit 只改要改的地方（一次可以改好几处），why 写这一版改了什么。确实要整篇重写时 rewrite 设为 true。")
+    if not existed:
+        match = VARIANT.match(target.stem)
+        if match:
+            original = target.with_name(match.group(1).rstrip("-_ .") + target.suffix)
+            same = [original.name] if original.is_file() else []
+            if same:
+                raise ValueError(f"这像是「{same[0]}」的另一个版本。同一个程序在原文件上用 edit 改，每一版都会记在它的历史里、能逐行对比；"
+                                 "真是另一个程序，就起一个能说明它做什么的名字。")
+    return {"file": rel, "created": not existed, **_write(ctx, rel, text(content, 2_000_000), _version(rel, why, "重写了" if existed else "新建了"))}
 
 
 @tool("write_cell", {"tutor", "coach", "organizer"}, "在实验笔记里新增或改写一个单元格（kind 为 code 或 markdown）。notebook 是路径或 id；不给时写进当前练习的笔记本，或者当前主题最近的实验笔记（没有就新建一本）。给 cell 时改写那一格；after 指定插在哪一格后面。想看结果就接着用 run。",
@@ -757,7 +796,7 @@ def write_cell(ctx, source, kind="code", notebook=None, cell=None, after=None):
     return {"notebook": rel, "cell": ident}
 
 
-@tool("run", {"tutor", "coach", "builder"}, "运行一个文件并等它结束，取回真实输出：.py、.ipynb（cells 指定单元格，不给就全部）、.c、.cpp、.rs、.go、.js、.ts、.sh 等。在沙箱里执行（不联网）；缺 Python 包时会自动装上再跑一次。学习者关掉了「允许 AI 运行代码」时会拒绝，这时请学习者自己点运行。"
+@tool("run", {"tutor", "coach", "builder"}, "运行一个文件并等它结束，取回真实输出：.py、.ipynb（cells 指定单元格，不给就全部）、.c、.cpp、.rs、.go、.js、.ts、.sh 等。在沙箱里执行（能上互联网，连不了这台电脑和局域网）；缺 Python 包时会自动装上再跑一次。学习者关掉了「允许 AI 运行代码」时会拒绝，这时请学习者自己点运行。"
       "要用 NVIDIA 显卡（训练、CUDA）时 gpu 设为 true：显卡只在这次运行时被唤醒，结束就回到休眠；实验笔记会换到用显卡的内核（之前的变量没了），"
       "这个内核空闲 15 分钟后自动关掉。训练这类跑得久的，用 timeout 给够秒数（最多 3600）。",
       {"file": S, "cells": LIST, "gpu": {"type": "boolean"}, "timeout": I}, ["file"])
@@ -770,11 +809,13 @@ def run(ctx, file, cells=None, gpu=False, timeout=None):
     if not absolute.is_file():
         raise ValueError("文件不存在：" + path)
 
+    began = time.monotonic()
+
     def start(done):
         def finish(result):
             outputs = result.get("outputs") or []
             readable = "\n".join(readable_outputs(outputs, 6000))
-            done({"state": result.get("state"), "exit_code": result.get("exit_code"), "seconds": result.get("seconds"),
+            done({**_network(ctx, began), "state": result.get("state"), "exit_code": result.get("exit_code"), "seconds": result.get("seconds"),
                   "output": readable[-12000:], "figures": sum(1 for o in outputs if "image/png" in (o.get("data") or {})),
                   **({"cells": result["cells"]} if result.get("cells") else {}), **({"note": result["note"]} if result.get("note") else {})})
         try:
@@ -875,6 +916,16 @@ def fetch_asset(ctx, url, file):
             done({"file": rel, "bytes": len(data), "type": kind, "from": final})
         ctx.bridge.background(lambda: web.asset(url), finish)
     return Later(start)
+
+
+def _network(ctx, began):
+    """Where a command or run went on the internet, and what it was refused; noted in the journal too."""
+    reached, refused = ctx.bridge.netproxy.since(began)
+    if not reached and not refused:
+        return {}
+    ctx.l.record("net", {"reached": reached[:30], "refused": refused[:30]}, ctx.agent, [ctx.thread])
+    return {"network": {**({"reached": reached[:30]} if reached else {}),
+                        **({"refused": refused[:30], "why_refused": "沙箱连不了这台电脑和局域网里的地址"} if refused else {})}}
 
 
 def today():

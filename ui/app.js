@@ -33,6 +33,8 @@ function applyUi(){
  const u=S.ui,root=document.documentElement;
  root.dataset.theme=u.theme==="light"?"light":"dark";root.dataset.density=u.density||"comfortable";
  root.style.setProperty("--font-size",(Number(u.font_size)||14.5)+"px");root.style.setProperty("--code-size",(Number(u.code_font_size)||13)+"px");
+ // Notes, cards, lessons and topics are read at length: their text has a size of its own, larger than the interface's.
+ root.style.setProperty("--note-size",(Number(u.note_font_size)||16)+"px");root.style.setProperty("--note-scale",String((Number(u.note_font_size)||16)/(Number(u.font_size)||14.5)));
  root.style.setProperty("--line-height",String(Number(u.line_height)||1.8));root.style.setProperty("--read-width",readWidth(u.read_width));
  applyTheme();
  Object.keys(Dock.panels).forEach(applyView);
@@ -91,7 +93,8 @@ function tabMenu(pid,at){
   '<button data-action="zoom-step" data-pid="'+pid+'" data-dir="-1" title="缩小 · Ctrl -">A−</button><b>'+Math.round(zoomOf(p)*100)+'%</b>'+
   '<button data-action="zoom-step" data-pid="'+pid+'" data-dir="1" title="放大 · Ctrl =">A+</button></div>'+
   (p.zoom?'<button data-action="zoom-step" data-pid="'+pid+'" data-dir="0">'+svg("undo",14)+'<span>恢复成这种面板的默认（'+Math.round(zoomDefault(p)*100)+'%）</span></button>':"")+'<hr/>'+
-  (floating?"":'<button data-action="dock-float" data-pid="'+pid+'">'+svg("float",14)+'<span>浮出</span></button>')+
+  (WINDOW?"":(floating?"":'<button data-action="dock-float" data-pid="'+pid+'">'+svg("float",14)+'<span>浮出</span></button>')+
+   '<button data-action="dock-window" data-pid="'+pid+'">'+svg("external",14)+'<span>放大成单独的窗口</span></button>')+
   '<button data-action="dock-close" data-pid="'+pid+'">'+svg("close",14)+'<span>关闭</span></button>');
  Menus.reopen=()=>tabMenu(pid,at);
 }
@@ -149,7 +152,8 @@ function sendScreen(){
   look:{base:S.ui.theme,theme:S.ui.theme_custom||"默认",...(activeTheme()?{vars:activeTheme().vars,font:activeTheme().font||undefined,css:activeTheme().css?activeTheme().css.slice(0,600):undefined}:{}),saved:Object.keys(S.ui.themes||{})},
   workspace:{now:currentSpace().name,sidebar:sideOpen()?(currentSpace().side||[]):"收起",all:visibleSpaces().map(x=>x.name)},theme:S.ui.theme,
   open_but_hidden:stacks.flatMap(s=>s.tabs).filter(t=>!shown.includes(t.id)).map(t=>t.title),recent_files:Dwell.recent.slice(0,20),selection:Sel.text?shorten(Sel.text,600):undefined};
- return rpc("screen",{state});
+ if(WINDOW)state.layout.title=windowTitleShown;
+ return rpc("screen",{state,...(WINDOW?{window:WINDOW}:{})});
 }
 /* The split tree in brief, so an agent can see how the panels sit before it rearranges them. */
 function layoutShape(n){return n.t==="stack"?{tabs:n.tabs}:{split:n.dir,sizes:n.sizes.map(x=>+x.toFixed(2)),parts:n.kids.map(layoutShape)};}
@@ -181,6 +185,10 @@ function screenNote(){
 }
 /* ---- events from the backend ---------------------------------------------------------------------------------- */
 async function onEvent(evt){
+ // Moving panels, opening things and checking apps are the main window's to do; a separate window shows its panel.
+ if(WINDOW&&["ui","open","app_check","open_panel","window_closed"].includes(evt.type))return;
+ if(evt.type==="open_panel")return openPanel(evt.params);
+ if(evt.type==="window_closed")return fromWindow(evt.params,evt.origin||{});
  if(evt.type==="agent"&&String(evt.thread||"").startsWith("compare:"))return compareEvent(evt);
  if(evt.type==="agent"&&evt.agent==="builder"){appAgentEvent(evt);if(evt.kind==="finished")refreshState();return;}
  if(evt.type==="agent")return chatEvent(evt);
@@ -211,6 +219,9 @@ async function onAction(a){
  switch(kind){
  case "dock-close":return closePanel(pid);
  case "dock-float":return float(pid);
+ case "dock-window":return toWindow(pid);
+ case "dock-unfloat":return unfloat(pid);
+ case "window-return":return rpc("window_return",{window:WINDOW});
  case "modal-close":return closeModal();
  case "new-menu":return newMenu(a);
  case "stack-add":return stackMenu(a,a.dataset.stack);
@@ -244,7 +255,7 @@ async function onAction(a){
  case "open-file":return openFile(a.dataset.path||a.dataset.id,{line:a.dataset.line?Number(a.dataset.line):null,highlight:a.dataset.highlight||null});
  case "open-doc":{const d=(S.data.docs||[]).find(x=>x.id===a.dataset.id);if(d)return openFile(d.path);return toast("找不到这个文档，它可能已经被删除","error");}
  case "open-dir":{Side.open.add(a.dataset.path);if((currentSpace().side||[]).includes("files"))return setSideOpen(true);
-  const sp=visibleSpaces().find(x=>(x.side||[]).includes("files"));if(sp){switchSpace(sp.id);return setSideOpen(true);}return toast("没有哪个工作区的左栏放着「全部文件」");}
+  const sp=visibleSpaces().find(x=>(x.side||[]).includes("files"));if(sp){switchSpace(sp.id);return setSideOpen(true);}return toast("没有哪个工作区的左栏放着「文件」");}
  case "open-thread":return openPanel({type:"chat",agent:a.dataset.agent||"tutor",thread:a.dataset.thread});
  case "open-practice":return openPractice(a.dataset.id);
  case "open-ref":return openRef(a.dataset.ref);
@@ -252,6 +263,8 @@ async function onAction(a){
  case "open-web":return openWeb(a.dataset.url,pid);
  case "web-back":case "web-refresh":case "web-copy":case "web-save":return readerAction(kind,a,pid);
  case "open-vault":return rpc("open_folder",{});
+ case "files-view":S.ui.files_view=S.ui.files_view==="folders"?"":"folders";saveUi();return renderSide();
+ case "files-fold":{const k=a.dataset.key,on=a.dataset.on==="1";Side.fileOpen[on?"delete":"add"](k);Side.fileShut[on?"add":"delete"](k);return renderSide();}
  case "tree-toggle":{const p=a.dataset.path;Side.open.has(p)?Side.open.delete(p):Side.open.add(p);return renderSide();}
  case "project-add":{const path=await pickPath({mode:"dir",title:"挂载一个本地目录",ok:"挂载",hint:"挂载后你能读写，AI 只读"});if(!path)return;const r=await rpc("project_add",{path},0);if(r){delete Side.entries[""];await refreshState();renderSide();toast("已挂载 "+r.name+"：你能读写，AI 只读");}return;}
  case "project-remove":if(!await ask("目录本身不会被改动。",{title:"取消挂载这个目录？",ok:"取消挂载",cancel:"留着"}))return;await rpc("project_remove",{id:a.dataset.id});delete Side.entries[""];await refreshState();return renderSide();
@@ -287,7 +300,7 @@ async function onAction(a){
   else if(kind==="view-set")setView(pid,key,key==="read_width"&&a.dataset.value==="toggle"?(readChars(viewOf(p,key))?"none":readChars(S.ui.read_width)||42):a.dataset.value);
   else if(kind==="view-reset"){setZoom(pid,null);VIEW_KEYS.forEach(k=>setView(pid,k,null));}
   else{
-   const step={font_size:[.5,11,24],code_font_size:[.5,10,24]}[key];
+   const step={font_size:[.5,11,24],note_font_size:[.5,12,28],code_font_size:[.5,10,24]}[key];
    S.ui[key]=kind==="ui-step"?Math.min(step[2],Math.max(step[1],(Number(S.ui[key])||14)+Number(a.dataset.dir)*step[0])):a.dataset.value;
    applyUi();saveUi();if(key==="thinking")Object.keys(Chat).forEach(x=>{Chat[x].thoughts={};Chat[x].liveOpen=null;renderChat(x);});
   }
@@ -301,7 +314,7 @@ async function onAction(a){
  case "chat-cancel":return rpc("cancel",{thread:Chat[pid].thread});
  case "chat-task":return chatSend(pid,"",{task:a.dataset.task});
  case "session-kept":{const k=a.dataset.key;Side.archOpen.has(k)?Side.archOpen.delete(k):Side.archOpen.add(k);return renderSide();}
- case "chat-sessions":case "session-new":case "session-open":case "session-more":case "session-rename":case "session-archive":case "session-delete":return sessionAction(kind,a);
+ case "session-new":case "session-open":case "session-more":case "session-rename":case "session-archive":case "session-delete":return sessionAction(kind,a);
  case "chat-new":{if(SESSION_AGENTS.has(Dock.panels[pid]?.agent))return sessionAction("session-new",a);if(!await ask("之前的对话还在，可以在学习库的 threads/ 里找到，也能被搜索到。",{title:"开一段新会话？",ok:"开新会话"}))return;await rpc("thread_new",{agent:Dock.panels[pid].agent,topic:S.data.active_topic||""});return loadChat(pid,false);}
  case "practice-start":return startPractice(pid,a.dataset.mid);
  case "practice-end":return endPractice(pid);
@@ -367,7 +380,7 @@ async function onAction(a){
   let tutor=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="tutor"&&!Dock.panels[x].thread);if(!tutor)openPanel({type:"chat",agent:"tutor"});else activate(tutor);return;}
  case "topic-delete":{if(!await ask("里面的卡片、笔记和对话都会留下，只是不再属于它。主题文件会留在学习库的历史里。",{title:"删除这个主题？",...{danger:true,ok:"删除"}}))return;
   await rpc("topic_delete",{id:a.dataset.id});const p=a.closest(".panel")?.dataset.pid;if(p)await closePanel(p);await refreshState();return followingPanels().forEach(x=>loadChat(x));}
- case "version-view":case "version-restore":return versionAction(kind,a);
+ case "version-diff":case "version-restore":return versionAction(kind,a);
  case "file-history":return showHistory(pid);
  }
  if(kind.startsWith("space")||kind==="stack-unkeep"){const r=await spaceAction(kind,a);if(r!==null)return r;}
@@ -495,7 +508,17 @@ async function boot(){
     S.data=await rpc("bootstrap");S.config=S.data.config;S.ui=S.config.ui;
     el("#app").innerHTML='<div id="shell"><nav id="activity"></nav><aside id="side"></aside><div id="side-gutter"></div><div id="dock-wrap"><div id="dock"></div><div id="floats"></div></div></div>'+
      '<footer id="status"></footer><div id="organizer" hidden></div><div id="drop-mark"></div><datalist id="doc-titles"></datalist>';
-    applyUi();initInteractions();initSideResize();loadLayout(S.data.layout);await refreshState();renderSide();reportScreen();
+    applyUi();initInteractions();initSideResize();
+    if(WINDOW){
+     // A separate window: just its panel, filling it.
+     document.body.classList.add("separate-window");
+     const params=await rpc("window_params",{window:WINDOW}),sp=visibleSpaces()[0].id,pid="w"+WINDOW.slice(0,10);
+     if(!params){el("#dock-wrap").innerHTML=emptyState("layout","这个窗口里的面板已经放回主窗口了","可以关掉这个窗口。");return;}
+     loadLayout({panels:{[pid]:params},spaces:{[sp]:{root:stackNode([pid]),floats:[]}},space:sp});
+     await refreshState();refreshTab(pid);reportScreen();return;
+    }
+    loadLayout(S.data.layout);for(const w of S.data.returned_windows||[])fromWindow(w.params,w.origin||{});
+    await refreshState();renderSide();reportScreen();
     if(S.data.migrated)toast("已把原来的学习数据迁移成文件，放在 "+S.data.vault);
     if(S.data.problems?.length)console.warn("读不了的文件",S.data.problems);
    }catch(err){console.error(err);el("#app").innerHTML='<div class="boot">初始化失败：'+esc(err.message)+'<br/><button class="btn" onclick="location.reload()">重试</button></div>';}

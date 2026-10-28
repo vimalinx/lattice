@@ -25,9 +25,11 @@ class StoreTests(unittest.TestCase):
         new=self.l._edit_doc(ident,lambda a,b:({**a,"title":"注意力：修订后"},"经过实验修订的解释"))
         self.l.vault.commit("第二版")
         self.assertNotEqual(rel,new)
+        # Both versions are listed, newest first; the newest is what the file holds now.
         versions=self.l.history(new)
-        self.assertEqual(len(versions),1)
-        self.assertIn("第一种解释",self.l.vault.at(versions[0]["commit"],versions[0]["path"]))
+        self.assertEqual([v["number"] for v in versions],[2,1])
+        self.assertTrue(versions[0].get("current"))
+        self.assertIn("第一种解释",self.l.vault.at(versions[1]["commit"],versions[1]["path"]))
 
     def test_graph_links_and_backlinks(self):
         self.l.note_create("Transformer","连接到 [[Attention]]")

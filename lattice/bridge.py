@@ -7,6 +7,7 @@ thread; everything that touches the vault or the index happens on it.
 """
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import logging
@@ -30,6 +31,7 @@ from .notebook import NotebookWorker
 from .providers import AGENT_NAMES, ApiWorker, Config
 from .runner import RunWorker, command_for, missing_tool, runner_for, tool_hint
 from . import accel, appscheme
+from .netproxy import NetProxy
 from .sandbox import MPL, Sandbox, on_gpu
 from .vault import APPEND_ONLY, VAULT_PATH, VaultError, kind_of, slug as vault_slug, split_frontmatter
 
@@ -72,6 +74,35 @@ def compact(items):
     return json.dumps(items, ensure_ascii=False, default=str)
 
 
+def notebook_sources(raw):
+    """A notebook as its cells' sources, one after another, for comparing versions."""
+    try:
+        cells = json.loads(raw).get("cells") or [] if raw else []
+    except ValueError:
+        return raw
+    return "\n".join(f"# ── 第 {i} 格（{'代码' if c.get('cell_type') == 'code' else '文字'}）\n" + "".join(c.get("source") or "")
+                     for i, c in enumerate(cells, 1))
+
+
+def line_diff(before, after, context=3, limit=3000):
+    """Two texts compared line by line: the changed lines with `context` unchanged ones around them, and how many lines
+    were added and removed. Each line carries its number in the old (o) or new (n) text."""
+    a, b = before.splitlines(), after.splitlines()
+    lines, added, removed = [], 0, 0
+    for group in difflib.SequenceMatcher(None, a, b, autojunk=False).get_grouped_opcodes(context):
+        first = group[0]
+        if first[1] > 0 or lines:
+            lines.append({"t": "skip", "n": first[3] + 1})
+        for tag, i1, i2, j1, j2 in group:
+            if tag == "equal":
+                lines += [{"t": "ctx", "o": i + 1, "n": j + 1, "s": b[j]} for i, j in zip(range(i1, i2), range(j1, j2))]
+                continue
+            lines += [{"t": "del", "o": i + 1, "s": a[i]} for i in range(i1, i2)]
+            lines += [{"t": "add", "n": j + 1, "s": b[j]} for j in range(j1, j2)]
+            removed, added = removed + i2 - i1, added + j2 - j1
+    return {"lines": lines[:limit], "cut": len(lines) > limit, "added": added, "removed": removed, "same": not added and not removed}
+
+
 def app_meta(head, fallback):
     """An app's name and one-line description, from its <title> and <meta name="description">."""
     title = re.search(r"<title[^>]*>(.*?)</title>", head, re.S | re.I)
@@ -98,7 +129,10 @@ class Bridge(QObject):
             self.envs.wanted("default")
             self.lattice.index.sync()
             self.lattice.vault.commit("建立默认的 Python 环境定义", "lattice")
-        self.sandbox = Sandbox(self.root, self.lattice.projects, lambda: self.config.read()["sandbox_paths"])
+        # The sandbox's way out to the internet; its socket lives outside the vault (a socket's path has to be short).
+        self.netproxy = NetProxy(Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / f"lattice-net-{os.getpid()}.sock")
+        self.sandbox = Sandbox(self.root, self.lattice.projects, lambda: self.config.read()["sandbox_paths"],
+                               network=lambda: self.config.read()["agent_network"], proxy=self.netproxy)
         self.workers, self.turns, self.contexts, self.busy, self.status = {}, {}, {}, set(), {}
         # Conversations whose next reply answers their last question again (see rpc_retry).
         self.retrying = set()
@@ -117,6 +151,11 @@ class Bridge(QObject):
         self.reviews = {}
         self.runs, self.kernels, self.kernel_states, self.batches = {}, {}, {}, {}
         self.screen, self.edits, self.last_write = {}, {}, 0.0
+        self.window_screens = {}   # what each separate window shows, by its id
+        # Panels left in windows of their own when Lattice last closed: they come back into the main window.
+        self.returned_windows = [{"params": w["params"], "origin": w.get("origin") or {}} for w in (self.lattice.setting("separate_windows") or {}).values()
+                                 if isinstance(w, dict) and w.get("params")]
+        self.lattice.set_setting("separate_windows", {})
         self.tests, self._retired = [], []
         self.ui_waiters = {}
         self.closing = False
@@ -227,7 +266,11 @@ class Bridge(QObject):
                     files.append({"file": rel, "added": int(added) if added.isdigit() else None, "removed": int(removed) if removed.isdigit() else None})
             commit = vault.commit("我的编辑", "me")
             if commit and files:
-                self.lattice.record("wrote", {"files": files[:30], "commit": commit}, "me", [f["file"] for f in files[:30]])
+                # Where the learner was when they wrote it, so the file is found under that topic and conversation.
+                topic = self.lattice.active_topic()
+                thread = self.lattice.current_thread("tutor", topic)
+                self.lattice.record("wrote", {"files": files[:30], "commit": commit, "topic": topic, "thread": thread}, "me",
+                                    [f["file"] for f in files[:30]] + [x for x in (topic, thread) if x])
         except Exception as exc:
             LOG.warning("commit failed: %s", exc)
 
@@ -247,7 +290,8 @@ class Bridge(QObject):
 
     def rpc_bootstrap(self):
         state = self._local_state()
-        return {**self.rpc_state(), "vault": str(self.root), "layout": state.get("layout"), "config": self.config.public(),
+        returned, self.returned_windows = self.returned_windows, []
+        return {**self.rpc_state(), "vault": str(self.root), "layout": state.get("layout"), "returned_windows": returned, "config": self.config.public(),
                 "sandbox": {"ok": self.sandbox.available(), "why": self.sandbox.why_not()}, "migrated": self.lattice.migrated,
                 "problems": self.lattice.index.problems[:20]}
 
@@ -304,6 +348,9 @@ class Bridge(QObject):
         return self.rpc_state()
 
     # ---- files -------------------------------------------------------------------------------------
+    def rpc_file_map(self):
+        return self.lattice.file_map()
+
     def rpc_file_read(self, path):
         l = self.lattice
         absolute, rel = l.resolve(path)
@@ -742,6 +789,24 @@ class Bridge(QObject):
     def rpc_file_history(self, path):
         return self.lattice.history(path)
 
+    def rpc_file_diff(self, path, commit, against="previous"):
+        """What one version changed from the one before it, or (against="now") how the file now differs from it; line by
+        line, with a few unchanged lines around each change. A notebook is compared by its cells' sources."""
+        l = self.lattice
+        _, rel = l.resolve(path)
+        versions = l.history(rel)
+        at = next((i for i, v in enumerate(versions) if v["commit"] == commit), None)
+        if at is None:
+            raise ValueError("找不到这个版本")
+        content = lambda v: (l.vault.at(v["commit"], v["path"]) or "") if v else ""
+        if against == "now":
+            before, after = content(versions[at]), l.vault.read_text(rel) if l.vault.path(rel).exists() else ""
+        else:
+            before, after = content(versions[at + 1] if at + 1 < len(versions) else None), content(versions[at])
+        if rel.endswith(".ipynb"):
+            before, after = notebook_sources(before), notebook_sources(after)
+        return line_diff(before, after)
+
     def rpc_file_version(self, path, commit):
         _, rel = self.lattice.resolve(path)
         version = next((v for v in self.lattice.history(rel) if v["commit"] == commit), None)
@@ -903,26 +968,73 @@ class Bridge(QObject):
             self.lattice.record("viewed", {"file": path, "seconds": int(seconds), "where": str(where)[:200]}, "me", [path])
         return True
 
-    def rpc_screen(self, state):
-        """What the UI shows right now; agents read it with the screen tool."""
-        self.screen = state if isinstance(state, dict) else {}
-        for f in (self.screen.get("mine") or {}).get("files") or []:
+    def rpc_screen(self, state, window=None):
+        """What the UI shows right now, the main window's or (window) a separate one's; agents read it with the screen tool."""
+        state = state if isinstance(state, dict) else {}
+        if window:
+            if window in (self.lattice.setting("separate_windows") or {}):
+                self.window_screens[window] = state
+        else:
+            self.screen = state
+        for f in (state.get("mine") or {}).get("files") or []:
             if f.get("typing"):
                 self.edits[f.get("path")] = time.monotonic()
         return True
+
+    # ---- panels in windows of their own -------------------------------------------------------------
+    def rpc_window_open(self, params, title="", origin=None):
+        """Take a panel out into a window of its own (to make it big, or put it on another screen). The panel works
+        there as it did, agents still see it, and closing the window puts it back."""
+        if not isinstance(params, dict) or not params.get("type"):
+            raise ValueError("没有要放进单独窗口的面板")
+        ident = uid()
+        opened = self.lattice.setting("separate_windows") or {}
+        opened[ident] = {"params": params, "title": str(title or "")[:120], "origin": origin if isinstance(origin, dict) else {}}
+        self.lattice.set_setting("separate_windows", opened)
+        self.parent().open_window(ident, str(title or "Lattice")[:120])
+        return {"window": ident}
+
+    def rpc_window_params(self, window):
+        return ((self.lattice.setting("separate_windows") or {}).get(window) or {}).get("params")
+
+    def rpc_window_return(self, window):
+        """Close a separate window: its panel goes back where it was in the main window."""
+        self.parent().close_window(window)
+        return True
+
+    def rpc_window_title(self, window, title):
+        self.parent().title_window(window, str(title or "")[:120])
+        return True
+
+    def rpc_open_in_main(self, params):
+        """Something opened from a separate window opens in the main one."""
+        self.announce({"type": "open_panel", "params": params})
+        return True
+
+    def window_closed(self, ident):
+        opened = self.lattice.setting("separate_windows") or {}
+        entry = opened.pop(ident, None)
+        self.lattice.set_setting("separate_windows", opened)
+        self.window_screens.pop(ident, None)
+        if entry:
+            self.announce({"type": "window_closed", "window": ident, "params": entry["params"], "origin": entry.get("origin") or {}})
 
     def rpc_typing(self, path):
         self.edits[path] = self.last_write = time.monotonic()
         return True
 
     def typing(self, rel):
-        files = (self.screen.get("mine") or {}).get("files") or []
+        files = [f for state in (self.screen, *self.window_screens.values()) for f in (state.get("mine") or {}).get("files") or []]
         return time.monotonic() - self.edits.get(rel, -99) < 10 or any(f.get("path") == rel and f.get("dirty") for f in files)
 
     def screen_state(self):
         l = self.lattice
         topic = l.active_topic()
-        return {**self.screen, "conversation_topic": l.topic(topic)["title"] if topic else "默认对话（不属于任何主题）",
+        # A panel the learner took out into a window of its own is on show too, often big, on a screen of its own.
+        separate = [{"window_title": (state.get("layout") or {}).get("title"), "showing": (state.get("mine") or {}).get("files", []) +
+                     (state.get("mine") or {}).get("other", []) + (state.get("ai") or {}).get("panels", [])} for state in self.window_screens.values()]
+        return {**self.screen, **({"separate_windows": separate} if separate else {}),
+                "conversation_topic": l.topic(topic)["title"] if topic else "默认对话（不属于任何主题）",
                 "running": [{"file": v["path"], "by": v["by"]} for v in self.runs.values()],
                 "kernels": {k: v.get("state") for k, v in self.kernel_states.items()},
                 "recent_runs": [{"at": e["at"][:16], "by": e["actor"], **{k: e["data"].get(k) for k in ("file", "cell", "state", "summary")}}
@@ -930,7 +1042,8 @@ class Bridge(QObject):
                 "active_practices": [p for p in l.practices() if p["state"] == "active"],
                 "agent_may_run_code": bool(self.config.read()["agent_auto_run"]), "sandbox": self.sandbox.available(), "today": tools.today(),
                 # Facts about where things run, so an agent does not have to guess why something failed.
-                "where_things_run": {"sandbox_network": False, "install_network": True,
+                "where_things_run": {"sandbox_network": "能上互联网（经过 Lattice 的代理），连不了这台电脑和局域网" if self.config.read()["agent_network"]
+                                     else "学习者在设置里关掉了沙箱联网", "install_network": True,
                                      "gpu": ("能用：shell 或 run 带 gpu=true" if self.gpu_ready() else "学习者在设置里关掉了显卡"
                                              if self.accel()["preferred"] != "cpu" else "这台电脑上没有能用来计算的显卡，只能用 CPU"),
                                      "accelerator": self.accel_brief(),
@@ -1388,8 +1501,11 @@ class Bridge(QObject):
     def rpc_thread_new(self, agent, topic=None):
         topic = self.lattice.active_topic() if topic is None else (topic or None)
         name = self.lattice.topic(topic)["title"] if topic else None
+        if agent == "flash":
+            # A fresh quick answer beside the tutor's conversation there; it replaces the one that was beside it.
+            return {"thread": self.lattice.flash_for(self.lattice.thread_for("tutor", topic), fresh=True)}
         ident = self.lattice.thread_new(agent, topic, AGENT_NAMES[agent] + (" · " + name if name else ""))["id"]
-        if agent in ("tutor", "flash"):
+        if agent == "tutor":
             self.lattice.thread_pick(ident)
         return {"thread": ident}
 
@@ -1408,7 +1524,10 @@ class Bridge(QObject):
     def rpc_session_open(self, id):
         """Learn in this conversation: its topic becomes the one being learned, and it the conversation that topic opens."""
         head = self.lattice.thread_head(id)
-        if head.get("practice") or head.get("trial") or head.get("agent") not in ("tutor", "flash"):
+        if head.get("agent") == "flash" and head.get("pair"):
+            # A quick answer opens with the conversation it goes with.
+            id, head = head["pair"], self.lattice.thread_head(head["pair"])
+        if head.get("practice") or head.get("trial") or head.get("agent") != "tutor":
             raise ValueError("练习和试用的对话不在会话列表里")
         left = self.lattice.current_thread(head["agent"], self.lattice.active_topic())
         if left != id:
@@ -1566,7 +1685,7 @@ class Bridge(QObject):
         last = l.index.one("SELECT at FROM messages WHERE thread=? AND role='assistant' ORDER BY id DESC LIMIT 1", (thread,))
         if not last:
             return ""
-        side = l.current_thread("flash", topic)
+        side = l.paired_flash(thread)
         asked = [e["data"].get("text", "") for e in l.journal("asked", side, last["at"], limit=8)] if side else []
         judged = l.journal("judged", thread, last["at"], limit=6)
         handed = [e["data"]["handoff"] for e in l.journal("action", side, last["at"], limit=4) if e["data"].get("handoff")] if side else []
@@ -2274,6 +2393,7 @@ class Bridge(QObject):
 
     def shutdown(self):
         self.closing = True
+        self.netproxy.stop()
         workers = list(self.workers.values()) + self.tests + [r["worker"] for r in self.runs.values()]
         for worker in workers + list(self.kernels.values()):
             if worker.isRunning():
