@@ -79,16 +79,12 @@ jobs:
       - name: Installer
         shell: pwsh
         run: |
-          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
-            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6"
-            if (-not (Test-Path "$iscc\ISCC.exe")) { choco install innosetup -y --no-progress }
-            $env:PATH = "$iscc;$env:PATH"
-          }
-          $languages = Join-Path (Split-Path (Get-Command iscc).Source) "Languages"
-          $chinese = Get-ChildItem $languages -Recurse -Filter ChineseSimplified.isl -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($chinese) { Copy-Item $chinese.FullName packaging/windows/ }
-          else { Invoke-WebRequest https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseSimplified.isl -OutFile packaging/windows/ChineseSimplified.isl }
-          iscc /DVersion=$env:VERSION packaging/windows/lattice.iss
+          # The newest Inno Setup, whose own languages include Simplified Chinese.
+          choco upgrade innosetup -y --no-progress
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6"
+          Copy-Item "$iscc\Languages\ChineseSimplified.isl" packaging/windows/
+          & "$iscc\ISCC.exe" /DVersion=$env:VERSION packaging/windows/lattice.iss
+          if ($LASTEXITCODE) { throw "the installer was not built" }
           Compress-Archive dist/Lattice/* "dist/Lattice-$env:VERSION-windows-x64.zip"
       - uses: actions/upload-artifact@v4
         with:
