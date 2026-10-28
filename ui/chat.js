@@ -15,7 +15,7 @@ panelType("chat",{side:"ai",icon:p=>AGENT_ICON[p.agent]||"bot",
   const topic=p.agent==="flash"?null:head?.topic;return agentTitle(p.agent)+(topic?" · "+topicTitle(topic):"");
  },
  mount(p,node,pid){
-  Chat[pid]={input:"",stream:"",live:[],waiting:"",error:"",data:null,cache:{},attach:[],quote:"",opened:new Set(),thoughts:{},...freshThinking()};
+  Chat[pid]={input:"",stream:"",live:[],waiting:"",error:"",data:null,attach:[],quote:"",opened:new Set(),thoughts:{},...freshThinking()};
   node.innerHTML='<div class="chat-frame"><div class="chat"><div class="chat-head"></div><div class="chat-scroll"><div class="loading">正在打开对话…</div></div><div class="composer"></div><div class="chat-starters"></div></div></div>';
   loadChat(pid);
  },
@@ -33,9 +33,11 @@ async function loadChat(pid,keepScroll=true){
  // Without a thread of its own, a panel shows the conversation the topic being learned opens (the one last picked).
  const data=await safe(()=>rpc("chat",p.thread?{agent:p.agent,thread:p.thread}:{agent:p.agent,topic:S.data.active_topic||""}));
  if(!data||!Chat[pid])return;
- if(st.thread&&st.thread!==data.thread){st.cache={};st.stream="";st.live=[];st.error="";st.anchored=false;st.bottom=undefined;}
+ // Going to the end is for a conversation that changed; one reloaded where it was (another opened elsewhere) stays put.
+ const moved=st.thread!==data.thread;
+ if(st.thread&&moved){st.stream="";st.live=[];st.error="";st.anchored=false;st.bottom=undefined;}
  st.thread=data.thread;st.data=data;
- renderChat(pid,keepScroll);refreshTab(pid);
+ renderChat(pid,keepScroll||!moved);refreshTab(pid);
 }
 /* ---- a topic's conversations, listed under their topics in the sidebar. Opening one makes its topic the one being
    learned and it the conversation that topic opens, in every panel following along. The quick answer is one
@@ -115,13 +117,23 @@ function renderChat(pid,keepScroll=true){
  }
  node.querySelector(".chat-head").innerHTML=chatHead(pid);
  const answers=answersOf(st.data);
- scroll.innerHTML="";
+ // Messages already drawn stay as they are, with whatever was opened, revealed, run or dragged in them; only new or
+ // changed ones are drawn, so a long conversation does not redraw all its formulas each time a reply comes.
+ if(scroll.__thread!==st.thread){scroll.innerHTML="";scroll.__thread=st.thread;}
+ const drawn=new Map();for(const n of scroll.querySelectorAll(":scope>.msg[data-mid]"))drawn.set(n.dataset.mid,n);
  const msgs=st.data.messages,empty=!msgs.length&&!st.data.busy;
  node.querySelector(".chat").classList.toggle("blank",empty);
- if(empty)scroll.appendChild(h('<div class="chat-welcome">'+chatWelcome(p.agent)+'</div>'));
+ const want=empty?[h('<div class="chat-welcome">'+chatWelcome(p.agent)+'</div>')]:[];
  const divider=importedDivider(st);
- msgs.forEach(m=>{scroll.appendChild(messageEl(pid,m,answers));if(divider&&m.id===divider.after)scroll.appendChild(h(divider.html));});
- scroll.appendChild(h('<div class="live-slot"></div>'));scroll.appendChild(h('<div class="chat-spacer"></div>'));
+ msgs.forEach(m=>{
+  const key=messageKey(pid,m,answers),old=drawn.get(String(m.id));
+  want.push(old?.__key===key?old:messageEl(pid,m,answers,key));
+  if(divider&&m.id===divider.after)want.push(h(divider.html));
+ });
+ want.push(scroll.querySelector(":scope>.live-slot")||h('<div class="live-slot"></div>'),scroll.querySelector(":scope>.chat-spacer")||h('<div class="chat-spacer"></div>'));
+ let at=scroll.firstChild;
+ for(const n of want){if(n===at)at=at.nextSibling;else scroll.insertBefore(n,at);}
+ while(at){const next=at.nextSibling;at.remove();at=next;}
  renderLive(pid);
  node.querySelector(".chat-starters").innerHTML=empty?chatStarters(pid):"";
  if(!node.querySelector(".composer textarea"))node.querySelector(".composer").innerHTML=composerHtml(pid);
@@ -202,34 +214,39 @@ function topicMenu(pid,anchor){
   topics.slice(0,14).map(t=>'<button data-action="topic-focus" data-id="'+esc(t.id)+'">'+svg("map",14)+'<span>'+esc(t.title)+'</span></button>').join("")+
   (!topic&&!topics.length?'<p class="menu-empty">还没有主题。聊着聊着，主会话会把值得深入的内容建成主题。</p>':""));
 }
-function messageEl(pid,m,answers){
+/* What a message's drawing depends on: itself, where it stands, and the state of what it holds (its steps undone, its
+   suggestions decided, its questions answered, cards noted from it), so a change elsewhere leaves it as it is. */
+function messageKey(pid,m,answers){
+ const st=Chat[pid],meta=m.meta||{},list=st.data.messages,at=list.indexOf(m),next=list[at+1];
+ const undone=new Set([...(st.data.undone||[]),...(S.data?.undone||[])]);
+ const mine=Object.keys(answers).filter(k=>k.startsWith(m.id+":")).map(k=>k+"="+answers[k].length);
+ return [m.id,m.content.length,JSON.stringify(meta).length,!!next,next?.meta?.retry,!next&&st.data.busy,S.ui.thinking,
+  (meta.actions||[]).filter(a=>undone.has(a.id)).map(a=>a.id),(meta.suggestions||[]).map(x=>st.data.decisions?.[m.id+":"+x.id]||""),mine,
+  (st.data.cards?.[m.id]||[]).map(c=>c.id)].join("|");
+}
+function messageEl(pid,m,answers,key){
  const st=Chat[pid],p=Dock.panels[pid],meta=m.meta||{},list=st.data.messages,at=list.indexOf(m),next=list[at+1];
  // A reply that broke off: the last one can be answered again; one already answered again says so.
  const redone=m.role==="assistant"&&next?.role==="assistant"&&next.meta?.retry,canRetry=!next&&!st.data.busy;
- const key=m.id+"|"+m.content.length+"|"+redone+"|"+canRetry+"|"+(st.data.undone||[]).length+"|"+JSON.stringify(st.data.decisions||{}).length+"|"+Object.keys(answers).length+"|"+S.ui.thinking+"|"+(st.data.cards?.[m.id]||[]).length;
- let cached=st.cache[m.id];
- if(!cached||cached.key!==key){
-  const mine=m.role==="user";
-  const r=mine?{html:markdown(m.content),blocks:[]}:replyHtml(meta.imported?adaptImported(m.content):m.content);
-  const incomplete=!mine&&meta.stop_reason&&meta.stop_reason!=="end_turn";
-  const foot='<div class="msg-foot">'+(mine?"":'<span>'+esc(meta.imported||agentTitle(meta.agent||p.agent))+'</span>')+'<time>'+esc(fmtDate(m.at,true))+'</time>'+(mine?"":usageLabel(meta.usage))+
-   (m.content.trim()?iconButton("copy","msg-copy","复制",'data-pid="'+pid+'" data-mid="'+m.id+'"'):"")+(!mine&&m.content.trim()?messageTools(pid,m):"")+'</div>';
-  const html=mine?'<div class="msg from-me" data-mid="'+m.id+'"><div class="bubble">'+
-    (meta.skill_title?'<div class="msg-skill"'+(meta.skill?' data-skill-open="'+esc(meta.skill)+'" data-tip="看看、改改这个技能"':"")+'>'+svg("store",11)+' 按技能「'+esc(meta.skill_title)+'」</div>':"")+
-    (meta.selection?'<div class="msg-quote">'+esc(shorten(meta.selection,180))+'</div>':"")+
-    (meta.attach?.length?messageTiles(meta.attach):"")+
-    '<div class="markdown msg-body">'+r.html+'</div></div>'+foot+'</div>'
-   :'<div class="msg from-ai" data-mid="'+m.id+'">'+skillsUsed(meta.skills||olderSkills(list,at))+thinkingHtml(meta.thinking,meta.think_seconds)+stepsHtml(meta.steps)+'<div class="markdown msg-body">'+r.html+'</div>'+
-    (redone?'<div class="msg-note">这次没有答完，下面是重新回答的</div>':incomplete?'<div class="msg-note">'+esc(meta.stop_reason==="cancelled"?"已停止 · 保留了部分回答":meta.stop_reason==="max_tokens"?"达到回复长度上限":"没有正常结束 · 只保留了收到的部分")+
-     (canRetry?button(svg("refresh",12)+" 重新回答","chat-retry",'data-pid="'+pid+'"',"ghost xs"):"")+'</div>':"")+
-    actionChips((meta.actions||[]).filter(a=>!/^(skill|me):/.test(String(a.ref||""))),st.data.undone||[])+remembered(meta.actions,st.data.undone||[])+sourcesHtml(meta.sources)+cardsNoted(st.data.cards?.[m.id])+suggestionsHtml(pid,m)+changesHtml(meta.changes)+foot+'</div>';
-  cached=st.cache[m.id]={key,html,blocks:r.blocks};
- }
- const node=h(cached.html);
+ const mine=m.role==="user";
+ const r=mine?{html:markdown(m.content),blocks:[]}:replyHtml(meta.imported?adaptImported(m.content):m.content);
+ const incomplete=!mine&&meta.stop_reason&&meta.stop_reason!=="end_turn";
+ const foot='<div class="msg-foot">'+(mine?"":'<span>'+esc(meta.imported||agentTitle(meta.agent||p.agent))+'</span>')+'<time>'+esc(fmtDate(m.at,true))+'</time>'+(mine?"":usageLabel(meta.usage))+
+  (m.content.trim()?iconButton("copy","msg-copy","复制",'data-pid="'+pid+'" data-mid="'+m.id+'"'):"")+(!mine&&m.content.trim()?messageTools(pid,m):"")+'</div>';
+ const html=mine?'<div class="msg from-me" data-mid="'+m.id+'"><div class="bubble">'+
+   (meta.skill_title?'<div class="msg-skill"'+(meta.skill?' data-skill-open="'+esc(meta.skill)+'" data-tip="看看、改改这个技能"':"")+'>'+svg("store",11)+' 按技能「'+esc(meta.skill_title)+'」</div>':"")+
+   (meta.selection?'<div class="msg-quote">'+esc(shorten(meta.selection,180))+'</div>':"")+
+   (meta.attach?.length?messageTiles(meta.attach):"")+
+   '<div class="markdown msg-body">'+r.html+'</div></div>'+foot+'</div>'
+  :'<div class="msg from-ai" data-mid="'+m.id+'">'+skillsUsed(meta.skills||olderSkills(list,at))+thinkingHtml(meta.thinking,meta.think_seconds)+stepsHtml(meta.steps)+'<div class="markdown msg-body">'+r.html+'</div>'+
+   (redone?'<div class="msg-note">这次没有答完，下面是重新回答的</div>':incomplete?'<div class="msg-note">'+esc(meta.stop_reason==="cancelled"?"已停止 · 保留了部分回答":meta.stop_reason==="max_tokens"?"达到回复长度上限":"没有正常结束 · 只保留了收到的部分")+
+    (canRetry?button(svg("refresh",12)+" 重新回答","chat-retry",'data-pid="'+pid+'"',"ghost xs"):"")+'</div>':"")+
+   actionChips((meta.actions||[]).filter(a=>!/^(skill|me):/.test(String(a.ref||""))),st.data.undone||[])+remembered(meta.actions,st.data.undone||[])+sourcesHtml(meta.sources)+cardsNoted(st.data.cards?.[m.id])+suggestionsHtml(pid,m)+changesHtml(meta.changes)+foot+'</div>';
+ const node=h(html);node.__key=key;
  const fold=node.querySelector("details.actions");if(fold)fold.open=st.opened.has(String(m.id));
  const thought=node.querySelector("details.thinking-box");if(thought)thought.open=st.thoughts[m.id]??S.ui.thinking==="open";
  const steps=node.querySelector("details.steps-box");if(steps)steps.open=st.opened.has("steps:"+m.id);
- if(cached.blocks.length)mountBlocks(node,cached.blocks,{thread:st.thread,message:m.id,answers,pid});
+ if(r.blocks.length)mountBlocks(node,r.blocks,{thread:st.thread,message:m.id,answers,pid});
  if(meta.changes?.length)mountInlineChanges(node);
  if(meta.attach?.length){hydrateVault(node);fillTextTiles(node);}
  return node;
