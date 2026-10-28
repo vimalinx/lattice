@@ -79,11 +79,22 @@ jobs:
       - name: Installer
         shell: pwsh
         run: |
-          # The newest Inno Setup, whose own languages include Simplified Chinese.
           choco upgrade innosetup -y --no-progress
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6"
-          Copy-Item "$iscc\Languages\ChineseSimplified.isl" packaging/windows/
-          & "$iscc\ISCC.exe" /DVersion=$env:VERSION packaging/windows/lattice.iss
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          # Simplified Chinese for the installer: Inno Setup's own where it has it, else its repository's.
+          $chinese = "${env:ProgramFiles(x86)}\Inno Setup 6\Languages\ChineseSimplified.isl"
+          if (Test-Path $chinese) { Copy-Item $chinese packaging/windows/ }
+          else {
+            try { Invoke-WebRequest https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseSimplified.isl -OutFile packaging/windows/ChineseSimplified.isl }
+            catch { Write-Warning "no Simplified Chinese for the installer: $_" }
+          }
+          & $iscc /DVersion=$env:VERSION packaging/windows/lattice.iss
+          if ($LASTEXITCODE -and (Test-Path packaging/windows/ChineseSimplified.isl)) {
+            # A translation newer than this compiler: the installer in English rather than none.
+            Write-Warning "the Chinese translation did not compile here; building the installer in English"
+            Remove-Item packaging/windows/ChineseSimplified.isl
+            & $iscc /DVersion=$env:VERSION packaging/windows/lattice.iss
+          }
           if ($LASTEXITCODE) { throw "the installer was not built" }
           Compress-Archive dist/Lattice/* "dist/Lattice-$env:VERSION-windows-x64.zip"
       - uses: actions/upload-artifact@v4

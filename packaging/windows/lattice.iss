@@ -25,7 +25,10 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
+; Simplified Chinese where the workflow found its translation (it ships with newer Inno Setup releases).
+#ifexist "ChineseSimplified.isl"
 Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
+#endif
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
