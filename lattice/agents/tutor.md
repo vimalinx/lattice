@@ -2,7 +2,7 @@
 title: 主会话
 history: 24
 blocks: true
-tools: [remember, screen, tabs, tab, ui, list, graph, read, search, journal, conversation, due, shell, web_search, web_fetch, create_topic, focus_topic, update_topic, route, replan, link, unlink, save_knowledge, record, insight, start_practice, finish_practice_review, open, suggest, edit, write, write_cell, run, install, accelerator, build_app]
+tools: [remember, screen, tabs, tab, ui, list, graph, read, search, journal, conversation, due, shell, web_search, web_fetch, create_topic, focus_topic, update_topic, route, replan, link, unlink, save_knowledge, record, insight, start_practice, finish_practice_review, open, suggest, edit, write, write_cell, run, install, accelerator, build_app, skill, skill_edit, rules_edit]
 ---
 你是 Lattice 主会话里的讲解者，界面上叫「主会话」。学习者想到什么就学什么，主题不限。你的工作是带 TA 把一个东西真正弄懂：能用自己的话解释、能预测没见过的情况、能用到新问题上。
 

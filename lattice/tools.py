@@ -670,7 +670,7 @@ UI_OP = {"type": "object", "properties": {"do": {"type": "string", "enum": ["ope
                                           "apply": {"type": "boolean"}, "replace": {"type": "boolean"}, "delete": {"type": "boolean"}}, "required": ["do"]}
 
 
-@tool("ui", {"tutor", "flash", "coach"}, "控制整个界面，ops 按顺序执行。界面分成几个工作区（活动栏上的图标，见 screen 的 workspace），每个是一套窗口组合，左栏放它自己的列表；"
+@tool("ui", {"tutor", "coach"}, "控制整个界面，ops 按顺序执行。界面分成几个工作区（活动栏上的图标，见 screen 的 workspace），每个是一套窗口组合，左栏放它自己的列表；"
       "同一个面板（比如主会话）可以同时出现在几个工作区。下面的操作都作用在学习者眼前的这个工作区；对话工作区可以放任何面板，由你按需要安排。\n"
       "- open：打开面板。panel 是 chat（给 agent：tutor 主会话 / flash 快答）、file（给 path）、map（可给 topic）、journal、review（回顾到期的卡）、library（卡片库）、memory（记忆：理解阶段、到期预报、回顾记录）、noteinfo（笔记旁边的大纲、反向链接、出链和标签）、skills（技能商城）、settings、home、web（给 url：在学习者这边的阅读器里打开一个网页或 PDF，读成文字、能点链接，不用跳去浏览器）；where 是 left / right / top / bottom（贴着 to 指定的面板分栏）、float（浮出）或 tab（默认：放进 to 所在的那组标签，不给 to 就放进同一侧最近用的那组）。\n"
       "- close / focus / float：panel 是面板 id 或标题（从 screen 里看）。\n"
@@ -717,7 +717,7 @@ def open_file(ctx, file, line=None, highlight=None, cell=None):
     return {"opened": rel or str(absolute)}
 
 
-@tool("skill_edit", ALL, "提出修改一个技能（技能列表见系统说明的「技能」一节；先用 skill 读它现在的全文）。不会直接改："
+@tool("skill_edit", {"tutor", "coach"}, "提出修改一个技能（技能列表见系统说明的「技能」一节；先用 skill 读它现在的全文）。不会直接改："
       "学习者在左右对照里看你改了哪里（删的标红、加的标绿），可以接着改、换回原文或者不用，批准了才生效，每次修改都留历史。"
       "name 是技能名；file 默认 SKILL.md，也可以是它附带的文件；给 content 就是改后的全文（SKILL.md 可以只写正文，开头的属性没写的会保留原来的），或者给 edits（[{old, new}]，"
       "每个 old 必须在原文里恰好出现一次）；why 用一句话说为什么这样改。new 为 true 时是新建一个技能：name 是它的名字，"
@@ -745,7 +745,7 @@ def skill_edit(ctx, name, why, file="SKILL.md", content=None, edits=None, new=Fa
     return {"change": change, "note": "已经在学习者那边打开了左右对照，等 TA 审；批准之前技能还是原来的样子，不要当成已经改好了"}
 
 
-@tool("rules_edit", ALL, "提出修改一个 AI 的规则（tutor 主会话、flash 快答、coach 练习教练、organizer 整理）：规则是它每一轮都读的工作方式，开头的属性里有它能用的工具。"
+@tool("rules_edit", {"tutor", "coach"}, "提出修改一个 AI 的规则（tutor 主会话、flash 快答、coach 练习教练、organizer 整理）：规则是它每一轮都读的工作方式，开头的属性里有它能用的工具。"
       "只给 agent 就返回它现在的规则全文，先读再改。和改技能一样不会直接生效：学习者在左右对照里审、可以接着改，批准了才生效，每次修改都留历史，"
       "还能用改前改后两版规则接着同一段对话各回答一次来对比。content 是改后的全文，或者给 edits（[{old, new}]，每个 old 必须在原文里恰好出现一次）；"
       "why 用一句话说为什么这样改；questions 给两三个最能看出效果的问题。规则宁短勿长：写清要做到什么，别罗列条条框框。",

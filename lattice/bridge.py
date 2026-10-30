@@ -125,6 +125,7 @@ class Bridge(QObject):
         self.lattice = Lattice(root or (Path(chosen).expanduser() if chosen else VAULT_PATH), migrate_from=LEGACY_DB if migrate and root is None else None)
         self.root = self.lattice.root
         self.envs = Envs(self.lattice.vault)
+        self._follow_shipped_rules()
         if not self.lattice.vault.path("envs/default.txt").exists():
             self.envs.wanted("default")
             self.lattice.index.sync()
@@ -212,6 +213,18 @@ class Bridge(QObject):
 
     def announce(self, data):
         self.event.emit(compact(data))
+
+    def _follow_shipped_rules(self):
+        """Rules the learner changed stay theirs, and what a newer Lattice changed in them arrives too."""
+        l = self.lattice
+        def first_before(rel):
+            found = l.journal("skill_changed", ref=rel, limit=200)
+            return found[-1]["data"].get("before") if found else None
+        changed = agents.follow_shipped(l.vault, first_before)
+        for rel in changed:
+            l.index.reindex(rel)
+        if changed:
+            l.vault.commit("规则跟上了新版 Lattice，保留了学习者的修改", "lattice")
 
     def background(self, work, then):
         """Run work() off the GUI thread, then then(result or exception) back on it."""
@@ -583,6 +596,7 @@ class Bridge(QObject):
         self.commit_mine()
         l.vault.write_text(change["file"], after)
         if rules:
+            agents.keep_shipped(l.vault, rules[0])
             l.index.reindex(change["file"])
         edited = after != change["proposed"]
         who = {"me": "我"}.get(change["by"], AGENT_NAMES.get(change["by"], change["by"]))
@@ -1868,6 +1882,8 @@ class Bridge(QObject):
         messages = [{"role": "system", "content": system}]
         messages += [{"role": m["role"], "content": m["content"]} for m in history if m["role"] in ("user", "assistant")]
         messages.append({"role": "user", "content": user})
+        # A skill picked for this message may come with files, read through the tool, whatever the agent has otherwise.
+        allowed = [*allowed, "skill"] if picked and "skill" not in allowed else allowed
         old = self.workers.get(thread)
         if old and old.isRunning():
             self._retire(old)

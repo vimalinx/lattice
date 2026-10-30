@@ -86,7 +86,7 @@ def for_agent(root, agent):
     return [s for s in installed(root) if s["enabled"] and agent in s["agents"]]
 
 
-def prompt_section(root, agent):
+def prompt_section(root, agent, editing=True):
     """What an agent knows of the skills each turn: names and when to use them, not the instructions."""
     skills = for_agent(root, agent)
     if not skills:
@@ -94,7 +94,7 @@ def prompt_section(root, agent):
     lines = "\n".join(f"- {s['name']}（{s['title']}）：{s['description']}" for s in skills)
     # Making and changing skills has a skill of its own when it is installed; the tool alone is the fallback.
     maker = next((s for s in skills if s["slug"] == "skill-maker"), None)
-    editing = (f"要新建、修改技能，或者理清几个技能的分工时，先用 skill 读「{maker['title']}」（{maker['name']}），照着做。" if maker else
+    editing = ("" if not editing else f"要新建、修改技能，或者理清几个技能的分工时，先用 skill 读「{maker['title']}」（{maker['name']}），照着做。" if maker else
                "学习者让你改一个技能、或者用下来发现它的做法有问题时，用 skill_edit 提出修改（不要用 write 或 edit），由学习者审过批准；"
                "同时用 questions 给两三个最能看出改动效果的问题，方便学习者点了就对比两版。")
     return ("# 技能\n学习库里装了下面这些技能，每个是做某一类事的完整做法。学习者的请求正好是某个技能管的事时，先用 skill 读它的完整说明，"
