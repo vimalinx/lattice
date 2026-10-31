@@ -345,6 +345,7 @@ label.check input{margin:0}
 .model-tag{grid-area:model;display:inline-flex;align-items:center;gap:4px;border:0;background:transparent;color:var(--subtle);font-size:12px;padding:4px 8px;border-radius:20px;white-space:nowrap;max-width:min(190px,28cqw);overflow:hidden;text-overflow:ellipsis}
 .model-tag span{overflow:hidden;text-overflow:ellipsis;min-width:0}
 .model-tag svg{flex:0 0 auto}
+.model-effort{flex:0 0 auto;margin-left:3px;font-style:normal;color:var(--subtle)}
 .model-tag:hover{background:var(--surface);color:var(--text)}
 .model-tag.own{color:var(--ai)}
 .model-tag.working{color:var(--ai);animation:pulse 1.6s infinite}

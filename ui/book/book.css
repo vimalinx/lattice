@@ -1,0 +1,27 @@
+:root{--bg:#10171a;--panel:#141d20;--surface:#1b2528;--text:#d9e2df;--muted:#93a29e;--subtle:#6e7a77;--line:#2a3538;--accent:#7fd8bd}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:13px/1.5 system-ui,"Noto Sans CJK SC",sans-serif;overflow:hidden}
+body{display:flex;flex-direction:column}
+#bar{display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1px solid var(--line);flex:0 0 auto;min-width:0}
+#bar button{border:0;background:transparent;color:var(--muted);font:inherit;padding:3px 8px;border-radius:6px;cursor:pointer;white-space:nowrap}
+#bar button:hover{background:var(--surface);color:var(--text)}
+#book-title{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+#where{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--subtle);font-size:12px}
+#search{width:150px;min-width:60px;flex:0 1 150px;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:6px;padding:3px 8px;font:inherit;outline:0}
+#search:focus{border-color:var(--accent)}
+#found{color:var(--subtle);font-size:12px;white-space:nowrap}
+main{flex:1 1 auto;min-height:0;display:flex;position:relative}
+#side{flex:0 0 260px;max-width:60%;overflow:auto;border-right:1px solid var(--line);background:var(--panel);padding:8px 4px}
+#side[hidden]{display:none}
+#side button{display:block;width:100%;text-align:left;border:0;background:transparent;color:var(--text);font:inherit;padding:4px 8px;border-radius:6px;cursor:pointer;overflow-wrap:anywhere}
+#side button:hover{background:var(--surface)}
+#side button.on{color:var(--accent)}
+#side small{display:block;color:var(--muted)}
+#side mark{background:transparent;color:var(--accent);font-weight:600}
+#side p{color:var(--muted);padding:4px 8px;margin:0}
+#stage{flex:1 1 auto;min-width:0;position:relative;overflow:hidden}
+#loading{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted)}
+foliate-view{display:block;width:100%;height:100%}
+/* pdf.js wants its scrolling box positioned absolutely. */
+#pdf{position:absolute;inset:0;overflow:auto;background:var(--bg)}
+#pdf .pdfViewer .page{margin:0 auto 10px;border:0;box-shadow:0 1px 6px rgba(0,0,0,.25)}

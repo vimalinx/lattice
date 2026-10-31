@@ -107,6 +107,7 @@ function targetStack(side){
  return s;
 }
 function openPanel(params,opts={}){
+ if(params.type==="file"&&isBook(params.path))params={type:"book",path:params.path};
  // From a separate window, whatever else is opened opens in the main window.
  if(WINDOW){const own=findPanel(params);if(own){activate(own);opts.then?.(own);return own;}safe(()=>rpc("open_in_main",{params}));return null;}
  let pid=opts.reuse===false?null:findPanel(params);

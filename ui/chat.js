@@ -444,7 +444,7 @@ function updateComposer(pid){
  hydrateVault(node.querySelector(".attach-row"));
  const tag=node.querySelector(".model-tag");
  const lvl=S.config?.effort_levels?.[p.effort||S.config?.agents?.[p.agent]?.effort||""];
- tag.innerHTML='<span>'+esc(modelName(m.model))+(lvl?' · 思考'+esc(lvl):"")+'</span>'+svg("chevrondown",10);tag.hidden=!m.ready;tag.classList.toggle("own",m.own);tag.classList.toggle("working",!!busy);
+ tag.innerHTML='<span>'+esc(modelName(m.model))+'</span>'+(lvl?'<i class="model-effort" data-tip="思考强度">'+esc(lvl)+'</i>':"")+svg("chevrondown",10);tag.hidden=!m.ready;tag.classList.toggle("own",m.own);tag.classList.toggle("working",!!busy);
  node.querySelector(".send-slot").innerHTML=busy?'<button class="send-round stop" data-action="chat-cancel" data-pid="'+pid+'" title="停止">'+svg("stop",13)+'</button>':
   !m.ready?button("去设置","open-settings",'data-page="agents"',"primary sm pill"):'<button class="send-round" data-action="chat-send" data-pid="'+pid+'" title="发送"'+(ended?" disabled":"")+'>'+svg("arrowup",16)+'</button>';
  fitComposer(pid);

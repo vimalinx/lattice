@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<!-- A book's pages are someone else's HTML, and load as blob: frames that take on this policy: no script but this page's
+     own, nothing from the network. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' blob:; img-src 'self' blob: data:; font-src 'self' blob: data:; media-src blob:; connect-src 'self' blob: data:; worker-src 'self' blob:; frame-src blob:; form-action 'none'; base-uri 'none'">
+<title>书</title>
+<link rel="stylesheet" href="./book.css">
+</head>
+<body>
+<header id="bar">
+ <button id="toc-toggle" title="目录">目录</button>
+ <b id="book-title"></b>
+ <span id="where"></span>
+ <input id="search" type="search" placeholder="在书里搜索" autocomplete="off">
+ <span id="found"></span>
+ <button id="flow" title="滚动或翻页" hidden>翻页</button>
+ <button id="smaller" title="缩小">−</button>
+ <button id="bigger" title="放大">+</button>
+</header>
+<main>
+ <aside id="side" hidden></aside>
+ <section id="stage"><div id="loading">正在打开…</div></section>
+</main>
+<script type="module" src="./book.js"></script>
+</body>
+</html>

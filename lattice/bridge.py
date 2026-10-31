@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 
-from . import __version__, agents, skills, tools
+from . import __version__, agents, books, skills, tools
 from .envs import Envs, missing_module
 from .index import dump, uid
 from .model import Lattice, STAGES, outside_code, readable_outputs, text
@@ -154,6 +154,7 @@ class Bridge(QObject):
         self.screen, self.edits, self.last_write = {}, {}, 0.0
         self.window_screens = {}   # what each separate window shows, by its id
         self.imports_read = {}     # conversations read to be imported, by request
+        self.book_files = {}       # the book window's way to a book's bytes: token -> where the file is
         # Panels left in windows of their own when Lattice last closed: they come back into the main window.
         self.returned_windows = [{"params": w["params"], "origin": w.get("origin") or {}} for w in (self.lattice.setting("separate_windows") or {}).values()
                                  if isinstance(w, dict) and w.get("params")]
@@ -957,6 +958,39 @@ class Bridge(QObject):
     def rpc_project_add(self, path=None):
         return self.lattice.add_project(Path(path).name, path) if path else None
 
+    def rpc_book_open(self, path):
+        """What the book window needs to show a book: a one-off way to its bytes, and where the learner got to."""
+        target, rel = self.lattice.resolve(path)
+        if not Path(target).is_file():
+            raise ValueError("找不到这本书：" + str(path))
+        token = uid()
+        self.book_files[token] = str(target)
+        return {"url": f"lattice-app://book/_book/{token}", "name": Path(target).name, "at": self._local_state().get("book_places", {}).get(rel or str(target))}
+
+    def rpc_book_place(self, path, at):
+        target, rel = self.lattice.resolve(path)
+        places = self._local_state().get("book_places", {})
+        key = rel or str(target)
+        places.pop(key, None)
+        places[key] = str(at)[:400]
+        self._local_save("book_places", dict(list(places.items())[-300:]))
+        return True
+
+    def rpc_books_add(self, paths=None):
+        """Books chosen on this computer, copied into books/ in the vault."""
+        out = []
+        for raw in paths or []:
+            source = Path(str(raw)).expanduser()
+            if not source.is_file() or not books.is_book(source.name):
+                continue
+            rel = self.lattice.vault.unique("books", source.stem, source.suffix)
+            self.lattice.vault.write_bytes(rel, source.read_bytes())
+            self.lattice.index.reindex(rel)
+            out.append(rel)
+        if out:
+            self.last_write = time.monotonic()
+        return out
+
     def rpc_attach_files(self, paths=None):
         """Copy files chosen on this computer into data/附件/, so they can be attached to a message and read
         by the agents (whose sandbox sees only the vault and mounted folders). The originals stay untouched."""
@@ -1084,7 +1118,7 @@ class Bridge(QObject):
         return time.monotonic() - self.edits.get(rel, -99) < 10 or any(f.get("path") == rel and f.get("dirty") for f in files)
 
     # ---- every tab in the interface, for the agents to look into ----------------------------------------
-    TAB_KINDS = {"file": "文件", "web": "网页", "app": "应用", "home": "开始页", "map": "知识图", "journal": "学习轨迹", "review": "回顾",
+    TAB_KINDS = {"file": "文件", "book": "书", "web": "网页", "app": "应用", "home": "开始页", "map": "知识图", "journal": "学习轨迹", "review": "回顾",
                  "library": "卡片库", "memory": "记忆", "noteinfo": "大纲与链接", "skills": "技能商城", "settings": "设置",
                  "skillchange": "改技能", "compare": "技能两版对比"}
 
@@ -1756,14 +1790,16 @@ class Bridge(QObject):
             user += self._since(thread, topic)
         if flash:
             user += "\n\n（" + self.tab_directory(thread) + "）"
-        for rel, content in inline:
-            user += f"\n\n（学习者附上的「{rel}」，全文如下）\n```\n{content}\n```"
-        if flash:
             where = ("快答不属于哪个主题或主会话，学习者在哪里有小问题就在这里问。" +
                      (f"学习者现在在学的主题是「{l.topic(topic)['title']}」（topic:{topic}）。" if topic else "学习者现在在默认对话里，没有在学哪个主题。"))
         else:
             where = self._topic_brief(definition["name"], thread, topic) if topic else "这是默认对话，不属于任何主题。"
-        context = f"现在是 {tools.today()}。{where}对话 id：{thread}。" + self._imported(thread) + self._earlier(thread, definition["history"])
+        # The route and the archive change often, so they come with the message, after the history: services cache the start
+        # of a request, and anything changing before the history would make all of it count as new.
+        user += "\n\n（现在的情况：" + where.strip() + "）"
+        for rel, content in inline:
+            user += f"\n\n（学习者附上的「{rel}」，全文如下）\n```\n{content}\n```"
+        context = f"现在是 {tools.today()}。对话 id：{thread}。" + self._imported(thread) + self._earlier(thread, definition["history"])
         if practice:
             context += (f"\n\n这次练习：practice:{thread}「{practice['title']}」，练习文件：{practice['file']}。"
                         + (f"\n目标：{practice['goal']}" if practice.get("goal") else "") + "\n\n练习依据的讲解：\n" + practice["seed"])
@@ -1804,7 +1840,7 @@ class Bridge(QObject):
         count = l.index.one("SELECT COUNT(*) AS n FROM messages WHERE thread=?", (thread,))["n"]
         if not saved or count <= history:
             return ""
-        return f"\n\n这段对话有 {count} 条，你只看得到最近的 {history} 条；更早的部分存档时的摘要（要细看用 conversation 读）：\n{saved}"
+        return f"\n\n这段对话比你看到的长；更早的部分存档时的摘要（要细看用 conversation 读）：\n{saved}"
 
     def _since(self, thread, topic):
         """What the learner did since the tutor last spoke, which says where they are unsure: the questions they put to
@@ -1841,7 +1877,10 @@ class Bridge(QObject):
         msgs = msgs if before is None else msgs[:before]
         kept = [m for i, m in enumerate(msgs) if not (m["role"] == "assistant" and i + 1 < len(msgs)
                                                       and msgs[i + 1]["role"] == "assistant" and msgs[i + 1]["meta"].get("retry"))]
-        return kept[-limit:]
+        # At least the last `limit`, starting at a place that moves in steps of half of that: while it stays put the
+        # request starts the same as the last one, and the service counts all of it as already read.
+        step = max(1, limit // 2)
+        return kept[max(0, len(kept) - limit) // step * step:]
 
     def rpc_retry(self, thread, note="", model=None, effort=None):
         """Answer the last question again after its reply was stopped, cut off or failed, without asking it twice."""

@@ -10,3 +10,5 @@
 | `purify.min.js` | [DOMPurify](https://github.com/cure53/DOMPurify) | 3.4.16 | Apache-2.0 或 MPL-2.0 |
 | `cytoscape.umd.js` | [Cytoscape.js](https://js.cytoscape.org/) | 3.34.3 | MIT |
 | `mermaid.min.js` | [Mermaid](https://mermaid.js.org/) | 10.9.4 | MIT |
+| `pdfjs/` | [PDF.js](https://mozilla.github.io/pdf.js/)（pdfjs-dist 的 legacy 构建，含 cmaps、标准字体和 wasm 解码器） | 6.4.299 | Apache-2.0（见 `pdfjs/LICENSE`） |
+| `foliate/` | [foliate-js](https://github.com/johnfactotum/foliate-js)（EPUB、MOBI、AZW3、FB2、CBZ 的解析和排版，`vendor/` 里带 zip.js 和 fflate） | 78914ae | MIT（见 `foliate/LICENSE`） |

@@ -61,7 +61,8 @@ function openMenuHtml(){
  const item=([t,a,i,d,x])=>'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+(d?'<small>'+esc(d)+'</small>':"")+'</span></button>';
  return '<div class="menu-label">新建</div><div class="menu-grid">'+NEW_ITEMS.slice(0,4).map(([t,a,i,d,x])=>item([t,a,i,"",x])).join("")+
   '<button data-action="note-new" data-folder="">'+svg("notenew",14)+'<span>新笔记</span></button>'+
-  '<button data-action="import-chat">'+svg("download",14)+'<span>导入 AI 对话</span></button></div>'+
+  '<button data-action="import-chat">'+svg("download",14)+'<span>导入 AI 对话</span></button>'+
+  '<button data-action="book-add">'+svg("book",14)+'<span>打开电子书</span></button></div>'+
   '<hr/><div class="menu-label">打开窗口</div><div class="menu-grid">'+OPEN_ITEMS.map(([t,a,i,x])=>'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+'</span></button>').join("")+'</div>'+
   '<hr/><button data-action="note-switcher">'+svg("search",14)+'<span>打开一篇笔记或文件… <small>Ctrl O</small></span></button>'+
   '<button data-action="space-new">'+svg("layout",14)+'<span>新工作区…</span></button>';
@@ -188,6 +189,7 @@ async function tabRead(evt){
    return answer({type:"file",path:p.path,view,...(draft!=null?{draft:String(draft)}:{})});
   }
   if(p.type==="chat")return answer({type:"chat",thread:Chat[pid]?.thread||p.thread||null,draft:Chat[pid]?.input||""});
+  if(p.type==="book")return answer({type:"book",path:p.path,view,progress:Books[pid]?.progress??null});
   if(p.type==="web"){const page=Reader[pid]?.page;return answer({type:"web",url:page?.url||p.url,view,markdown:page?.markdown||""});}
   if(p.type==="app"){
    if(!p.path)return answer({type:"app",live:{text:shorten(node?.innerText||"",8000)}});
@@ -264,6 +266,9 @@ async function onAction(a){
  case "dock-float":return float(pid);
  case "dock-window":return toWindow(pid);
  case "import-chat":return importChat("",a.dataset.pid||null);
+ case "book-external":return rpc("file_external",{path:Dock.panels[a.dataset.pid]?.path});
+ case "book-add":{const picked=await pickPath({mode:"files",title:"打开电子书",ok:"打开",hint:"PDF、EPUB、MOBI、AZW3、FB2、CBZ；会复制进学习库的 books/，原文件不动"});if(!picked?.length)return;
+  const paths=await rpc("books_add",{paths:picked},0);if(!paths.length)return toast("没有认识的电子书格式");paths.forEach(openFile);return sideChanged([]);}
  case "import-read":case "import-save":case "import-paste":return importAction(kind);
  case "dock-unfloat":return unfloat(pid);
  case "window-return":return rpc("window_return",{window:WINDOW});
@@ -446,6 +451,13 @@ async function openRef(ref){
 }
 /* ---- selection: ask about anything selected ----------------------------------------------------------------------- */
 function hidePop(){el("#sel-pop")?.remove();}
+function showSelPop(rect){
+ if(!rect||S.ui.selection_popup===false)return;hidePop();
+ const pop=h('<div id="sel-pop"><button data-action="ask-flash">'+svg("spark",13)+' 问快答</button><button data-action="ask-tutor">'+svg("bot",13)+' 问主会话</button></div>');
+ document.body.appendChild(pop);
+ const x=Math.min(Math.max(8,rect.left+rect.width/2-pop.offsetWidth/2),innerWidth-pop.offsetWidth-8),y=rect.top-pop.offsetHeight-8;
+ pop.style.left=x+"px";pop.style.top=(y<8?rect.bottom+8:y)+"px";
+}
 function onSelect(e){
  if(e.target.closest?.("#overlays,.menu,#sel-pop,.composer,.tabs"))return;
  const t=e.target;let text="",rect=null;
@@ -453,11 +465,7 @@ function onSelect(e){
  else{const s=window.getSelection();text=s?.toString()||"";if(s?.rangeCount)rect=s.getRangeAt(0).getBoundingClientRect();}
  if(!text.trim()){if(Sel.text)clearSelection();else hidePop();return;}
  Sel.text=text.slice(0,5000);Sel.el=t.tagName==="TEXTAREA"||t.tagName==="INPUT"?t:null;reportScreen();
- if(!rect||S.ui.selection_popup===false)return;hidePop();
- const pop=h('<div id="sel-pop"><button data-action="ask-flash">'+svg("spark",13)+' 问快答</button><button data-action="ask-tutor">'+svg("bot",13)+' 问主会话</button></div>');
- document.body.appendChild(pop);
- const x=Math.min(Math.max(8,rect.left+rect.width/2-pop.offsetWidth/2),innerWidth-pop.offsetWidth-8),y=rect.top-pop.offsetHeight-8;
- pop.style.left=x+"px";pop.style.top=(y<8?rect.bottom+8:y)+"px";
+ showSelPop(rect);
 }
 /* ---- wiring ------------------------------------------------------------------------------------------------------------- */
 function initInteractions(){

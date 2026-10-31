@@ -7,7 +7,7 @@
 - `topics/` 主题，`cards/` 知识卡，`lessons/` 课程，`notes/` 笔记（子文件夹随意），`insights/` 薄弱点和做得好的地方：都是 Markdown，属性写在开头的 YAML 里。
 - `apps/` 小应用：应用助手做的 .html 文件，在「应用」窗口的沙箱里运行（能联网，连不了本机和局域网，读不到学习库）；它们用的库和素材在 `apps/assets/`。
 - `notebooks/` 实验笔记：标准 `.ipynb`，属性在 `metadata.lattice`。
-- `code/` 代码，`data/` 数据：原样保存，用路径引用。
+- `code/` 代码，`data/` 数据，`books/` 电子书：原样保存，用路径引用。
 - `envs/<名字>.txt`：Python 环境的定义，一行一个包。某个目录里放一个 `.lattice-env` 文件（内容是环境名），这个目录下的文件就用那个环境；默认用 `default`。
 - `threads/` 对话，`journal/` 学习轨迹：JSON lines，只追加。
 - `agents/<名字>.md`：可选。放一份同名文件就能改写那个 AI 的工作方式。

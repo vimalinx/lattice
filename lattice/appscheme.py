@@ -3,6 +3,10 @@ own storage, but a different origin from Lattice's page, which they cannot reach
 which keeps its own page off the network, does not bind them). What the scheme serves: an app's files under apps/,
 Lattice's bundled libraries under /_lattice/vendor/, and the copies of an app the app builder loads to check it.
 
+Books are read on a site of their own, lattice-app://book: what is in a book is someone else's HTML, kept off Lattice's
+page, where a script could reach the agents' tools. The page there forbids scripts other than its own and the network
+(see ui/book/index.html), and gets a book's bytes from /_book/ only by a token handed out for that book.
+
 What apps may not reach is this computer and the local network: the request interceptor refuses those requests from
 an app, so an app can use the internet but not the services running here."""
 from __future__ import annotations
@@ -22,7 +26,9 @@ from PySide6.QtWebEngineCore import QWebEngineUrlRequestInterceptor, QWebEngineU
 
 SCHEME = b"lattice-app"
 # Lattice's own files an app's site may load: bundled libraries, and the runtime for ChatGPT's widgets.
-SHARED = {"vendor": host.APP / "ui" / "vendor", "widget": host.APP / "ui" / "widget"}
+SHARED = {"vendor": host.APP / "ui" / "vendor", "widget": host.APP / "ui" / "widget", "book": host.APP / "ui" / "book"}
+# A browser refuses a module script of the wrong type, and what the system says of .js or .mjs differs (Windows's registry).
+TYPES = {".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".html": "text/html; charset=utf-8", ".wasm": "application/wasm"}
 # The look Lattice is in, handed to each app as these variables (see the app-design skill).
 LOOK = ("bg", "panel", "panel-hi", "surface", "surface-hover", "line", "line-soft", "text", "muted", "subtle", "accent", "accent-ink",
         "accent-glow", "ai", "ai-glow", "amber", "red", "green", "code-bg", "code-text", "shadow", "mono", "sans")
@@ -108,9 +114,11 @@ class AppScheme(QWebEngineUrlSchemeHandler):
         try:
             if path.startswith("/_lattice/"):
                 body, mime = self._shared(path[len("/_lattice/"):])
+            elif host == "book" and path.startswith("/_book/"):
+                body, mime = Path(self.bridge.book_files[path.split("/")[2]]).read_bytes(), "application/octet-stream"
             else:
                 body, mime = self._app(host, path.lstrip("/"), parse_qs(url.query()))
-        except (OSError, ValueError, UnicodeDecodeError):
+        except (OSError, ValueError, KeyError, UnicodeDecodeError):
             return job.fail(QWebEngineUrlRequestJob.Error.UrlNotFound)
         buffer = QBuffer(job)
         buffer.setData(QByteArray(body))
@@ -124,7 +132,7 @@ class AppScheme(QWebEngineUrlSchemeHandler):
         target = (base / rest).resolve() if base else None
         if not target or not target.is_relative_to(base.resolve()) or not target.is_file():
             raise ValueError(rel)
-        return target.read_bytes(), mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        return target.read_bytes(), TYPES.get(target.suffix.lower()) or mimetypes.guess_type(target.name)[0] or "application/octet-stream"
 
     def _app(self, host, rel, query):
         vault = self.bridge.lattice.vault
