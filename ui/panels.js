@@ -233,6 +233,7 @@ const SETTINGS_RENDER={
    '<label>笔记默认的显示方式<select data-ui="md_mode">'+opt(u.md_mode||"live",MD_MODES)+'</select></label>'+
    '<label>模型的思考过程<select data-ui="thinking">'+opt(u.thinking||"collapsed",[["collapsed","折叠，只显示用时和一句摘要"],["open","展开"],["hidden","不显示"]])+'</select></label>'+
    '<h3>交互</h3><label>发送消息<select data-ui="send_key">'+opt(u.send_key,[["enter","Enter 发送，Shift + Enter 换行"],["ctrl","Ctrl + Enter 发送，Enter 换行"]])+'</select></label>'+
+   '<label>AI 批注<select data-ui="ai_annotate">'+opt(u.ai_annotate||"auto",[["auto","主动批注：讲到原文时自己留在原文旁边"],["asked","只在我要求时才留"]])+'</select></label>'+
    '<label class="check"><input type="checkbox" data-ui="selection_popup"'+(u.selection_popup?" checked":"")+'/> 选中文字时出现「问快答 / 问主会话」</label>'+
    '<label class="check"><input type="checkbox" data-cfg="agent_auto_organize"'+(c.agent_auto_organize?" checked":"")+'/> 关掉随手写的记录或代码后，自动交给 AI 整理</label>'+
    '<label class="check"><input type="checkbox" data-cfg="auto_cards"'+(c.auto_cards?" checked":"")+'/> 边学边记知识卡：主会话每讲完一段，整理助手在后台把讲到的概念、原理、方法和思想记成分好类、连好关系的卡</label>'+

@@ -791,7 +791,7 @@ def _book_anchor(ctx, target, quote):
     return {"at": {"page": hit["section"]} if book["unit"] == "页" else {}, "label": label, "text": quote}
 
 
-@tool("annotate", {"tutor", "coach"}, "在学习者的书、笔记、代码或实验笔记上留一条批注：标出 text 这段原文（要一字不差），note 写你要说的话。学习者打开那里就看得到，和 TA 自己的批注样子不同，可以撤销。用来把讲解落到原文上（这句话是全章的关键、这里容易误解、这个定义后面会用到），不是用来代替讲解；一次几条就够，别满篇都是。",
+@tool("annotate", {"tutor", "coach"}, "在学习者的书、笔记、代码或实验笔记上留一条批注：标出 text 这段原文（要一字不差），note 写你要说的话。学习者打开那里就看得到，和 TA 自己的批注样子不同，可以撤销。用来把讲解落到原文上（这句话是全章的关键、这里容易误解、这个定义后面会用到），不是用来代替讲解；默认主动留，一轮最多三条，别满篇都是，已经批注过的地方不重复。",
       {"file": S, "text": S, "note": S}, ["file", "text", "note"])
 def annotate(ctx, file, text, note):
     path = _path_of(ctx, file)
@@ -816,6 +816,16 @@ def annotate(ctx, file, text, note):
                 done({"error": str(exc)})
         ctx.bridge.background(lambda: _book_anchor(ctx, target, quote), then)
     return Later(start)
+
+
+@tool("annotate_setting", {"tutor", "flash", "coach"}, "改 AI 批注这项设置，和设置页里的是同一项。mode：auto 主动批注（默认）；asked 只在学习者开口要求时才留。学习者明确说了才改（「以后别主动批注了」「恢复主动批注」），不要自己判断着改；改完告诉 TA。已有的批注不受影响。",
+      {"mode": {"type": "string", "enum": ["auto", "asked"]}}, ["mode"])
+def annotate_setting(ctx, mode):
+    if mode not in ("auto", "asked"):
+        raise ValueError("mode 只能是 auto 或 asked")
+    ctx.bridge.set_ui("ai_annotate", mode)
+    ctx.act("把 AI 批注改成了" + ("主动批注" if mode == "auto" else "只在你要求时才留"), None, False)
+    return {"mode": mode}
 
 
 @tool("open", {"tutor", "flash", "coach"}, "在学习者自己的面板里打开一个文件，用来指给 TA 看：line 定位到某一行，highlight 高亮一段原文，cell 定位到实验笔记的某一格，page 翻到书的某一页；ann 给一条批注的 id，就回到它标的地方（不用给 file）。要摆放面板用 ui。",

@@ -1868,6 +1868,8 @@ class Bridge(QObject):
                      (f"学习者现在在学的主题是「{l.topic(topic)['title']}」（topic:{topic}）。" if topic else "学习者现在在默认对话里，没有在学哪个主题。"))
         else:
             where = self._topic_brief(definition["name"], thread, topic) if topic else "这是默认对话，不属于任何主题。"
+        if definition["name"] in ("tutor", "coach") and self.config.read()["ui"].get("ai_annotate") == "asked":
+            where += "（学习者把 AI 批注设成了只在 TA 开口要求时才留：TA 没要求就不要用 annotate。）"
         # The route and the archive change often, so they come with the message, after the history: services cache the start
         # of a request, and anything changing before the history would make all of it count as new.
         user += "\n\n（现在的情况：" + where.strip() + "）"
@@ -2530,6 +2532,12 @@ class Bridge(QObject):
 
     def rpc_ui_save(self, ui):
         return self.config.save_ui(ui)
+
+    def set_ui(self, key, value):
+        """A setting changed from here (an agent, told to by the learner). The interface saves its whole copy of these, so it
+        has to hear of the change or the next save would put the old value back."""
+        self.config.save_ui({**self.config.read()["ui"], key: value})
+        self.announce({"type": "ui_setting", "key": key, "value": value})
 
     def ui_request(self, agent, ops, done):
         """Ask the interface to carry out an agent's UI operations; done() gets what actually happened."""

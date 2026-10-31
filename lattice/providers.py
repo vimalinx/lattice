@@ -167,7 +167,7 @@ DEFAULTS = {
     # spaces: the learner's changes to the built-in workspaces and their own ones; side.closed: workspaces whose sidebar is folded.
     "ui": {"theme": "dark", "thinking": "collapsed", "md_mode": "live", "font_size": 14.5, "note_font_size": 16, "code_font_size": 13, "line_height": 1.8, "read_width": 42, "zoom": {"chat:tutor": 1.1},
            "density": "comfortable", "send_key": "enter",
-           "selection_popup": True, "activity_plus": False, "themes": {}, "theme_custom": None, "side": {"width": 270, "closed": []}, "spaces": []},
+           "selection_popup": True, "ai_annotate": "auto", "activity_plus": False, "themes": {}, "theme_custom": None, "side": {"width": 270, "closed": []}, "spaces": []},
 }
 AGENT_FIELDS = ("api", "model", "max_tokens", "temperature", "effort")
 # Settings saved by earlier versions under flat names.

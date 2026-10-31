@@ -243,6 +243,7 @@ async function onEvent(evt){
  if(evt.type==="app_check")return appCheck(evt);
  if(evt.type==="skill_change"){skillsChanged();return skillChangeEvent(evt);}
  if(evt.type==="annotations")return marksChanged();
+ if(evt.type==="ui_setting"){S.ui[evt.key]=evt.value;for(const pid of Object.keys(Dock.panels))if(Dock.panels[pid].type==="settings")renderSettings(Dock.els[pid],Dock.panels[pid].page);return;}
  if(evt.type==="open_annotation")return openAnnotation(evt.id);
  if(evt.type==="saved"){sideChanged([]);return;}
  if(evt.type==="cards"){refreshState();for(const pid of Object.keys(Chat))if(Chat[pid].thread===evt.thread)loadChat(pid);return;}
