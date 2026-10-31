@@ -10,6 +10,7 @@
 - `code/` 代码，`data/` 数据，`books/` 电子书：原样保存，用路径引用。
 - `envs/<名字>.txt`：Python 环境的定义，一行一个包。某个目录里放一个 `.lattice-env` 文件（内容是环境名），这个目录下的文件就用那个环境；默认用 `default`。
 - `threads/` 对话，`journal/` 学习轨迹：JSON lines，只追加。
+- `annotations/` 高亮和批注：一个被批注的东西一个 JSON 文件，`source` 是它（文档 id、`file:<路径>`、`thread:<id>` 或 `web:<网址>`），`items` 是一条条批注，每条的 `anchor` 记着位置（`at`）和原文（`text`、`before`、`after`），文件改过以后靠原文找回。别处用 `ann:<id>` 指向一条批注。
 - `agents/<名字>.md`：可选。放一份同名文件就能改写那个 AI 的工作方式。
 - `.lattice/`：索引和本机状态，删了能重建。
 
@@ -27,5 +28,5 @@
 - 普通内容（笔记正文、代码、数据）可以用命令行直接改。
 - 知识卡的 `stage`、`due`、`reviews` 和 `## 我的理解`，轨迹里学习者那一侧的记录，回顾自评：只归学习者。AI 能读不能改；命令行改了会被自动退回。
 - 删除只由学习者做。
-- `threads/`、`journal/`、`AGENTS.md`、`agents/`、`.lattice/` 只由 Lattice 和学习者维护。
+- `threads/`、`journal/`、`annotations/`、`AGENTS.md`、`agents/`、`.lattice/` 只由 Lattice 和学习者维护；AI 用 `annotate` 留批注。
 - AI 的每个动作都单独提交一次 git，学习者可以撤销。

@@ -80,10 +80,21 @@ const wikiSyntax={
   return cx.addElement(cx.elt("HashTag",pos,end));
  }}],
 };
-function wikiParts(inner){const bar=inner.indexOf("|");return {target:(bar<0?inner:inner.slice(0,bar)).split("#")[0].trim(),shown:bar<0?inner:inner.slice(bar+1),bar};}
+function wikiParts(inner){const bar=inner.indexOf("|"),link=(bar<0?inner:inner.slice(0,bar)).trim();return {link,target:link.split("#")[0].trim(),shown:bar<0?inner:inner.slice(bar+1),bar};}
 
 /* ---- live preview ---------------------------------------------------------------------------------------------------- */
 const Refresh=CS.StateEffect.define();
+/* Highlights and notes in an editor (marks.js works out where): they move with the text as it is typed. */
+const SetMarks=CS.StateEffect.define();
+const markField=CS.StateField.define({create:()=>CV.Decoration.none,
+ update(deco,tr){deco=deco.map(tr.changes);for(const e of tr.effects)if(e.is(SetMarks))deco=e.value;return deco;},
+ provide:f=>CV.EditorView.decorations.from(f)});
+function setEditorMarks(view,ranges){
+ if(!ranges.length&&view.state.field(markField).size===0)return;
+ const marks=ranges.filter(r=>r.to>r.from).sort((a,b)=>a.from-b.from).map(r=>CV.Decoration.mark({class:"lmark lmark-"+r.style+(r.note?" has-note":""),
+  attributes:{"data-mark":r.id,...(r.note?{"data-tip":r.note}:{})}}).range(r.from,r.to));
+ view.dispatch({effects:SetMarks.of(CV.Decoration.set(marks,true))});
+}
 const HIDE=CV.Decoration.replace({});
 const mark=cls=>CV.Decoration.mark({class:cls});
 const MARKS={em:mark("cm-em"),strong:mark("cm-strong"),strike:mark("cm-strike"),code:mark("cm-icode"),src:mark("cm-linksrc"),math:mark("cm-mathsrc")};
@@ -176,16 +187,16 @@ function livePreview(opts){
      out.push(CV.Decoration.replace({widget:new Picture(doc.sliceString(url.from,url.to),alt,opts.path)}).range(n.from,n.to));return false;
     }
     case "WikiLink":case "WikiEmbed":{
-     const skip=name==="WikiEmbed"?3:2,{target,shown,bar}=wikiParts(doc.sliceString(n.from+skip,n.to-2));
+     const skip=name==="WikiEmbed"?3:2,{link,target,shown,bar}=wikiParts(doc.sliceString(n.from+skip,n.to-2));
      if(name==="WikiEmbed"&&IMAGE_RE.test(target)&&!near(n.from,n.to)){out.push(CV.Decoration.replace({widget:new Picture(target,shown,opts.path)}).range(n.from,n.to));return false;}
      if(name==="WikiEmbed"&&!near(n.from,n.to)){
       const inner=doc.sliceString(n.from+3,n.to-2),bar2=inner.indexOf("|");
       out.push(CV.Decoration.replace({widget:new Embed((bar2<0?inner:inner.slice(0,bar2)).trim(),opts.path,n.from+3,typeof Embeds==="undefined"?0:Embeds.version)}).range(n.from,n.to));return false;
      }
      const cls="cm-wikilink"+(opts.resolve(target)?"":" cm-unresolved");
-     if(near(n.from,n.to)){out.push(CV.Decoration.mark({class:cls+" cm-src",attributes:{"data-wiki":target}}).range(n.from,n.to));return false;}
+     if(near(n.from,n.to)){out.push(CV.Decoration.mark({class:cls+" cm-src",attributes:{"data-wiki":link}}).range(n.from,n.to));return false;}
      const start=n.from+skip+(bar<0?0:bar+1);hide(n.from,start);hide(n.to-2,n.to);
-     if(n.to-2>start)out.push(CV.Decoration.mark({class:cls,attributes:{"data-wiki":target}}).range(start,n.to-2));
+     if(n.to-2>start)out.push(CV.Decoration.mark({class:cls,attributes:{"data-wiki":link}}).range(start,n.to-2));
      return false;
     }
     case "InlineMath":case "DisplayMath":{
@@ -694,7 +705,7 @@ function createEditor(host,text,opts){
   CA.closeBrackets(),CQ.highlightSelectionMatches(),CV.rectangularSelection(),CV.crosshairCursor(),CQ.search({top:true}),
   CL.indentUnit.of("    "),CS.EditorState.tabSize.of(4),
   CS.Prec.highest(CV.keymap.of(keys)),CV.keymap.of(standard),CL.syntaxHighlighting(cmHighlight),cmTheme,...(md?[lang.of([])]:[]),
-  CV.EditorView.updateListener.of(u=>{if(u.docChanged)opts.onChange?.(host);if(u.selectionSet||u.docChanged)opts.onCursor?.(u.view);}),
+  markField,CV.EditorView.updateListener.of(u=>{if(u.docChanged)opts.onChange?.(host);if(u.selectionSet||u.docChanged)opts.onCursor?.(u.view);}),
  ];
  if(opts.placeholder)ext.push(CV.placeholder(opts.placeholder));
  if(opts.readonly)ext.push(CS.EditorState.readOnly.of(true));
@@ -729,6 +740,7 @@ function editorIn(root,field){const h=field?root?.querySelector('.cm-host[data-f
 function focusEditor(root,end=false){const v=editorIn(root);if(!v)return;v.focus();if(end)v.dispatch({selection:{anchor:v.state.doc.length}});}
 function editorGoto(view,at){
  const doc=view.state.doc,text=doc.toString();let from=0,to=0;
+ if(at.heading){const want=at.heading.trim().toLowerCase(),i=text.split("\n").findIndex(l=>/^#{1,6}\s/.test(l)&&l.replace(/^#+\s*|\s*#*\s*$/g,"").toLowerCase()===want);if(i>=0)at={line:i+1,select:false};}
  if(at.highlight&&text.includes(at.highlight)){from=text.indexOf(at.highlight);to=from+at.highlight.length;}
  else if(at.line){const l=doc.line(Math.min(Math.max(1,at.line),doc.lines));from=l.from;to=at.select===false?l.from:l.to;}
  view.focus();view.dispatch({selection:{anchor:from,head:to},effects:CV.EditorView.scrollIntoView(from,{y:"center"})});

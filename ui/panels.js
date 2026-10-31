@@ -29,7 +29,7 @@ async function loadMap(pid){
 function mapsChanged(){clearTimeout(MapState.timer);MapState.timer=setTimeout(()=>Object.keys(Dock.panels).filter(pid=>Dock.panels[pid].type==="map").forEach(loadMap),800);}
 
 /* ---- the journal ------------------------------------------------------------------------------------------- */
-const JOURNAL_GROUPS={"":"全部",asked:"提问与作答",ran:"运行",wrote:"写作",viewed:"查看",reviewed:"回顾",judged:"AI 判断与讲解",detour:"岔路与主干",insight:"薄弱点",searched:"联网",action:"AI 动作"};
+const JOURNAL_GROUPS={"":"全部",annotated:"批注",asked:"提问与作答",ran:"运行",wrote:"写作",viewed:"查看",reviewed:"回顾",judged:"AI 判断与讲解",detour:"岔路与主干",insight:"薄弱点",searched:"联网",action:"AI 动作"};
 const GROUP_TYPES={asked:["asked","answered"],judged:["judged","explained"],detour:["detour","bridged"],reviewed:["reviewed","staged"],action:["action","undo","installed","organized"]};
 panelType("journal",{side:"mine",icon:"history",title:()=>"学习轨迹",
  mount(p,node,pid){node.innerHTML='<div class="journal"><div class="map-bar"><select data-journal-type="'+pid+'">'+Object.entries(JOURNAL_GROUPS).map(([k,v])=>'<option value="'+k+'"'+((p.group||"")===k?" selected":"")+'>'+esc(v)+'</option>').join("")+'</select>'+

@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 
-from . import __version__, agents, books, skills, tools
+from . import __version__, agents, annotations, books, skills, tools
 from .envs import Envs, missing_module
 from .index import dump, uid
 from .model import Lattice, STAGES, outside_code, readable_outputs, text
@@ -277,7 +277,7 @@ class Bridge(QObject):
             files = []
             for line in vault.git("diff", "HEAD", "--numstat", "--no-renames", check=False).splitlines():
                 added, removed, rel = (line.split("\t") + ["", "", ""])[:3]
-                if rel and not rel.startswith(APPEND_ONLY) and not rel.startswith("envs/"):
+                if rel and not rel.startswith(APPEND_ONLY) and not rel.startswith(("envs/", annotations.FOLDER + "/")):
                     files.append({"file": rel, "added": int(added) if added.isdigit() else None, "removed": int(removed) if removed.isdigit() else None})
             commit = vault.commit("我的编辑", "me")
             if commit and files:
@@ -975,6 +975,57 @@ class Bridge(QObject):
         places[key] = str(at)[:400]
         self._local_save("book_places", dict(list(places.items())[-300:]))
         return True
+
+    # ---- annotations ---------------------------------------------------------------------------------------------
+    def rpc_annotations(self, source=None, query=None):
+        return annotations.listing(self.lattice, source, query)
+
+    def rpc_annotation_get(self, id):
+        return annotations.get(self.lattice, id)
+
+    def _annotated(self, result):
+        self.lattice.vault.commit_only(annotations.FOLDER, "批注")
+        self.announce({"type": "annotations"})
+        return result
+
+    def rpc_annotation_add(self, source, anchor, note="", color=None):
+        return self._annotated(annotations.add(self.lattice, source, anchor, note, color))
+
+    def rpc_annotation_update(self, id, note=None, color=None, at=None):
+        return self._annotated(annotations.update(self.lattice, id, note, color, at))
+
+    def rpc_annotation_delete(self, id):
+        return self._annotated(annotations.remove(self.lattice, id))
+
+    def rpc_annotation_card(self, id, title):
+        """A card out of a highlight: the words and the learner's note, and a link back to where they stand."""
+        l, item = self.lattice, annotations.get(self.lattice, id)
+        quote = "\n".join("> " + line for line in item["text"].splitlines())
+        said = item["note"]
+        if item.get("ask"):
+            got = annotations.asked(l, id)
+            said = "**问**：" + got["question"] + "\n\n**答**：" + got["answer"]
+        card = l.card_save({"title": title, "body": quote + ("\n\n" + said if said else ""), "topic": l.active_topic()})
+        l.link(card["id"], "ann:" + item["id"], "explains", item["label"])
+        self.last_write = time.monotonic()
+        self.changed([card["path"]])
+        return {"id": card["id"], "path": card["path"]}
+
+    def rpc_annotation_unmount(self, id):
+        return self._annotated(annotations.unmount(self.lattice, id))
+
+    def rpc_annotation_asked(self, id):
+        got = annotations.asked(self.lattice, id)
+        return {**got, "answering": got.get("thread") in self.busy}
+
+    def rpc_anchor_place(self, source, message=None):
+        # Messages can move to another conversation; the place is where the message is now.
+        row = self.lattice.index.one("SELECT thread FROM messages WHERE id=?", (message,)) if message else None
+        return annotations.place(self.lattice, "thread:" + row["thread"] if row else annotations.source_of(self.lattice, source))
+
+    def rpc_file_mentions(self, path):
+        _, rel = self.lattice.resolve(path)
+        return self.lattice.file_mentions(rel) if rel else []
 
     def rpc_books_add(self, paths=None):
         """Books chosen on this computer, copied into books/ in the vault."""
@@ -1706,11 +1757,11 @@ class Bridge(QObject):
         l.vault.commit(f"删除会话「{head.get('title') or id}」", "me")
         return {"ok": True}
 
-    def rpc_send(self, agent, message="", thread=None, topic=None, selection="", task="", note="", answer=None, attach=None, model=None, skill=None, effort=None):
-        return self.send(agent, message, thread, topic, selection, task, note, answer, attach=attach, model=model, skill=skill, effort=effort)
+    def rpc_send(self, agent, message="", thread=None, topic=None, selection="", task="", note="", answer=None, attach=None, model=None, skill=None, effort=None, anchor=None):
+        return self.send(agent, message, thread, topic, selection, task, note, answer, attach=attach, model=model, skill=skill, effort=effort, anchor=anchor)
 
     def send(self, agent, message="", thread=None, topic=None, selection="", task="", note="", answer=None, extra="", attach=None, model=None, skill=None,
-             effort=None):
+             effort=None, anchor=None):
         l = self.lattice
         definition = agents.load(self.root, agent)
         practice = None
@@ -1740,7 +1791,8 @@ class Bridge(QObject):
         history = self._history(thread, definition["history"])
         attach = [str(x)[:500] for x in (attach or []) if str(x).strip()][:12]
         picked = skills.find(self.root, skill) if skill else None
-        meta = {"agent": agent, **({"selection": selection} if selection else {}), **({"task": task} if task else {}), **({"answer": answer} if answer else {}),
+        selected_at, anchor = anchor, self._quoted_from(anchor) if selection else None
+        meta = {"agent": agent, **({"selection": selection} if selection else {}), **({"anchor": anchor} if anchor else {}), **({"task": task} if task else {}), **({"answer": answer} if answer else {}),
                 **({"attach": attach} if attach else {}), **({"skill": picked["slug"], "skill_title": picked["title"]} if picked else {})}
         source = str(answer.get("thread") or "") if answer else ""
         source = source if source and source != thread else ""
@@ -1751,15 +1803,37 @@ class Bridge(QObject):
             # explanation goes on undisturbed. The answer is noted against the tutor's conversation too.
             extra += ("\n\n（这是学习者在回答主会话讲解里出的一个小问题：" + str(answer.get("question") or "")[:1500] +
                       "\n请判断回答对不对、哪里对哪里偏，点出关键的一两句；简短。不要接着往下讲主会话的主线，主会话会接着讲。）")
-        l.append_message(thread, "user", message, meta)
+        asked = l.append_message(thread, "user", message, meta)
+        if agent == "flash" and anchor and not answer:
+            self._mount(selected_at, selection, asked, message)
         l.record("answered" if answer else "asked", {"text": message[:600], "agent": agent, "topic": topic, **({"question": answer.get("question", "")[:400]} if answer else {}),
                                                     **({"source": source, "message": answer.get("message"), "block": answer.get("block")} if source else {}),
                                                     **({"screen": note[:300]} if note else {})}, "me", [thread, *([source] if source else []), *([topic] if topic else [])])
-        user, system = self._compose(definition, thread, topic, practice, message, task, selection, attach, note, extra, picked)
+        user, system = self._compose(definition, thread, topic, practice, message, task, selection, attach, note, extra, picked, anchor)
         self._turn(agent, thread, topic, thread if practice else None, conn, system, history, user, definition["tools"], picked)
         return {"thread": thread, "state": "queued"}
 
-    def _compose(self, definition, thread, topic, practice, message, task, selection, attach, note, extra="", skill=None):
+    def _mount(self, anchor, selection, message, question):
+        """A question about selected words stays with those words. A place that cannot be kept does not stop the question."""
+        try:
+            self._annotated(annotations.add(self.lattice, anchor["source"], {**anchor, "text": selection}, ask={"message": message, "question": question[:600]}))
+        except (ValueError, VaultError, OSError) as exc:
+            LOG.warning("could not keep where a question was asked: %s", exc)
+
+    def _quoted_from(self, anchor):
+        """Where a selection came from, as a message keeps it. The words themselves are the message's selection."""
+        if not isinstance(anchor, dict) or not anchor.get("source"):
+            return None
+        try:
+            source = annotations.source_of(self.lattice, anchor["source"])
+        except (ValueError, VaultError):
+            return None
+        kept = annotations.clean(anchor)
+        kept["at"].pop("rects", None)
+        del kept["text"]
+        return {"source": source, **kept}
+
+    def _compose(self, definition, thread, topic, practice, message, task, selection, attach, note, extra="", skill=None, anchor=None):
         """The learner's turn as the model gets it, and the system prompt around it."""
         l = self.lattice
         user = agents.task_prompt(message, task) + extra
@@ -1783,7 +1857,7 @@ class Bridge(QObject):
         flash = definition["name"] == "flash"
         notes = "；".join(x for x in ("" if flash else note.strip(), ("附上了这些文件，需要时用 read 读：" + "、".join(listed)) if listed else "",
                                       ("附上了图片（你看不到图里的内容，需要时请学习者描述）：" + "、".join(images)) if images else "",
-                                      ("选中了这段内容：\n" + selection.strip()[:5000]) if selection.strip() else "") if x)
+                                      (("选中了这段内容" + (f"（出自 {annotations.describe(l, anchor['source'], anchor)}，要看前后文就读那里）" if anchor else "") + "：\n" + selection.strip()[:5000]) if selection.strip() else "")) if x)
         if notes:
             user += "\n\n（界面附注：" + notes + "）"
         if definition["name"] == "tutor":
@@ -1856,6 +1930,9 @@ class Bridge(QObject):
         judged = l.journal("judged", thread, last["at"], limit=6)
         handed = [e["data"]["handoff"] for e in here if e["data"].get("handoff")][:4]
         parts = []
+        marked = [e for e in l.journal("annotated", None, last["at"], actor="me", limit=20) if (e["data"].get("topic") or None) == topic][:6]
+        if marked:
+            parts.append("标下了" + "；".join(f"「{e['data'].get('text', '')[:80]}」" + (f"（TA 写：{e['data']['note'][:120]}）" if e["data"].get("note") else "") for e in reversed(marked)))
         if asked:
             parts.append("在快答里问了" + "；".join(f"「{q[:160]}」" for q in reversed(asked)))
         if handed:
@@ -1909,7 +1986,7 @@ class Bridge(QObject):
             except ValueError:
                 picked = None
         user, system = self._compose(definition, thread, topic, practice, question["content"], meta.get("task", ""), meta.get("selection", ""),
-                                     meta.get("attach") or [], note, "", picked)
+                                     meta.get("attach") or [], note, "", picked, meta.get("anchor"))
         self.retrying.add(thread)
         self._turn(agent, thread, topic, thread if practice else None, conn, system, self._history(thread, definition["history"], last), user,
                    definition["tools"], picked)

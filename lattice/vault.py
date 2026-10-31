@@ -21,7 +21,7 @@ from . import host
 VAULT_PATH = Path(os.environ.get("LATTICE_VAULT") or Path.home() / "Lattice")
 # Markdown kinds take their meaning from the folder they sit in; everything else is a plain file.
 MD_KINDS = {"topics": "topic", "cards": "card", "lessons": "lesson", "notes": "note", "insights": "insight"}
-FOLDERS = (*MD_KINDS, "notebooks", "code", "data", "envs", "threads", "journal")
+FOLDERS = (*MD_KINDS, "notebooks", "code", "data", "envs", "threads", "journal", "annotations")
 SKIP_DIRS = {".git", ".lattice", "__pycache__", "node_modules", ".venv", "venv", "target", ".ipynb_checkpoints"}
 IGNORED = """.lattice/index.db*
 .lattice/cache/
@@ -62,6 +62,8 @@ def kind_of(rel):
         return "thread" if top == "threads" else "journal"
     if rel.endswith(".ipynb"):
         return "notebook"
+    if top == "annotations" and rel.endswith(".json"):
+        return "annotation"
     if rel.endswith(".md") and top in MD_KINDS:
         return MD_KINDS[top]
     return "file"
@@ -296,6 +298,16 @@ class Vault:
         name, email = ("我", "me@lattice.local") if actor == "me" else (f"Lattice · {actor}", f"{actor}@lattice.local")
         self.git("-c", f"user.name={name}", "-c", f"user.email={email}", "commit", "-q", "-m", message)
         self.pending.clear()
+        return self.git("rev-parse", "HEAD").strip()
+
+    def commit_only(self, folder, message, actor="me"):
+        """Commit one folder and nothing else: what an agent is in the middle of stays out of it, and what is committed
+        here cannot be swept into an agent's step, where undoing that step would take it too."""
+        self.git("add", "-A", "--", folder, check=False)
+        if not self.git("diff", "--cached", "--name-only", "--", folder).strip():
+            return None
+        name, email = ("我", "me@lattice.local") if actor == "me" else (f"Lattice · {actor}", f"{actor}@lattice.local")
+        self.git("-c", f"user.name={name}", "-c", f"user.email={email}", "commit", "-q", "-m", message, "--", folder)
         return self.git("rev-parse", "HEAD").strip()
 
     def head(self):

@@ -17,9 +17,12 @@ function resolveWiki(name){
  return /\.[a-z0-9]{1,6}$/i.test(n)?n:null;
 }
 function folderOf(path){return String(path||"").startsWith("notes/")?path.split("/").slice(1,-1).join("/"):"";}
-async function openWiki(name,pid){
- const path=resolveWiki(name);
- if(path)return openFile(path);
+async function openWiki(raw,pid){
+ // A link can name a place too: [[书.pdf#p120]] a page, [[笔记#一节]] a section, [[…#ann:id]] an annotation.
+ const hash=String(raw).indexOf("#"),name=hash<0?raw:String(raw).slice(0,hash),place=hash<0?"":String(raw).slice(hash+1).trim();
+ if(place.startsWith("ann:"))return openAnnotation(place.slice(4));
+ const path=resolveWiki(name),page=/^p(\d+)$/.exec(place);
+ if(path)return openFile(path,page?{page:Number(page[1])}:place?{heading:place}:null);
  // As in Obsidian, a link to a note that does not exist yet creates it, next to the note the link is in.
  const r=await rpc("doc_create",{kind:"note",title:String(name).trim(),folder:folderOf(Dock.panels[pid]?.path)});
  await refreshState();toast("新建了笔记「"+String(name).trim()+"」");return openFile(r.path);

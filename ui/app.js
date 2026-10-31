@@ -1,9 +1,9 @@
 "use strict";
 /* Boot, the top bar, routing of backend events and clicks, and reporting what is on screen. */
-const Sel={text:"",timer:null,el:null};
+const Sel={text:"",timer:null,el:null,anchor:null};
 /* Selected text is only context until the learner hands it to a conversation; letting go of it clears it everywhere. */
 function clearSelection(){
- Sel.text="";hidePop();
+ Sel.text="";Sel.anchor=null;hidePop();all("iframe.book-frame").forEach(f=>f.contentWindow?.postMessage({book:"unselect"},"*"));
  if(Sel.el?.setSelectionRange&&Sel.el.isConnected)Sel.el.setSelectionRange(Sel.el.selectionEnd,Sel.el.selectionEnd);
  Sel.el=null;window.getSelection()?.removeAllRanges();reportScreen();
 }
@@ -52,11 +52,11 @@ const NEW_ITEMS=[
  ["新知识卡","new-card","card","自己记下一个知识点"],["主会话","open-agent","bot","",'data-agent="tutor"'],["快答","open-agent","spark","",'data-agent="flash"'],
  ["新工作区…","space-new","layout","自己搭一套窗口组合"]];
 // Panels that already have a button of their own; the palette still lists them as commands.
-const PANEL_ITEMS=[["开始","open-home","home",""],["知识图","open-map","network",""],["学习轨迹","open-journal","history",""],["回顾","open-review","refresh",""],["卡片库","open-library","card",""],["记忆","open-memory","calendar",""],
+const PANEL_ITEMS=[["开始","open-home","home",""],["知识图","open-map","network",""],["学习轨迹","open-journal","history",""],["回顾","open-review","refresh",""],["卡片库","open-library","card",""],["批注","open-marks","marker",""],["问答","open-asked","spark",""],["记忆","open-memory","calendar",""],
  ["快速打开笔记 · Ctrl O","note-switcher","document",""],["技能商城","open-skills","store",""],["应用","open-apps","apps",""],["今天的日记","note-daily","calendar",""],["大纲与链接","open-noteinfo","list",""],["设置","open-settings","sliders",""]];
 // What a group of tabs can open: something new, or any window. The same list is behind the activity bar's +, when it is shown.
 const OPEN_ITEMS=[["主会话","open-agent","bot",'data-agent="tutor"'],["快答","open-agent","spark",'data-agent="flash"'],["开始","open-home","home"],["知识图","open-map","network"],
- ["卡片库","open-library","card"],["回顾","open-review","refresh"],["记忆","open-memory","calendar"],["大纲与链接","open-noteinfo","list"],["学习轨迹","open-journal","history"],["应用","open-apps","apps"],["技能商城","open-skills","store"],["设置","open-settings","sliders"]];
+ ["卡片库","open-library","card"],["批注","open-marks","marker"],["回顾","open-review","refresh"],["记忆","open-memory","calendar"],["大纲与链接","open-noteinfo","list"],["学习轨迹","open-journal","history"],["应用","open-apps","apps"],["技能商城","open-skills","store"],["设置","open-settings","sliders"]];
 function openMenuHtml(){
  const item=([t,a,i,d,x])=>'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+(d?'<small>'+esc(d)+'</small>':"")+'</span></button>';
  return '<div class="menu-label">新建</div><div class="menu-grid">'+NEW_ITEMS.slice(0,4).map(([t,a,i,d,x])=>item([t,a,i,"",x])).join("")+
@@ -131,7 +131,7 @@ async function paletteFilter(q){
   const hits=await safe(()=>rpc("search",{query:term}));
   if(seq!==paletteSeq||!hits||!el("#palette-list"))return;
   const seen=new Set((S.data.docs||[]).filter(d=>d.title.toLowerCase().includes(term)).map(d=>d.path));
-  const more=hits.filter(x=>!seen.has(x.path)).slice(0,20).map(x=>'<button class="pal-item" '+(x.kind==="message"?'data-action="open-thread" data-thread="'+esc(x.thread)+'" data-agent="'+esc(x.agent||"tutor")+'"':'data-action="open-file" data-path="'+esc(x.path)+'"')+'>'+svg(x.kind==="message"?"bot":fileIcon(x.path),14)+'<span>'+esc(x.title)+'<small>'+esc(x.excerpt)+'</small></span><em>'+esc(kindName[x.kind]||"对话")+'</em></button>');
+  const more=hits.filter(x=>x.kind==="annotation"||!seen.has(x.path)).slice(0,20).map(x=>'<button class="pal-item" '+(x.kind==="annotation"?'data-action="open-ref" data-ref="'+esc(x.ref)+'"':x.kind==="message"?'data-action="open-thread" data-thread="'+esc(x.thread)+'" data-agent="'+esc(x.agent||"tutor")+'"':'data-action="open-file" data-path="'+esc(x.path)+'"')+'>'+svg(x.kind==="message"?"bot":x.kind==="annotation"?"marker":fileIcon(x.path),14)+'<span>'+esc(x.title)+'<small>'+esc(x.excerpt)+'</small></span><em>'+esc(kindName[x.kind]||"对话")+'</em></button>');
   el("#palette-list").insertAdjacentHTML("beforeend",more.join(""));
  }
 }
@@ -141,6 +141,7 @@ let screenTimer=null;
 function reportScreen(){clearTimeout(screenTimer);screenTimer=setTimeout(()=>safe(sendScreen),1200);}
 function screenOf(pid){const p=Dock.panels[pid],t=Dock.types[p?.type];return t?.screen?{panel:pid,type:p.type,title:panelTitle(pid),...t.screen(p,Dock.els[pid])}:{panel:pid,type:p?.type};}
 function sendScreen(){
+ marksFollow();
  const stacks=[];eachStack((s,f)=>stacks.push({tabs:s.tabs.map(pid=>({id:pid,title:panelTitle(pid),type:Dock.panels[pid].type,zoom:Math.round(zoomOf(Dock.panels[pid])*100)+"%"})),showing:s.active,floating:!!f}));
  const shown=[];eachStack(s=>{if(s.active)shown.push(s.active);});
  const mine=shown.filter(pid=>sideOf(pid)==="mine").map(screenOf),ai=shown.filter(pid=>sideOf(pid)==="ai").map(screenOf);
@@ -154,7 +155,7 @@ function sendScreen(){
  const state={layout:{stacks,focused:Dock.focus||null,nesting:layoutShape(Dock.layout.root),windows},ai:{panels:ai},mine:{files:mine.filter(x=>x.type==="file"),other:mine.filter(x=>x.type!=="file")},
   look:{base:S.ui.theme,theme:S.ui.theme_custom||"默认",...(activeTheme()?{vars:activeTheme().vars,font:activeTheme().font||undefined,css:activeTheme().css?activeTheme().css.slice(0,600):undefined}:{}),saved:Object.keys(S.ui.themes||{})},
   workspace:{now:currentSpace().name,sidebar:sideOpen()?(currentSpace().side||[]):"收起",all:visibleSpaces().map(x=>x.name)},theme:S.ui.theme,
-  open_but_hidden:stacks.flatMap(s=>s.tabs).filter(t=>!shown.includes(t.id)).map(t=>t.title),recent_files:Dwell.recent.slice(0,20),selection:Sel.text?shorten(Sel.text,600):undefined,
+  open_but_hidden:stacks.flatMap(s=>s.tabs).filter(t=>!shown.includes(t.id)).map(t=>t.title),recent_files:Dwell.recent.slice(0,20),selection:Sel.text?shorten(Sel.text,600):undefined,selection_from:Sel.anchor?.label||undefined,
   tabs:tabList(shown)};
  if(WINDOW)state.layout.title=windowTitleShown;
  return rpc("screen",{state,...(WINDOW?{window:WINDOW}:{})});
@@ -229,17 +230,20 @@ function screenNote(){
 /* ---- events from the backend ---------------------------------------------------------------------------------- */
 async function onEvent(evt){
  // Moving panels, opening things and checking apps are the main window's to do; a separate window shows its panel.
- if(WINDOW&&["ui","open","app_check","open_panel","window_closed"].includes(evt.type))return;
+ if(WINDOW&&["ui","open","open_annotation","app_check","open_panel","window_closed"].includes(evt.type))return;
  if(evt.type==="open_panel")return openPanel(evt.params);
  if(evt.type==="window_closed")return fromWindow(evt.params,evt.origin||{});
  if(evt.type==="agent"&&String(evt.thread||"").startsWith("compare:"))return compareEvent(evt);
  if(evt.type==="agent"&&evt.agent==="builder"){appAgentEvent(evt);if(evt.kind==="finished")refreshState();return;}
+ if(evt.type==="agent"&&evt.kind==="finished"&&evt.agent==="flash")askedFinished(evt.thread);
  if(evt.type==="agent")return chatEvent(evt);
  if(evt.type==="app_build")return appBuildEvent(evt);
  if(evt.type==="import")return importEvent(evt);
  if(evt.type==="tab_read")return tabRead(evt);
  if(evt.type==="app_check")return appCheck(evt);
  if(evt.type==="skill_change"){skillsChanged();return skillChangeEvent(evt);}
+ if(evt.type==="annotations")return marksChanged();
+ if(evt.type==="open_annotation")return openAnnotation(evt.id);
  if(evt.type==="saved"){sideChanged([]);return;}
  if(evt.type==="cards"){refreshState();for(const pid of Object.keys(Chat))if(Chat[pid].thread===evt.thread)loadChat(pid);return;}
  if(evt.type==="run")return runEvent(evt);
@@ -247,8 +251,8 @@ async function onEvent(evt){
  if(evt.type==="notice"){toast(evt.message);return;}
  if(evt.type==="web")return readerEvent(evt);
  if(evt.type==="ui"){const result=await runUiOps(evt.ops);return rpc("ui_done",{request:evt.request,result});}
- if(evt.type==="changed"){fileChanged(evt);embedsChanged(evt.paths);if(evt.paths.some(p=>p.startsWith("skills/")))skillsChanged();sideChanged(evt.paths);mapsChanged();journalsChanged();homesChanged();if(evt.external||evt.paths.some(p=>/^(topics|cards|lessons|notes|insights|notebooks)\//.test(p)))refreshState();return;}
- if(evt.type==="open"){openFile(evt.path,{line:evt.line,highlight:evt.highlight,cell:evt.cell});return;}
+ if(evt.type==="changed"){fileChanged(evt);embedsChanged(evt.paths);if(evt.paths.some(p=>p.startsWith("skills/")))skillsChanged();sideChanged(evt.paths);mapsChanged();journalsChanged();homesChanged();if(evt.paths.some(p=>p.startsWith("annotations/")))marksChanged();if(evt.external||evt.paths.some(p=>/^(topics|cards|lessons|notes|insights|notebooks)\//.test(p)))refreshState();return;}
+ if(evt.type==="open"){openFile(evt.path,{line:evt.line,highlight:evt.highlight,cell:evt.cell,page:evt.page});return;}
  if(evt.type==="env"){
   toast(evt.message,evt.ok?"info":"error");
   // A run that waited for the learner's install goes again.
@@ -297,6 +301,8 @@ async function onAction(a){
  case "open-journal":return openPanel({type:"journal"});
  case "open-review":{const had=findPanel({type:"review"}),id=openPanel({type:"review"});if(had)loadReview(Dock.els[id]);return;}
  case "open-library":return openPanel({type:"library"});
+ case "open-marks":return openMarks();
+ case "open-asked":return openAsked(null);
  case "open-memory":return openPanel({type:"memory"});
  case "open-noteinfo":return openPanel({type:"noteinfo"});
  case "open-skills":return openPanel({type:"skills"});
@@ -329,7 +335,8 @@ async function onAction(a){
  case "chat-attach-add":{const st=Chat[pid];if(st&&!st.attach.some(x=>x.path===a.dataset.path))st.attach.push({path:a.dataset.path});updateComposer(pid);return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
  case "chat-attach-pick":{const picked=await pickPath({mode:"files",title:"附上文件",ok:"附上",hint:"会复制进学习库的 data/附件/，原文件不动"});if(!picked?.length)return;const paths=await rpc("attach_files",{paths:picked},0);const st=Chat[pid];if(!paths?.length||!st)return;
   paths.forEach(x=>{if(!st.attach.some(y=>y.path===x))st.attach.push({path:x});});await refreshState();updateComposer(pid);return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
- case "chat-attach-sel":{const st=Chat[pid];if(st&&Sel.text){st.quote=Sel.text;clearSelection();updateComposer(pid);}return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
+ case "chat-attach-sel":{const st=Chat[pid];if(st&&Sel.text){st.quote=Sel.text;st.quoteAt=Sel.anchor;clearSelection();updateComposer(pid);}return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
+ case "quote-go":{const m=Chat[pid]?.data?.messages.find(x=>String(x.id)===a.dataset.mid),q=m?.meta?.anchor;if(q)return anchorGo(q.source,{...q,text:m.meta.selection});return;}
  case "att-open":return openAttachment(a.dataset.path);
  case "chat-attach-remove":Chat[pid]?.attach.splice(Number(a.dataset.index),1);return updateComposer(pid);
  case "chat-effort":{const p=Dock.panels[pid];if(!p)return;if(a.dataset.value)p.effort=a.dataset.value;else delete p.effort;saveLayout();updateComposer(pid);
@@ -408,14 +415,10 @@ async function onAction(a){
  case "code-take":{const n=el("#"+a.dataset.target);if(!n)return;const ext=CODE_EXT[(a.dataset.lang||"").toLowerCase()]||".txt";
   const name=await askText("存成哪个文件","片段-"+new Date().toLocaleTimeString("zh-CN",{hour12:false}).replace(/:/g,"")+ext,{hint:"放在 code/ 里",selectStem:true,ok:"存下"});if(!name)return;
   const r=await rpc("file_create",{folder:"code",name,content:n.textContent});await refreshState();return openFile(r.path);}
- case "quote-clear":if(Chat[pid])Chat[pid].quote="";return updateComposer(pid);
+ case "quote-clear":if(Chat[pid]){Chat[pid].quote="";Chat[pid].quoteAt=null;}return updateComposer(pid);
  case "ask-flash":case "ask-tutor":{
-  // Hands the selection to that conversation's input and waits for the learner's own question.
-  const agent=kind==="ask-flash"?"flash":"tutor",text=Sel.text;clearSelection();
-  let target=Object.keys(Chat).find(x=>Dock.panels[x]?.agent===agent&&!Dock.panels[x].thread);
-  if(!target)target=openPanel({type:"chat",agent});else activate(target);
-  const go=()=>{if(!Chat[target]?.data)return setTimeout(go,150);Chat[target].quote=text;updateComposer(target);Dock.els[target]?.querySelector(".composer textarea")?.focus();};
-  return go();
+  const agent=kind==="ask-flash"?"flash":"tutor",text=Sel.text,anchor=Sel.anchor;clearSelection();
+  return askAbout(agent,text,anchor);
  }
  case "theme-color":return themeColorPick(a);
  case "sc-window":case "sc-all-left":case "sc-reset":case "sc-rebase":case "sc-history":case "sc-compare":case "sc-try-q":case "sc-dismiss":case "sc-approve":return changeAction(kind,a);
@@ -433,6 +436,7 @@ async function onAction(a){
  case "version-diff":case "version-restore":return versionAction(kind,a);
  case "file-history":return showHistory(pid);
  }
+ if(/^marks?-/.test(kind)){const r=await markAction(kind,a);if(r!==null)return r;}
  if(kind.startsWith("space")||kind==="stack-unkeep"){const r=await spaceAction(kind,a);if(r!==null)return r;}
  if(kind.startsWith("grid-")){const r=gridAction(kind,a);if(r!==null)return r;}
  if(kind.startsWith("skill-")){const r=await skillAction(kind,a);if(r!==null)return r;}
@@ -443,6 +447,7 @@ async function onAction(a){
 async function openRef(ref){
  const at=ref.indexOf(":"),kind=ref.slice(0,at),id=ref.slice(at+1);
  if(kind==="file")return openFile(id);
+ if(kind==="ann")return openAnnotation(id);
  if(kind==="cell"){const [path,cell]=id.split("#");return openFile(path,{cell});}
  if(kind==="practice")return openPractice(id);
  const d=(S.data.docs||[]).find(x=>x.id===id);if(d)return openFile(d.path);
@@ -451,20 +456,27 @@ async function openRef(ref){
 }
 /* ---- selection: ask about anything selected ----------------------------------------------------------------------- */
 function hidePop(){el("#sel-pop")?.remove();}
+// Hands text to that conversation's input, with where it came from, and waits for the learner's own question.
+function askAbout(agent,text,anchor){
+ let target=Object.keys(Chat).find(x=>Dock.panels[x]?.agent===agent&&!Dock.panels[x].thread);
+ if(!target)target=openPanel({type:"chat",agent});else activate(target);
+ const go=()=>{if(!Chat[target]?.data)return setTimeout(go,150);Chat[target].quote=text;Chat[target].quoteAt=anchor;updateComposer(target);Dock.els[target]?.querySelector(".composer textarea")?.focus();};
+ go();
+}
 function showSelPop(rect){
  if(!rect||S.ui.selection_popup===false)return;hidePop();
- const pop=h('<div id="sel-pop"><button data-action="ask-flash">'+svg("spark",13)+' 问快答</button><button data-action="ask-tutor">'+svg("bot",13)+' 问主会话</button></div>');
+ const pop=h('<div id="sel-pop">'+(Sel.anchor?'<button data-action="mark-add">'+svg("marker",13)+' 高亮</button><button data-action="mark-note">'+svg("edit",13)+' 批注</button>':"")+'<button data-action="ask-flash">'+svg("spark",13)+' 问快答</button><button data-action="ask-tutor">'+svg("bot",13)+' 问主会话</button></div>');
  document.body.appendChild(pop);
  const x=Math.min(Math.max(8,rect.left+rect.width/2-pop.offsetWidth/2),innerWidth-pop.offsetWidth-8),y=rect.top-pop.offsetHeight-8;
  pop.style.left=x+"px";pop.style.top=(y<8?rect.bottom+8:y)+"px";
 }
 function onSelect(e){
- if(e.target.closest?.("#overlays,.menu,#sel-pop,.composer,.tabs"))return;
+ if(e.target.closest?.("#overlays,.dialog-backdrop,.menu,#sel-pop,.composer,.tabs"))return;
  const t=e.target;let text="",rect=null;
  if(t.tagName==="TEXTAREA"||t.tagName==="INPUT"){text=t.value?.slice(t.selectionStart,t.selectionEnd)||"";rect=t.getBoundingClientRect();}
  else{const s=window.getSelection();text=s?.toString()||"";if(s?.rangeCount)rect=s.getRangeAt(0).getBoundingClientRect();}
  if(!text.trim()){if(Sel.text)clearSelection();else hidePop();return;}
- Sel.text=text.slice(0,5000);Sel.el=t.tagName==="TEXTAREA"||t.tagName==="INPUT"?t:null;reportScreen();
+ Sel.text=text.slice(0,5000);Sel.el=t.tagName==="TEXTAREA"||t.tagName==="INPUT"?t:null;Sel.anchor=Sel.el?null:selectionAnchor(t,Sel.text);reportScreen();
  showSelPop(rect);
 }
 /* ---- wiring ------------------------------------------------------------------------------------------------------------- */
@@ -560,7 +572,7 @@ async function boot(){
     S.bridge.event.connect(raw=>safe(()=>onEvent(JSON.parse(raw))));
     S.data=await rpc("bootstrap");S.config=S.data.config;S.ui=S.config.ui;S.version=S.data.version;
     el("#app").innerHTML='<div id="shell"><nav id="activity"></nav><aside id="side"></aside><div id="side-gutter"></div><div id="dock-wrap"><div id="dock"></div><div id="floats"></div></div></div>'+
-     '<footer id="status"></footer><div id="organizer" hidden></div><div id="drop-mark"></div><datalist id="doc-titles"></datalist>';
+     '<footer id="status"></footer><div id="dock-keep"></div><div id="organizer" hidden></div><div id="drop-mark"></div><datalist id="doc-titles"></datalist>';
     applyUi();initInteractions();initSideResize();
     if(WINDOW){
      // A separate window: just its panel, filling it.

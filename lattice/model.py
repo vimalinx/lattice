@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 import re
 
+from . import annotations
 from .index import Index, dump, stamp_of, uid
 from .vault import APPEND_ONLY, KEPT, ME, MD_KINDS, VAULT_PATH, Vault, VaultError, join_frontmatter, kind_of, now, slug, split_frontmatter
 
@@ -118,6 +119,7 @@ class Lattice:
         if not self.vault.path("AGENTS.md").exists():
             self.vault.write_text("AGENTS.md", RULES.read_text(encoding="utf-8"))
             self.index.reindex("AGENTS.md")
+        self._rules_name_annotations()
         self.migrated = None
         if migrate_from and Path(migrate_from).exists() and not self.index.one("SELECT 1 FROM docs LIMIT 1"):
             from .migrate import migrate
@@ -127,6 +129,17 @@ class Lattice:
     rows = property(lambda self: self.index.rows)
 
     # ---- machine-local settings ------------------------------------------------------
+    def _rules_name_annotations(self):
+        """A vault's rules were written once and are the learner's now; what is new in the vault is added, the rest left be."""
+        rules = self.vault.read_text("AGENTS.md")
+        if annotations.FOLDER + "/" in rules:
+            return
+        line = next(x for x in RULES.read_text(encoding="utf-8").splitlines() if x.startswith("- `annotations/`"))
+        lines, after = rules.splitlines(), next((i for i, x in enumerate(rules.splitlines()) if x.startswith("- `threads/`")), None)
+        lines.insert(len(lines) if after is None else after + 1, line)
+        self.vault.write_text("AGENTS.md", "\n".join(lines) + "\n")
+        self.index.reindex("AGENTS.md")
+
     def settings(self):
         try:
             return json.loads(self.settings_path.read_text(encoding="utf-8"))
@@ -392,6 +405,9 @@ class Lattice:
         if ref.startswith("file:"):
             self.resolve(ref[5:])
             return ref
+        if ref.startswith("ann:"):
+            annotations.get(self, ref)
+            return ref
         for prefix in ("topic:", "card:", "lesson:", "note:", "insight:", "notebook:"):
             if ref.startswith(prefix):
                 ref = ref[len(prefix):]
@@ -405,6 +421,13 @@ class Lattice:
     def links_of(self, ident):
         rows = self.index.rows("""SELECT l.*, s.title source_title, t.title target_title FROM links l
             LEFT JOIN docs s ON s.id=l.source LEFT JOIN docs t ON t.id=l.target WHERE l.source=? OR l.target=?""", (ident, ident))
+        for r in rows:
+            if r["target"].startswith("ann:"):
+                try:
+                    item = annotations.get(self, r["target"])
+                    r["target_title"] = item["place"]["title"] + (" · " + item["label"] if item["label"] else "")
+                except ValueError:
+                    r["target_title"] = "已删除的批注"
         return rows
 
     def link(self, source, target, kind="related", why="", by="me"):
@@ -575,6 +598,9 @@ class Lattice:
         self.vault.move(rel, target)
         self.index.unindex(rel)
         self.index.reindex(target)
+        annotations.moved(self, rel, target)
+        if kind_of(target) == "file":
+            self.relink(rel, target)
         return target
 
     def delete_file(self, path):
@@ -603,6 +629,9 @@ class Lattice:
         for old in inside:
             self.index.unindex(old)
             self.index.reindex(target + old[len(rel):])
+            annotations.moved(self, old, target + old[len(rel):])
+            if kind_of(old) == "file":
+                self.relink(old, target + old[len(rel):])
         return target
 
     def move_into(self, path, folder):
@@ -688,6 +717,16 @@ class Lattice:
             path = d["path"] if d else (name if self.vault.path(name).is_file() else None) if "/" in name or "." in name else None
             outgoing.append({"name": name, "path": path, "kind": d["kind"] if d else ("file" if path else None)})
         return {"title": row["title"], "backlinks": backlinks[:100], "unlinked": unlinked[:60], "outgoing": outgoing[:200]}
+
+    def file_mentions(self, rel):
+        """The documents that link to a plain file, such as a book: [[books/x.pdf]], with or without a place in it."""
+        key, out = rel.casefold(), []
+        for d in self.index.rows("SELECT id, kind, title, path, body FROM docs WHERE body LIKE ?", ("%[[%" + rel + "%",)):
+            lines = (d["body"] or "").split("\n")
+            linked = [i for i, line in enumerate(lines) if any(wiki_target(m).casefold() == key for m in WIKI.findall(line))]
+            if linked:
+                out.append({"id": d["id"], "kind": d["kind"], "title": d["title"], "path": d["path"], "lines": [{"line": i + 1, "text": lines[i].strip()[:240]} for i in linked[:5]]})
+        return out[:100]
 
     def tags(self):
         """Every tag, from documents' attributes and #tags in their text, with the documents that carry it."""
@@ -1100,6 +1139,7 @@ class Lattice:
             lines = self.vault.read_lines(target_rel)
             self.vault.write_lines(target_rel, [lines[0]] + sorted(lines[1:] + moved, key=lambda m: m["id"]))
             self.index.reindex(target_rel)
+            annotations.carried(self, ids, target)
         return len(moved)
 
     # ---- practices: a coach conversation whose header carries the practice ----------------------------------
@@ -1201,6 +1241,13 @@ class Lattice:
         if not commit or ident in self.undone():
             raise ValueError("这个操作不能撤销")
         summary = json.loads(entry["data"]).get("summary", "")
+        ref = str(json.loads(entry["data"]).get("ref") or "")
+        if ref.startswith("ann:"):
+            # One annotation among others in a file that goes on changing: taken out, not reverted.
+            rel = self.index.one("SELECT path FROM annotations WHERE id=?", (ref[4:],))
+            annotations.remove(self, ref)
+            self.record("undo", {"commit": commit, "summary": "撤销了「" + summary + "」", "files": [rel["path"]]}, "me", [ident])
+            return [rel["path"]]
         touched = self.vault.revert(commit)
         # Removed paths first: a moved file keeps its id, so unindexing the old path afterwards would drop it.
         for rel in sorted(touched, key=lambda r: self.vault.path(r).exists()):
@@ -1216,9 +1263,9 @@ class Lattice:
             before = self.vault.at("HEAD", rel)
             # Lattice's own conversation and journal lines wait uncommitted for the next commit; only a change it did
             # not write itself is put back, or every shell command would throw away what was said since.
-            if (rel.startswith(APPEND_ONLY) or rel.startswith(".lattice/") or rel in KEPT or rel.startswith("agents/")) and not self.vault.ours(rel):
+            if (rel.startswith(APPEND_ONLY) or rel.startswith((".lattice/", "agents/", annotations.FOLDER + "/")) or rel in KEPT) and not self.vault.ours(rel):
                 self._put_back(rel, before)
-                fixed.append(f"{rel}：对话、轨迹和规则只由 Lattice 和学习者维护，已还原")
+                fixed.append(f"{rel}：对话、轨迹、批注和规则只由 Lattice 和学习者维护，已还原")
             elif status == "D":
                 self._put_back(rel, before)
                 fixed.append(f"{rel}：删除只由学习者做，已还原")
@@ -1277,6 +1324,12 @@ class Lattice:
             nodes[d["id"]] = node
             by_title.setdefault(d["title"].casefold(), d["id"])
         for l in self.index.rows("SELECT * FROM links"):
+            if l["target"].startswith("ann:"):
+                # On the map a card drawn from a highlight hangs off the thing it was highlighted in.
+                held = self.index.one("SELECT source FROM annotations WHERE id=?", (l["target"][4:],))
+                if not held or held["source"].startswith(("thread:", "web:")):
+                    continue
+                l = {**l, "target": held["source"]}
             if l["target"].startswith("file:") and l["target"] not in nodes:
                 nodes[l["target"]] = {"id": l["target"], "kind": "file", "title": l["target"][5:].rsplit("/", 1)[-1], "topic": None,
                                       "evidence": counts.get(l["target"][5:], 0), "last": activity.get(l["target"][5:], "")}
@@ -1357,6 +1410,9 @@ class Lattice:
                                     WHERE m.content LIKE ? ORDER BY m.id DESC LIMIT 12""", (q,)):
             hits.append({"ref": "message:" + str(r["id"]), "kind": "message", "title": r["title"] + " · " + ("我" if r["role"] == "user" else "AI"),
                          "thread": r["thread"], "agent": r["agent"], "excerpt": excerpt(r["content"], query)})
+        for item in annotations.listing(self, query=query, limit=12):
+            hits.append({"ref": "ann:" + item["id"], "kind": "annotation", "title": item["place"]["title"] + (" · " + item["label"] if item["label"] else ""),
+                         "excerpt": (item["note"] + " ← " if item["note"] else "") + item["text"][:160]})
         return hits
 
 

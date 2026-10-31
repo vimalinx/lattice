@@ -266,13 +266,24 @@ function restoreScroll(node){
 }
 function renderDock(){
  const host=el("#dock");if(!host)return;
- Object.values(Dock.els).forEach(n=>n.parentElement&&n.remove());
+ // A page inside a window (a book, an app) is lost when it leaves the document, so a window that has one waits here while
+ // the rest is rebuilt, and one still on show is moved to its new place whole. A book on a tab behind stays here, its size
+ // kept, so it is as it was when its tab comes back.
+ const hold=el("#dock-keep");
+ Object.values(Dock.els).forEach(n=>{
+  if(!n.parentElement||n.parentElement===hold)return;
+  if(hold?.moveBefore&&n.querySelector("iframe")){const r=n.getBoundingClientRect();n.style.width=r.width+"px";n.style.height=r.height+"px";hold.moveBefore(n,null);}
+  else n.remove();
+ });
  host.innerHTML="";host.appendChild(nodeEl(Dock.layout.root));
  const floats=el("#floats");floats.innerHTML="";
  Dock.layout.floats.forEach(f=>{
   const w=h('<div class="float" data-float="'+f.id+'" style="left:'+f.x+'px;top:'+f.y+'px;width:'+f.w+'px;height:'+f.h+'px"><div class="float-resize" data-float-resize="'+f.id+'"></div></div>');
   w.prepend(stackEl(f.stack,f));floats.appendChild(w);
  });
+ all("[data-awaits]").forEach(body=>{const n=Dock.els[body.dataset.awaits];body.moveBefore(n,null);n.style.width=n.style.height="";delete body.dataset.awaits;});
+ // The three left most lately, as a book costs memory; another opens again where it was.
+ if(hold){const books=[...hold.children].filter(n=>n.querySelector("iframe.book-frame")||n.remove());books.slice(0,-3).forEach(n=>n.remove());}
 }
 function nodeEl(n){
  if(n.t==="stack")return stackEl(n);
@@ -299,10 +310,11 @@ function stackEl(s,floating=null){
  else bar.appendChild(h('<button class="tab-add" data-action="stack-add" data-stack="'+s.id+'" title="在这一组里新建或打开…">'+svg("plus",13)+'</button>'));
  bar.appendChild(h('<div class="tabs-fill" data-stack="'+s.id+'"'+(floating?' data-float-move="'+floating.id+'"':"")+'></div>'));
  if(s.active&&Dock.els[s.active]){
-  node.lastElementChild.appendChild(Dock.els[s.active]);
+  if(Dock.els[s.active].parentElement?.id==="dock-keep")node.lastElementChild.dataset.awaits=s.active;
+  else node.lastElementChild.appendChild(Dock.els[s.active]);
   // Sizes measured while a panel was detached are wrong; let it fit itself once it is visible, scrolled where it was.
   const p=Dock.panels[s.active],t=Dock.types[p?.type],panel=Dock.els[s.active];
-  requestAnimationFrame(()=>{restoreScroll(panel);if(t?.shown)t.shown(p,panel);if(panel.querySelector(".mermaid:not([data-processed='true'])"))scheduleMermaid();});
+  requestAnimationFrame(()=>{restoreScroll(panel);if(t?.shown)t.shown(p,panel);marksShown(s.active);if(panel.querySelector(".mermaid:not([data-processed='true'])"))scheduleMermaid();});
  }
  else if(!s.tabs.length)node.lastElementChild.appendChild(h('<div class="stack-empty">'+emptyState("layout","这里是空的",s.keep?"从左栏打开的东西放在这里，也可以把标签拖进来。":"把标签拖到这里，或者从上面的「＋」打开。")+
   (s.keep?'<button class="ghost xs" data-action="stack-unkeep" data-stack="'+s.id+'">不要这一块</button>':"")+'</div>'));

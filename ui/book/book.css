@@ -25,3 +25,11 @@ foliate-view{display:block;width:100%;height:100%}
 /* pdf.js wants its scrolling box positioned absolutely. */
 #pdf{position:absolute;inset:0;overflow:auto;background:var(--bg)}
 #pdf .pdfViewer .page{margin:0 auto 10px;border:0;box-shadow:0 1px 6px rgba(0,0,0,.25)}
+/* Highlights on a PDF page, in shares of the page, under the mouse and over the page's picture. No z-index here: it would
+   shut the marks off from the picture they blend with. */
+.lmarks{position:absolute;inset:0;pointer-events:none}
+.lmarks i{position:absolute;display:block;opacity:.36;mix-blend-mode:multiply;border-radius:2px}
+.lmarks i.ai{opacity:1;mix-blend-mode:normal;background:transparent!important;border-bottom:2px dashed var(--ai)}
+.lmarks i.ask{opacity:1;mix-blend-mode:screen;border-radius:0}
+.lmarks i.ask-line{opacity:1;mix-blend-mode:normal;border-bottom:2px solid #12917f;border-radius:0}
+:root{--ai:#8f7ff0}

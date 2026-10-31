@@ -1262,3 +1262,56 @@ body.separate-window .tab-btn{display:none}
 .import-divider::before,.import-divider::after{content:"";flex:1;border-top:1px dashed var(--line)}
 .lblock.block-widget{padding:10px}
 .widget-frame{display:block;width:100%;height:160px;border:0;background:transparent}
+
+/* ---- highlights and notes -------------------------------------------------------------------------------------- */
+.lmark-yellow{background:rgba(245,197,24,.3)}.lmark-green{background:rgba(94,203,124,.28)}.lmark-blue{background:rgba(90,167,240,.28)}.lmark-pink{background:rgba(242,127,178,.28)}
+:root{--ask-text:color-mix(in srgb,var(--accent) 62%,var(--text))}
+.lmark-ask{color:var(--ask-text);text-decoration:underline solid var(--ask-text);text-underline-offset:3px;cursor:pointer}
+::highlight(lmark-ask){color:var(--ask-text);text-decoration:underline solid var(--ask-text)}
+.lmark-c-ask{background:var(--ask-text)}
+.lmark.has-note{border-bottom:1px dotted var(--muted)}
+.lmark-ai{text-decoration:underline dashed var(--accent);text-underline-offset:3px}
+::highlight(lmark-yellow){background-color:rgba(245,197,24,.3)}::highlight(lmark-green){background-color:rgba(94,203,124,.28)}::highlight(lmark-blue){background-color:rgba(90,167,240,.28)}::highlight(lmark-pink){background-color:rgba(242,127,178,.28)}
+::highlight(lmark-ai){text-decoration:underline dashed var(--accent)}
+::highlight(lmark-flash){background-color:rgba(245,197,24,.6)}
+.lmark-c-yellow{background:#f5c518}.lmark-c-green{background:#5ecb7c}.lmark-c-blue{background:#5aa7f0}.lmark-c-pink{background:#f27fb2}.lmark-c-ai{background:var(--accent)}
+.msg-quote[data-action]{cursor:pointer}.msg-quote[data-action]:hover{color:var(--text);border-left-color:var(--accent)}
+.msg-quote small{display:block;color:var(--subtle)}
+.mini-source{display:block;margin:6px 0;font-size:.86em;color:var(--muted);cursor:pointer}
+.dialog textarea.dialog-input{resize:vertical;min-height:96px;font:inherit;line-height:1.6}
+.menu-mark{max-width:320px}
+.mark-pop{padding:6px 10px;display:flex;flex-direction:column;gap:6px}
+.mark-pop small{color:var(--subtle)}
+.mark-pop blockquote,.mark-row blockquote{margin:0;color:var(--muted);overflow-wrap:anywhere}
+.mark-note{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text)}
+.mark-colors{display:flex;gap:6px}
+.menu .mark-colors button.dot{flex:0 0 18px;width:18px;height:18px;padding:0;border:2px solid transparent;border-radius:50%;cursor:pointer}
+.menu .mark-colors button.dot.on{border-color:var(--text)}
+.menu .mark-colors button.lmark-c-yellow,.menu .mark-colors button.lmark-c-yellow:hover{background:#f5c518}
+.menu .mark-colors button.lmark-c-green,.menu .mark-colors button.lmark-c-green:hover{background:#5ecb7c}
+.menu .mark-colors button.lmark-c-blue,.menu .mark-colors button.lmark-c-blue:hover{background:#5aa7f0}
+.menu .mark-colors button.lmark-c-pink,.menu .mark-colors button.lmark-c-pink:hover{background:#f27fb2}
+.marks{display:flex;flex-direction:column;height:100%;min-height:0}
+.marks-bar{display:flex;flex-direction:column;gap:6px;padding:10px 12px 8px;border-bottom:1px solid var(--line-soft)}
+.marks-scope{display:flex;gap:4px;min-width:0}
+.marks-scope button{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:0;background:transparent;color:var(--muted);padding:3px 9px;border-radius:6px;font-size:12px;cursor:pointer}
+.marks-scope button.on{background:var(--surface);color:var(--text)}
+.marks-list{flex:1;min-height:0;overflow:auto;padding:6px 8px 16px}
+.mark-row{display:flex;gap:8px;padding:8px 6px;border-radius:8px;cursor:pointer}
+.mark-row:hover{background:var(--surface)}
+.mark-row .icon{opacity:0;flex:0 0 auto;align-self:flex-start}.mark-row:hover .icon{opacity:1}
+.mark-bar{flex:0 0 3px;border-radius:2px}
+.mark-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.mark-main small{color:var(--subtle)}.mark-main small b{color:var(--amber);font-weight:500}
+.mark-row.lost blockquote{text-decoration:line-through;text-decoration-color:var(--subtle)}
+.marks-mentions{padding:8px 6px}.marks-mentions h5{margin:6px 0;color:var(--muted)}.marks-mentions a{display:block;padding:3px 0;cursor:pointer}
+.menu-asked{max-width:380px}
+.asked-pop{max-height:min(46vh,380px);overflow:auto}
+.asked-q{font-weight:600;overflow-wrap:anywhere}
+.asked-a{font-size:.94em;overflow-wrap:anywhere}
+.asked{height:100%;overflow:auto;padding:14px 16px 20px;display:flex;flex-direction:column;gap:8px}
+.asked small{color:var(--subtle)}
+.asked blockquote{margin:0;padding-left:8px;border-left:2px solid var(--ask-text);color:var(--muted);overflow-wrap:anywhere}
+.asked-tools{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+#dock-keep{position:fixed;left:-30000px;top:0;width:0;height:0;overflow:hidden;visibility:hidden}
+.asked-more{display:flex;flex-direction:column;gap:6px;margin-top:6px;padding-top:8px;border-top:1px solid var(--line-soft)}

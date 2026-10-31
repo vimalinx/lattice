@@ -145,6 +145,7 @@ function renderChat(pid,keepScroll=true){
  st.sizes=new ResizeObserver(()=>{if(st.bottom!==false&&scroll.isConnected&&scroll.clientHeight)scroll.scrollTop=scroll.scrollHeight;toBottomButton(pid);});
  all(".msg,.live-slot",scroll).forEach(n=>st.sizes.observe(n));
  toBottomButton(pid);
+ marksRefresh(pid);
 }
 /* How far the end of the conversation (not the room kept below the last question) is under the visible part. */
 function toEnd(scroll){return scroll.scrollHeight-(scroll.querySelector(".chat-spacer")?.offsetHeight||0)-scroll.scrollTop-scroll.clientHeight;}
@@ -235,7 +236,7 @@ function messageEl(pid,m,answers,key){
   (m.content.trim()?iconButton("copy","msg-copy","复制",'data-pid="'+pid+'" data-mid="'+m.id+'"'):"")+(!mine&&m.content.trim()?messageTools(pid,m):"")+'</div>';
  const html=mine?'<div class="msg from-me" data-mid="'+m.id+'"><div class="bubble">'+
    (meta.skill_title?'<div class="msg-skill"'+(meta.skill?' data-skill-open="'+esc(meta.skill)+'" data-tip="看看、改改这个技能"':"")+'>'+svg("store",11)+' 按技能「'+esc(meta.skill_title)+'」</div>':"")+
-   (meta.selection?'<div class="msg-quote">'+esc(shorten(meta.selection,180))+'</div>':"")+
+   (meta.selection?'<div class="msg-quote"'+(meta.anchor?' data-action="quote-go" data-pid="'+pid+'" data-mid="'+m.id+'" title="回到原处"':"")+'>'+esc(shorten(meta.selection,180))+(meta.anchor?.label?'<small>'+esc(meta.anchor.label)+'</small>':"")+'</div>':"")+
    (meta.attach?.length?messageTiles(meta.attach):"")+
    '<div class="markdown msg-body">'+r.html+'</div></div>'+foot+'</div>'
   :'<div class="msg from-ai" data-mid="'+m.id+'">'+skillsUsed(meta.skills||olderSkills(list,at))+thinkingHtml(meta.thinking,meta.think_seconds)+stepsHtml(meta.steps)+'<div class="markdown msg-body">'+r.html+'</div>'+
@@ -500,15 +501,15 @@ async function chatSend(pid,text,extra={}){
  if(!message&&!extra.task)return;
  if(st.data?.busy)return toast("这段对话正在回答；可以先停止");
  if(typeof flushAll==="function")await flushAll();
- const selection=extra.selection??st.quote??"",attach=text==null?st.attach.map(a=>a.path):[];
+ const selection=extra.selection??st.quote??"",anchor=extra.selection==null?st.quoteAt||null:null,attach=text==null?st.attach.map(a=>a.path):[];
  if(text==null&&area){area.value="";fitComposer(pid);}st.input="";
  st.error="";st.stream="";st.live=[];st.waiting="";Object.assign(st,freshThinking());
  try{
   const skill=text==null?st.skill:null;st.liveSkill=skill?{slug:skill.slug,title:skill.title}:null;
   // The screen as it is now, so the tab directory sent along says what the learner was just using.
   clearTimeout(screenTimer);await safe(sendScreen);
-  const r=await rpc("send",{agent:p.agent,message,thread:st.thread,selection,task:extra.task||"",note:screenNote(),answer:extra.answer||null,attach,model:p.model||null,skill:skill?.slug||null,effort:p.effort||null});
-  st.thread=r.thread;if(extra.selection==null)st.quote="";if(text==null){st.attach=[];st.skill=null;}
+  const r=await rpc("send",{agent:p.agent,message,thread:st.thread,selection,task:extra.task||"",note:screenNote(),answer:extra.answer||null,attach,model:p.model||null,skill:skill?.slug||null,effort:p.effort||null,anchor});
+  st.thread=r.thread;if(extra.selection==null){st.quote="";st.quoteAt=null;}if(text==null){st.attach=[];st.skill=null;}
   st.data.messages.push({id:"pending",role:"user",content:message||({check:"我写好了，帮我看看我的代码和运行结果。",hint:"我卡住了，给我一点提示，先别直接给答案。",capture:"把我们讨论过的内容整理成知识卡。"})[extra.task]||"",meta:{selection,answer:extra.answer,attach,skill:skill?.slug,skill_title:skill?.title},at:new Date().toISOString()});
   st.data.busy=true;st.anchored=false;renderChat(pid);anchorQuestion(pid);liveTicker(pid);
  }catch(e){if(text==null&&area){area.value=message;fitComposer(pid);}st.error=e.message;renderLive(pid);throw e;}

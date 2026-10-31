@@ -171,7 +171,8 @@ addEventListener("contextmenu",e=>{
  e.preventDefault();hideTip();
  const t=e.target,field=fieldOf(t),text=fieldSelection(field),link=t.closest?.("a[href^='http'],a[data-wiki],a[data-action='open-web']");
  const row=(kind,icon,label,keys="",off=false)=>'<button type="button" data-ctx="'+kind+'"'+(off?" disabled":"")+'>'+svg(icon,14)+'<span>'+label+'</span>'+(keys?'<kbd>'+keys+'</kbd>':"")+'</button>';
- const parts=[];
+ const parts=[],marked=markAtPoint(e);
+ if(marked)parts.push('<button type="button" data-action="mark-more" data-id="'+esc(marked)+'">'+svg("marker",14)+'<span>这条批注…</span></button>');
  if(link)parts.push(link.dataset.wiki?row("open","document","打开「"+esc(shorten(link.dataset.wiki,24))+"」"):
   row("open","document","在 Lattice 里读")+row("browser","external","在浏览器里打开","Ctrl 点击")+row("link","link","复制链接地址"));
  if(field){
@@ -179,8 +180,8 @@ addEventListener("contextmenu",e=>{
   parts.push(row("cut","cut","剪切","Ctrl X",!text||locked)+row("copy","copy","复制","Ctrl C",!text)+row("paste","paste","粘贴","Ctrl V",locked)+row("all","selectall","全选","Ctrl A"));
  }else if(text.trim())parts.push(row("copy","copy","复制","Ctrl C"));
  if(text.trim()&&!t.closest?.(".composer")){
-  Sel.text=text.slice(0,5000);Sel.el=plainField(field)?field:null;
-  parts.push('<button type="button" data-action="ask-flash">'+svg("spark",14)+'<span>问快答</span></button><button type="button" data-action="ask-tutor">'+svg("bot",14)+'<span>问主会话</span></button>');
+  Sel.text=text.slice(0,5000);Sel.el=plainField(field)?field:null;Sel.anchor=Sel.el?null:selectionAnchor(t,Sel.text);
+  parts.push((Sel.anchor?'<button type="button" data-action="mark-add">'+svg("marker",14)+'<span>高亮</span></button><button type="button" data-action="mark-note">'+svg("edit",14)+'<span>批注</span></button>':"")+'<button type="button" data-action="ask-flash">'+svg("spark",14)+'<span>问快答</span></button><button type="button" data-action="ask-tutor">'+svg("bot",14)+'<span>问主会话</span></button>');
  }
  if(!parts.length)return closeMenus();
  const ctx={field,text,link},menu=popMenu({x:e.clientX,y:e.clientY},parts.join("<hr/>"),{cls:"menu-context"});

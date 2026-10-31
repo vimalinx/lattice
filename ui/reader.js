@@ -53,6 +53,7 @@ function readerRender(pid){
   (st.loading?'<div class="reader-note">正在重新读取…</div>':"")+(page.truncated?'<div class="reader-note">这一页太长，后面的没有显示；完整的请在浏览器里看。</div>':"");
  // Images on the page are not loaded into the program; each one is a link that opens the reader on it.
  all("img",body).forEach(img=>img.replaceWith(h('<a href="'+esc(img.getAttribute("src")||"")+'">'+esc("[图片："+(img.alt||"")+"]")+'</a>')));
+ marksRefresh(pid);
 }
 /* A web link: the reader, unless the learner asks for the browser (Ctrl or the middle button). Next to a reader it
    reuses that window and keeps a way back; elsewhere it opens one beside what is on screen. */

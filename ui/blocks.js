@@ -80,6 +80,7 @@ const BLOCKS={
    '<div class="mini-card" data-card="'+esc(c.id)+'"><div class="mini-card-top"><a data-action="open-file" data-path="'+esc(c.path)+'">'+esc(c.title)+'</a><span class="stage stage-'+esc(c.stage)+'">'+esc(stageName[c.stage]||c.stage)+'</span></div>'+
    (d.review?'<div class="mini-q">'+esc(c.question||"用自己的话说说它是什么、为什么。")+'</div><div class="mini-reveal">'+button("想好了，看答案","card-reveal","","sm")+'</div>'+
     '<div class="mini-answer" hidden><div class="markdown">'+markdown(c.body)+'</div>'+(c.mine?'<div class="mini-mine"><b>我的理解</b><div class="markdown">'+markdown(c.mine)+'</div></div>':"")+
+    ((c.links||[]).filter(l=>l.target.startsWith("ann:")).slice(0,3).map(l=>'<a class="mini-source" data-action="open-ref" data-ref="'+esc(l.target)+'">'+svg("marker",12)+' 回到出处：'+esc(l.target_title||"")+'</a>').join(""))+
     '<div class="mini-rate">记得多少：'+button("忘了","card-rate",'data-rating="again" data-id="'+esc(c.id)+'"',"sm")+button("模糊","card-rate",'data-rating="hard" data-id="'+esc(c.id)+'"',"sm")+button("记得","card-rate",'data-rating="good" data-id="'+esc(c.id)+'"',"sm primary")+'</div></div>':
     '<div class="mini-q">'+esc(shorten(c.question||c.body,140))+'</div>')+'</div>').join("");
  },
@@ -145,11 +146,11 @@ const BLOCKS={
  },
 };
 function journalRow(e){
- const d=e.data||{},refs=(e.refs||[]).filter(r=>r.includes("/")||r.includes("."));
+ const d=e.data||{},refs=(e.refs||[]).filter(r=>!r.startsWith("ann:")&&(r.includes("/")||r.includes("."))),mark=(e.refs||[]).find(r=>r.startsWith("ann:"));
  const what=d.summary||d.text||d.title||d.query||d.url||(d.files?d.files.map(f=>f.file).join("、"):"")||d.file||d.excerpt||"";
  return '<div class="jrow"><time>'+esc(fmtDate(e.at,true))+'</time><span class="jtype j-'+esc(e.type)+'">'+esc((String(e.data?.skill||"").startsWith("agent:")&&rulesJournalName[e.type])||journalName[e.type]||e.type)+'</span><span class="jwho">'+esc(who(e.actor))+'</span>'+
   '<span class="jwhat">'+esc(shorten(what,160))+(d.state?' <small>'+esc(d.state)+'</small>':"")+'</span>'+
-  refs.filter(r=>!String(what).includes(r)).slice(0,2).map(r=>'<a class="jref" data-action="open-file" data-path="'+esc(r)+'">'+esc(baseName(r))+'</a>').join("")+'</div>';
+  refs.filter(r=>!String(what).includes(r)).slice(0,2).map(r=>'<a class="jref" data-action="open-file" data-path="'+esc(r)+'">'+esc(baseName(r))+'</a>').join("")+(mark?'<a class="jref" data-action="open-ref" data-ref="'+esc(mark)+'">回到原处</a>':"")+'</div>';
 }
 /* A small dependency-free chart: line, bar or scatter, as SVG. */
 function chartSvg(d){

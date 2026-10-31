@@ -86,7 +86,7 @@ function renderFile(pid){
  else body=textView(pid);
  destroyEditors(node);
  node.innerHTML='<div class="file">'+fileBar(pid)+(st.conflict?conflictBar(pid):"")+body+'</div>';
- mountEditors(node);fitAreas(node);hydrateVault(node,d.path);
+ mountEditors(node);fitAreas(node);hydrateVault(node,d.path);marksRefresh(pid);
 }
 function fileBar(pid){
  const st=Files[pid],d=st.data,p=Dock.panels[pid];
@@ -205,7 +205,7 @@ function linksBlock(pid,links,id){
  const docs=new Map((S.data.docs||[]).map(d=>[d.id,d]));
  const rows=links.map(l=>{
   const out=l.source===id,other=out?l.target:l.source,doc=docs.get(other);
-  const name=doc?doc.title:(other.startsWith("file:")?baseName(other.slice(5)):other);
+  const name=doc?doc.title:other.startsWith("ann:")?(l.target_title||"一条批注"):(other.startsWith("file:")?baseName(other.slice(5)):other);
   return '<div class="link-row">'+(out?"":'<a data-action="open-doc" data-id="'+esc(other)+'">'+esc(name)+'</a> ')+'<span class="link-kind">'+esc(linkName[l.kind]||l.kind)+'</span>'+(out?' <a data-action="'+(other.startsWith("file:")?"open-file":"open-doc")+'" data-id="'+esc(other)+'" data-path="'+esc(other.slice(5))+'">'+esc(name)+'</a>':" 这里")+
    (l.why?'<small>'+esc(l.why)+'</small>':"")+(out?iconButton("close","unlink","去掉这条关系",'data-id="'+esc(l.id)+'" data-pid="'+pid+'"'):"")+'</div>';
  }).join("");
@@ -367,8 +367,11 @@ function fileChanged(evt){
  }
 }
 function gotoIn(pid,at){
+ if(Dock.panels[pid]?.type==="book")return bookGoto(pid,at);
  const st=Files[pid],node=Dock.els[pid];
  if(!st?.data){if(st)st.pendingAt=at;return;}
+ if(at.anchor&&gotoAnchor(pid,at.anchor))return;
+ if(at.anchor)at={line:at.anchor.at?.line};
  if(at.cell){const c=node.querySelector('[data-cell="'+at.cell+'"]');if(c){c.scrollIntoView({block:"center"});c.classList.add("flash");setTimeout(()=>c.classList.remove("flash"),1600);}return;}
  if(st.mode==="preview"){st.mode="live";renderFile(pid);}
  const view=node.querySelector(".cm-host.editor")?.cmView;if(view)editorGoto(view,at);
@@ -444,7 +447,7 @@ function fileInput(t){
 }
 function previewSoon(pid,text){
  const st=Files[pid];clearTimeout(st.timers.preview);
- st.timers.preview=setTimeout(()=>{const pv=Dock.els[pid]?.querySelector(".md-preview");if(pv&&pv.offsetParent){pv.innerHTML=markdown(text);hydrateVault(pv,Dock.panels[pid]?.path);}},250);
+ st.timers.preview=setTimeout(()=>{const pv=Dock.els[pid]?.querySelector(".md-preview");if(pv&&pv.offsetParent){pv.innerHTML=markdown(text);hydrateVault(pv,Dock.panels[pid]?.path);marksRefresh(pid);}},250);
 }
 // Ctrl + E: between editing (live preview, or whichever editing view was last used) and reading.
 async function toggleReading(pid){

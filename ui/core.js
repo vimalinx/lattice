@@ -69,6 +69,7 @@ function svg(name,size=18){
   refresh:'<path d="M20 7V3l-4 4a8 8 0 0 0-13 4M4 17v4l4-4a8 8 0 0 0 13-4"/>',
   bulb:'<path d="M9 18h6m-5 3h4M8 15a6 6 0 1 1 8 0l-1 3H9l-1-3Z"/>',
   quote:'<path d="M9 11H3v8h7V9H4m16 2h-6v8h7V9h-6"/>',
+  marker:'<path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/>',
   terminal:'<rect x="2" y="3" width="20" height="18" rx="2"/><path d="m6 8 4 4-4 4m6 1h6"/>',
   apps:'<rect x="3" y="3" width="7.5" height="7.5" rx="1.8"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.8"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.8"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.8"/>',
   layout:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 10h18M10 10v11"/>',
@@ -152,10 +153,10 @@ function markdown(text){
   .replace(MATH_RE,(m,a,b,c,d)=>{maths.push({tex:a??b??c??d,display:a!=null||b!=null});return "\uE000"+(maths.length-1)+"\uE001";});
  // [[target|shown]] links, ![[image]] and ![[note]] embeds, #tags; what comes from the vault is filled in afterwards (hydrateVault).
  const linked=masked.replace(/(!?)\[\[([^\]\n]+)\]\]/g,(_,bang,inner)=>{
-   const bar=inner.indexOf("|"),target=(bar<0?inner:inner.slice(0,bar)).split("#")[0].trim(),shown=bar<0?inner:inner.slice(bar+1);
+   const bar=inner.indexOf("|"),link=(bar<0?inner:inner.slice(0,bar)).trim(),target=link.split("#")[0].trim(),shown=bar<0?inner:inner.slice(bar+1);
    if(bang&&/\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(target))return '<img data-vault-src="'+esc(target)+'" alt="'+esc(bar<0?"":shown)+'"/>';
    if(bang)return '<span class="embed" data-embed="'+esc(bar<0?inner:inner.slice(0,bar))+'"></span>';
-   return '<a class="wikilink" data-wiki="'+esc(target)+'">'+esc(shown)+'</a>';})
+   return '<a class="wikilink" data-wiki="'+esc(link)+'">'+esc(shown)+'</a>';})
   .replace(/(^|[\s(（])#([^\s#.,;:!?，。；：！？、()（）\[\]{}<>"'`*]+)/gm,(m,pre,tag)=>/^\d+$/.test(tag)?m:pre+'<a class="tag" data-tag="'+esc(tag)+'">#'+esc(tag)+'</a>')
   .replace(/\u0000(\d+)\u0000/g,(_,i)=>codes[+i]);
  try{
@@ -214,14 +215,14 @@ function dialog({title,message="",ok="确定",cancel="取消",danger=false,input
  return new Promise(done=>{
   const box=h('<div class="dialog-backdrop"><div class="dialog'+(danger?" danger":"")+'" role="alertdialog" aria-modal="true">'+
    (title?'<h3>'+esc(title)+'</h3>':"")+(message?'<p>'+esc(message)+'</p>':"")+
-   (input?'<input class="dialog-input" value="'+esc(input.value||"")+'" placeholder="'+esc(input.placeholder||"")+'" spellcheck="false"/>'+(input.hint?'<small>'+esc(input.hint)+'</small>':""):"")+
+   (input?(input.multiline?'<textarea class="dialog-input" rows="5" placeholder="'+esc(input.placeholder||"")+'" spellcheck="false">'+esc(input.value||"")+'</textarea>':'<input class="dialog-input" value="'+esc(input.value||"")+'" placeholder="'+esc(input.placeholder||"")+'" spellcheck="false"/>')+(input.hint?'<small>'+esc(input.hint)+'</small>':""):"")+
    '<div class="dialog-actions"><button class="btn ghost" data-answer="no">'+esc(cancel)+'</button><button class="btn '+(danger?"danger":"primary")+'" data-answer="yes">'+esc(ok)+'</button></div></div></div>');
   const field=box.querySelector(".dialog-input");
   const finish=yes=>{document.removeEventListener("keydown",keys,true);box.classList.add("leaving");setTimeout(()=>box.remove(),120);
    done(input?(yes?field.value.trim()||(input.allowEmpty?"":null):null):yes);};
   const keys=e=>{
    if(e.key==="Escape"){e.preventDefault();e.stopPropagation();finish(false);}
-   else if(e.key==="Enter"&&!e.isComposing&&e.keyCode!==229){e.preventDefault();e.stopPropagation();finish(true);}
+   else if(e.key==="Enter"&&!e.isComposing&&e.keyCode!==229&&(!input?.multiline||e.ctrlKey||e.metaKey)){e.preventDefault();e.stopPropagation();finish(true);}
   };
   box.addEventListener("mousedown",e=>{if(e.target===box)finish(false);});
   box.addEventListener("click",e=>{const b=e.target.closest("[data-answer]");if(b)finish(b.dataset.answer==="yes");});
@@ -253,8 +254,8 @@ const stageName={suggested:"待探索",seen:"接触过",explained:"能解释",ap
 const cardTypeName={concept:"概念",principle:"原理",method:"方法",idea:"思想",fact:"事实"};
 const stageColor={suggested:"#5b6675",seen:"#e0be88",explained:"#b5a8fa",applied:"#83e2c7"};
 const linkName={prerequisite:"是前置",part_of:"是一部分",related:"有关联",applies_to:"应用于",contrasts:"对比",explains:"解释了",branch_of:"分支自",mentions:"提到"};
-const kindName={topic:"主题",card:"知识卡",lesson:"课程",note:"笔记",insight:"薄弱点",notebook:"实验笔记",file:"文件"};
-const journalName={asked:"提问",answered:"作答",judged:"AI 判断",explained:"讲解",ran:"运行",viewed:"查看",wrote:"写作",staged:"理解阶段",reviewed:"回顾",detour:"岔开",bridged:"接回主干",insight:"薄弱点",organized:"整理",searched:"联网",net:"沙箱上网",installed:"装包",action:"AI 动作",undo:"撤销",skill_proposed:"提议改技能",skill_changed:"改了技能",skill_change_dismissed:"没采用的技能修改",skill_compared:"两版对比",skill_compare_done:"两版对比",carded:"记了卡",imported:"导入对话"};
+const kindName={topic:"主题",card:"知识卡",lesson:"课程",note:"笔记",insight:"薄弱点",notebook:"实验笔记",file:"文件",annotation:"批注"};
+const journalName={annotated:"批注",asked:"提问",answered:"作答",judged:"AI 判断",explained:"讲解",ran:"运行",viewed:"查看",wrote:"写作",staged:"理解阶段",reviewed:"回顾",detour:"岔开",bridged:"接回主干",insight:"薄弱点",organized:"整理",searched:"联网",net:"沙箱上网",installed:"装包",action:"AI 动作",undo:"撤销",skill_proposed:"提议改技能",skill_changed:"改了技能",skill_change_dismissed:"没采用的技能修改",skill_compared:"两版对比",skill_compare_done:"两版对比",carded:"记了卡",imported:"导入对话"};
 // A change to an agent's rules is recorded like a skill's, and named for what it is.
 const rulesJournalName={skill_proposed:"提议改规则",skill_changed:"改了规则",skill_change_dismissed:"没采用的规则修改"};
 function who(actor){return actor==="me"?"我":({tutor:"主会话",flash:"快答",coach:"练习教练",organizer:"整理",builder:"应用助手",lattice:"Lattice",app:"Lattice"})[actor]||actor;}

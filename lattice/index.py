@@ -32,8 +32,11 @@ CREATE TABLE IF NOT EXISTS threads(id TEXT PRIMARY KEY, path TEXT NOT NULL, agen
 CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY, thread TEXT NOT NULL, role TEXT NOT NULL,
   content TEXT NOT NULL, meta TEXT NOT NULL DEFAULT '{}', at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread, id);
+CREATE TABLE IF NOT EXISTS annotations(id TEXT PRIMARY KEY, path TEXT NOT NULL, source TEXT NOT NULL, author TEXT NOT NULL, color TEXT NOT NULL,
+  note TEXT NOT NULL, text TEXT NOT NULL, label TEXT NOT NULL, anchor TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL, ask TEXT NOT NULL DEFAULT '');
+CREATE INDEX IF NOT EXISTS annotations_source ON annotations(source);
 """
-TABLES = ("files", "docs", "links", "journal", "threads", "messages")
+TABLES = ("files", "docs", "links", "journal", "threads", "messages", "annotations")
 
 
 def uid():
@@ -59,6 +62,8 @@ class Index:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA busy_timeout=3000")
         self.db.executescript(SCHEMA)
+        if not any(r["name"] == "ask" for r in self.rows("PRAGMA table_info(annotations)")):
+            self.db.execute("ALTER TABLE annotations ADD COLUMN ask TEXT NOT NULL DEFAULT ''")
         self.db.commit()
         self.problems = []
         self.rebuild()
@@ -128,6 +133,8 @@ class Index:
         if kind == "thread":
             self.db.execute("DELETE FROM messages WHERE thread=?", (ident,))
             self.db.execute("DELETE FROM threads WHERE id=?", (ident,))
+        elif kind == "annotation":
+            self.db.execute("DELETE FROM annotations WHERE path=?", (rel,))
         elif kind != "journal":
             # Another path may carry the same id (a copy); only drop rows that came from this one.
             if self.one("SELECT 1 FROM docs WHERE id=? AND path=?", (ident, rel)):
@@ -208,6 +215,17 @@ class Index:
         self.db.executemany("INSERT OR REPLACE INTO messages VALUES(?,?,?,?,?,?)",
                             [(m["id"], head["id"], m["role"], m["content"], dump(m.get("meta") or {}), m["at"]) for m in messages if "id" in m])
         self.db.execute("INSERT OR REPLACE INTO files VALUES(?,?,?)", (rel, head["id"], "thread"))
+
+    def _index_annotation(self, rel):
+        data = self.vault.read_json(rel)
+        self.db.execute("INSERT OR REPLACE INTO files VALUES(?,?,?)", (rel, rel, "annotation"))
+        for item in data.get("items") or []:
+            anchor = dict(item.get("anchor") or {})
+            quoted = str(anchor.pop("text", ""))
+            self.db.execute("INSERT OR REPLACE INTO annotations VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                            (str(item["id"]), rel, str(data["source"]), str(item.get("by") or "me"), str(item.get("color") or "yellow"), str(item.get("note") or ""),
+                             quoted, str(anchor.get("label") or ""), dump(anchor), stamp_of(item.get("created")), stamp_of(item.get("updated"), stamp_of(item.get("created"))),
+                             dump(item["ask"]) if item.get("ask") else ""))
 
     def _index_journal(self, rel):
         self.db.execute("INSERT OR REPLACE INTO files VALUES(?,?,?)", (rel, rel, "journal"))
