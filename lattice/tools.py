@@ -707,20 +707,20 @@ def hand_to_tutor(ctx, summary):
 
 UI_OP = {"type": "object", "properties": {"do": {"type": "string", "enum": ["open", "close", "focus", "move", "float", "layout", "workspace", "sidebar", "set"]},
                                           "panel": S, "agent": S, "path": S, "url": S, "topic": S, "where": S, "to": S, "name": S, "icon": S,
-                                          "side": {"type": "array", "items": S}, "new": {"type": "boolean"},
+                                          "list": S, "new": {"type": "boolean"},
                                           "open": {"type": "boolean"}, "key": S, "value": {}, "spec": {"type": "object"},
                                           "base": S, "vars": {"type": "object"}, "css": S, "font": S, "mono": S, "note": S,
                                           "apply": {"type": "boolean"}, "replace": {"type": "boolean"}, "delete": {"type": "boolean"}}, "required": ["do"]}
 
 
-@tool("ui", {"tutor", "coach"}, "控制整个界面，ops 按顺序执行。界面分成几个工作区（活动栏上的图标，见 screen 的 workspace），每个是一套窗口组合，左栏放它自己的列表；"
+@tool("ui", {"tutor", "coach"}, "控制整个界面，ops 按顺序执行。界面分成几个工作区（状态栏上切换，见 screen 的 workspace），每个是一套窗口组合；左栏独立于工作区，只放一个列表，换列表不动窗口；"
       "同一个面板（比如主会话）可以同时出现在几个工作区。下面的操作都作用在学习者眼前的这个工作区；对话工作区可以放任何面板，由你按需要安排。\n"
       "- open：打开面板。panel 是 chat（给 agent：tutor 主会话 / flash 快答）、file（给 path）、map（可给 topic）、journal、review（回顾到期的卡）、library（卡片库）、memory（记忆：理解阶段、到期预报、回顾记录）、noteinfo（笔记旁边的大纲、反向链接、出链和标签）、skills（技能商城）、settings、home、web（给 url：在学习者这边的阅读器里打开一个网页或 PDF，读成文字、能点链接，不用跳去浏览器）；where 是 left / right / top / bottom（贴着 to 指定的面板分栏）、float（浮出）或 tab（默认：放进 to 所在的那组标签，不给 to 就放进同一侧最近用的那组）。\n"
       "- close / focus / float：panel 是面板 id 或标题（从 screen 里看）。\n"
       "- move：把 panel 移到 to 旁边，where 同上。\n"
       "- layout：整个替换这个工作区的布局。spec 是 {\"split\": \"h\"或\"v\", \"sizes\": [0.5, 0.5], \"parts\": [spec, ...]}，叶子是 {\"tabs\": [面板, ...]}；面板可以是已有面板的 id，也可以是一个 open 那样的对象。\n"
-      "- workspace：切到 name 那个工作区（名字或 id）。new 为 true 时新建一个并切过去：name、icon、side（左栏的列表：topics、cards、notes、lessons、work、practice、files、search）、spec（同 layout，不给就照现在的样子）。"
-      "sidebar：open 为 false 时收起这个工作区的左栏，true 展开。\n"
+      "- workspace：切到 name 那个工作区（名字或 id）。new 为 true 时新建一个并切过去：name、icon、spec（同 layout，不给就照现在的样子）。"
+      "sidebar：open 为 false 时收起左栏，true 展开；list 换左栏的列表（topics、cards、notes、lessons、work、practice、files、skills），窗口不动。\n"
       "- theme：设计并套用一个主题（颜色和风格）。name 是主题名（同名就是在原来的上面改；name 为「默认」时回到默认外观）；base 是 dark 或 light，从哪种外观改起；"
       "vars 是要改的颜色变量 {名字: CSS 颜色}，能改的有 bg（窗口底色）、panel（面板）、panel-hi（弹窗和输入框）、surface（卡片和按钮）、surface-hover、line、line-soft（边框）、"
       "text、muted、subtle（三档文字）、accent（强调色）、accent-ink（强调色上的字）、accent-glow（强调色浅底）、ai、ai-glow（AI 的颜色）、amber、red、green、code-bg、code-text、"

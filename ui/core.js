@@ -2,7 +2,7 @@
 /* Lattice UI core: no remote services; all data passes through QWebChannel. */
 // In a separate window (one panel taken out of the main window), its id; empty in the main window.
 const WINDOW=new URLSearchParams(location.search).get("window")||"";
-const S={bridge:null,ui:{theme:"dark",side:{width:270,closed:[]},spaces:[]},data:null,config:null,toastTimer:null};
+const S={bridge:null,ui:{theme:"dark",side:{width:270},spaces:[]},data:null,config:null,toastTimer:null};
 const el=s=>document.querySelector(s);
 const all=(s,root=document)=>Array.from(root.querySelectorAll(s));
 function esc(v){return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}

@@ -18,7 +18,8 @@ function refreshChats(){Object.keys(Chat).forEach(pid=>loadChat(pid));}
 function renderStatus(){
  const bar=el("#status");if(!bar)return;
  const busy=(S.data.busy||[]).length,running=(S.data.running||[]).length,topic=S.data.active_topic;
- bar.innerHTML=(topic?'<a data-action="open-doc" data-id="'+esc(topic)+'" title="正在学的主题">'+svg("map",12)+' '+esc(topicTitle(topic))+'</a>':'<span>'+svg("bot",12)+' 默认对话</span>')+
+ const sp=currentSpace();
+ bar.innerHTML='<a data-action="space-menu" title="工作区：一套窗口的摆法，在这里切换和管理">'+svg(sp.icon||"layout",12)+' '+esc(sp.name)+'</a>'+(topic?'<a data-action="open-doc" data-id="'+esc(topic)+'" title="正在学的主题">'+svg("map",12)+' '+esc(topicTitle(topic))+'</a>':'<span>'+svg("bot",12)+' 默认对话</span>')+
   (busy?'<span class="working">'+svg("bot",12)+' '+busy+' 个 AI 在工作</span>':"")+(running?'<span class="working">'+svg("play",12)+' '+running+' 个运行中</span>':"")+
   '<span class="grow"></span>'+(S.data.sandbox?.isolated?'<span title="AI 的命令和运行都在沙箱里">'+svg("shield",12)+' 沙箱</span>':
    S.data.sandbox?.ok?'<span title="这台电脑上没有沙箱：AI 的命令和运行用你的权限直接运行">'+svg("play",12)+' 直接运行</span>':'<span class="warn">'+svg("shield",12)+' 沙箱不可用</span>')+
@@ -154,7 +155,7 @@ function sendScreen(){
  }).filter(Boolean):[];
  const state={layout:{stacks,focused:Dock.focus||null,nesting:layoutShape(Dock.layout.root),windows},ai:{panels:ai},mine:{files:mine.filter(x=>x.type==="file"),other:mine.filter(x=>x.type!=="file")},
   look:{base:S.ui.theme,theme:S.ui.theme_custom||"默认",...(activeTheme()?{vars:activeTheme().vars,font:activeTheme().font||undefined,css:activeTheme().css?activeTheme().css.slice(0,600):undefined}:{}),saved:Object.keys(S.ui.themes||{})},
-  workspace:{now:currentSpace().name,sidebar:sideOpen()?(currentSpace().side||[]):"收起",all:visibleSpaces().map(x=>x.name)},theme:S.ui.theme,
+  workspace:{now:currentSpace().name,sidebar:sideOpen()?sideList():"收起",all:visibleSpaces().map(x=>x.name)},theme:S.ui.theme,
   open_but_hidden:stacks.flatMap(s=>s.tabs).filter(t=>!shown.includes(t.id)).map(t=>t.title),recent_files:Dwell.recent.slice(0,20),selection:Sel.text?shorten(Sel.text,600):undefined,selection_from:Sel.anchor?.label||undefined,
   tabs:tabList(shown)};
  if(WINDOW)state.layout.title=windowTitleShown;
@@ -288,6 +289,7 @@ async function onAction(a){
  case "theme-use":S.ui.theme_custom=a.dataset.name||null;if(S.ui.theme_custom)S.ui.theme=S.ui.themes[S.ui.theme_custom].base;applyUi();saveUi();return renderSettings(a.closest(".panel"),"look");
  case "theme-delete":{if(!await ask("删掉以后可以再让 AI 做一个。",{title:"删除主题「"+a.dataset.name+"」？",danger:true,ok:"删除"}))return;themeOp({name:a.dataset.name,delete:true});return renderSettings(a.closest(".panel"),"look");}
  case "side-collapse":return setSideOpen(false);
+ case "side-list":return a.dataset.list===sideList()&&sideOpen()?setSideOpen(false):showList(a.dataset.list);
  case "side-stage":Side.stage=a.dataset.stage;return renderSide();
  case "lib-stage":if(Dock.panels[pid]){Dock.panels[pid].stage=a.dataset.stage;saveLayout();renderLibrary(pid);}return;
  case "lib-type":if(Dock.panels[pid]){Dock.panels[pid].ctype=a.dataset.ctype;saveLayout();renderLibrary(pid);}return;
@@ -311,8 +313,7 @@ async function onAction(a){
  case "open-settings":{const page=a.dataset.page,had=findPanel({type:"settings"}),id=openPanel({type:"settings",...(page?{page}:{})});if(had&&page)renderSettings(Dock.els[id],page);return;}
  case "open-file":return openFile(a.dataset.path||a.dataset.id,{line:a.dataset.line?Number(a.dataset.line):null,highlight:a.dataset.highlight||null});
  case "open-doc":{const d=(S.data.docs||[]).find(x=>x.id===a.dataset.id);if(d)return openFile(d.path);return toast("找不到这个文档，它可能已经被删除","error");}
- case "open-dir":{Side.open.add(a.dataset.path);if((currentSpace().side||[]).includes("files"))return setSideOpen(true);
-  const sp=visibleSpaces().find(x=>(x.side||[]).includes("files"));if(sp){switchSpace(sp.id);return setSideOpen(true);}return toast("没有哪个工作区的左栏放着「文件」");}
+ case "open-dir":Side.open.add(a.dataset.path);return showList("files");
  case "open-thread":return openPanel({type:"chat",agent:a.dataset.agent||"tutor",thread:a.dataset.thread});
  case "open-practice":return openPractice(a.dataset.id);
  case "open-ref":return openRef(a.dataset.ref);
@@ -542,7 +543,7 @@ function initInteractions(){
   if(mod&&e.key.toLowerCase()==="n"){e.preventDefault();safe(()=>newScratch("note"));return;}
   if(mod&&e.key.toLowerCase()==="j"){e.preventDefault();const f=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="flash")||openPanel({type:"chat",agent:"flash"});activate(f);setTimeout(()=>Dock.els[f]?.querySelector(".composer textarea")?.focus(),50);return;}
   if(mod&&e.key.toLowerCase()==="b"){e.preventDefault();setSideOpen(!sideOpen());return;}
-  if(mod&&!e.altKey&&!e.shiftKey&&/^[1-9]$/.test(e.key)){const sp=visibleSpaces()[Number(e.key)-1];if(sp){e.preventDefault();switchSpace(sp.id);}return;}
+  if(mod&&!e.altKey&&!e.shiftKey&&/^[1-9]$/.test(e.key)){const k=Object.keys(SIDE_SECTIONS)[Number(e.key)-1];if(k){e.preventDefault();showList(k);}return;}
   if(mod&&e.key.toLowerCase()==="w"&&Dock.focus){e.preventDefault();safe(()=>closePanel(Dock.focus));return;}
  });
  // Ctrl + wheel sizes the window under the mouse, not the whole program.
@@ -553,9 +554,8 @@ function initInteractions(){
   wheel+=e.deltaY;if(Math.abs(wheel)<60)return;stepZoom(pid,wheel<0?1:-1);wheel=0;
  },{passive:false,capture:true});
  document.addEventListener("contextmenu",e=>{
-  const tab=e.target.closest?.(".tab"),space=e.target.closest?.(".act.space");
+  const tab=e.target.closest?.(".tab");
   if(tab){e.preventDefault();tabMenu(tab.dataset.pid,{x:e.clientX,y:e.clientY});}
-  else if(space){e.preventDefault();const r=space.getBoundingClientRect();spaceMenu(space.dataset.space,{x:r.right+8,y:r.top});}
  });
  document.addEventListener("mouseup",e=>{if(e.button!==2)setTimeout(()=>onSelect(e),0);});
  document.addEventListener("scroll",()=>{hidePop();reportScreen();},true);

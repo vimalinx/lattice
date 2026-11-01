@@ -241,16 +241,16 @@ const SETTINGS_RENDER={
  },
  layout(){
   const list=spaceList(),b=(t,a,id,extra="")=>button(t,a,'data-space="'+esc(id)+'" '+extra,"ghost xs");
-  return '<h3>工作区</h3><p class="muted">活动栏上的每个图标是一个工作区：一套窗口组合，左栏放它自己的列表。同一个对话、同一个文件可以同时出现在几个工作区里。'+
-   '在工作区里拖动、分栏、浮出都会自动记住；「设为默认」以后，「恢复默认」就回到那时的样子。活动栏上的图标右键也能改，Ctrl + 1～9 切换。</p>'+
+  return '<h3>工作区</h3><p class="muted">工作区是一套窗口的摆法，在底部状态栏最左边切换和管理；左栏不跟着变。同一个对话、同一个文件可以同时出现在几个工作区里。'+
+   '在工作区里拖动、分栏、浮出都会自动记住；「设为默认」以后，「恢复默认」就回到那时的样子。</p>'+
    '<div class="preset-list">'+list.map((sp,i)=>'<div class="preset'+(sp.hidden?" off":"")+'">'+svg(sp.icon||"layout",14)+' <b>'+esc(sp.name)+'</b>'+
     (sp.id===Dock.space?'<span class="chip on">当前</span>':"")+(sp.hidden?'<span class="chip">隐藏了</span>':"")+
-    '<span class="muted small">'+esc((sp.side||[]).map(k=>SIDE_SECTIONS[k]?.title).filter(Boolean).join("、")||"左栏不放列表")+'</span><span class="grow"></span>'+
+    '<span class="grow"></span>'+
     (sp.hidden?b("显示","space-show",sp.id):sp.id===Dock.space?b("把现在的样子设为默认","space-keep",sp.id):b("切换","space",sp.id))+
     b("改","space-edit",sp.id)+b("恢复默认","space-reset",sp.id)+(i>0?iconButton("arrowup","space-move","往上挪",'data-space="'+esc(sp.id)+'" data-dir="-1"'):"")+
     (sp.hidden?"":b(sp.builtin?"隐藏":"删除","space-remove",sp.id))+'</div>').join("")+'</div>'+
    '<div class="inline">'+button(svg("plus",13)+" 新工作区","space-new","","primary sm")+'</div>'+
-   '<h3>左栏</h3><p class="muted">每个工作区的左栏各自收起、展开：点它右上角的按钮、再点一次活动栏上这个工作区的图标，或者按 Ctrl + B。</p>'+
+   '<h3>左栏</h3><p class="muted">活动栏的图标只换左栏里的列表，窗口不动（Ctrl + 1～8）。收起、展开左栏：点它右上角的按钮、再点一次当前列表的图标，或者按 Ctrl + B。</p>'+
    '<label>左栏宽度<input type="number" min="180" max="560" data-side-width value="'+esc(S.ui.side.width)+'"/></label>'+
    '<label class="check"><input type="checkbox" data-ui="activity_plus"'+(S.ui.activity_plus?" checked":"")+'/> 活动栏里也放一个「＋」 <small>（和每组标签末尾的「＋」是同一个菜单）</small></label>';
  },

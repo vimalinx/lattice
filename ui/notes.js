@@ -91,7 +91,7 @@ function noteFollow(){
  if(path===Notes.current)return;
  Notes.current=path;Notes.links=null;Notes.cursorLine=0;
  noteInfoChanged();
- if((currentSpace().side||[]).includes("notes")&&sideOpen()){
+ if(sideList()==="notes"&&sideOpen()){
   // The tree opens the folders of the note on screen, as Obsidian's "reveal" does.
   if(path?.startsWith("notes/")&&!el('#side .note-row[data-path="'+CSS.escape(path)+'"]')){revealPath(path);renderSide();}
   else all("#side .note-row").forEach(r=>r.classList.toggle("on",r.dataset.path===path));

@@ -11,7 +11,7 @@ async function skillList(fresh=false){
 }
 function skillsChanged(){
  SkillBook.list=null;all(".panel-skills").forEach(n=>{if(n.isConnected)safe(()=>renderStore(n.dataset.pid));});
- if((currentSpace().side||[]).includes("skills"))renderSide();
+ if(sideList()==="skills")renderSide();
 }
 /* ---- the sidebar's list: installed skills by kind ------------------------------------------------------------- */
 const SkillSide={query:""};

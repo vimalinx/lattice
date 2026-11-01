@@ -665,10 +665,7 @@ details.api summary span{font-size:11.5px}
 .zoom-grid label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0}
 .zoom-grid .unit{display:flex;align-items:center;gap:5px}.zoom-grid input{width:68px}
 /* workspaces */
-.side-part+.side-part{margin-top:10px;padding-top:6px;border-top:1px solid var(--line-soft)}
-.side-sub{display:flex;align-items:center;gap:4px;padding:4px 4px 4px 8px;font-size:11.5px;color:var(--muted)}
-.side-sub b{flex:1;min-width:0;font-weight:600;letter-spacing:.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.side-sub .icon,.side-head .icon{width:24px;height:24px}
+.side-head .icon{width:24px;height:24px}
 .stack-empty .ghost.xs{margin-top:10px}
 .preset.off{opacity:.55}
 .space-form{display:flex;flex-direction:column;gap:10px}
@@ -676,8 +673,6 @@ details.api summary span{font-size:11.5px}
 .icon-pick button{width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--line-soft);border-radius:8px;background:transparent;color:var(--muted)}
 .icon-pick button:hover{color:var(--text);background:var(--surface)}
 .icon-pick button.on{color:var(--accent);border-color:var(--accent);background:var(--accent-glow)}
-.list-pick{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 12px}
-.list-pick .check svg{vertical-align:-2px;color:var(--muted)}
 .inline.end{justify-content:flex-end}
 /* the card library */
 .library{height:100%;display:flex;flex-direction:column;min-height:0}

@@ -509,14 +509,14 @@ async function runUiOps(ops){
     const found=findSpace(op.name);
     if(op.new){
      if(!op.name)throw new Error("新工作区要给 name");
-     const lists=(op.side||[]).filter(k=>SIDE_SECTIONS[k]);
-     createSpace({name:String(op.name).slice(0,20),icon:SPACE_ICONS.includes(op.icon)?op.icon:"layout",side:lists,spec:op.spec||null});
+     createSpace({name:String(op.name).slice(0,20),icon:SPACE_ICONS.includes(op.icon)?op.icon:"layout",spec:op.spec||null});
     }else{if(!found)throw new Error("没有这个工作区："+op.name+"；有："+visibleSpaces().map(x=>x.name).join("、"));switchSpace(found.id);}
     results.push({ok:true,workspace:currentSpace().name});
    }else if(op.do==="theme"){
     results.push(themeOp(op));
    }else if(op.do==="sidebar"){
-    setSideOpen(op.open!==false);results.push({ok:true});
+    if(op.list&&!SIDE_SECTIONS[op.list])throw new Error("没有这个左栏列表："+op.list+"；有："+Object.keys(SIDE_SECTIONS).join("、"));
+    if(op.list&&op.open!==false)showList(op.list);else setSideOpen(op.open!==false);results.push({ok:true});
    }else if(op.do==="set"&&(op.key==="zoom"||op.panel&&VIEW_KEYS.includes(op.key))){
     const pid=resolvePanel(op.panel);if(!pid)throw new Error(op.key+" 要给 panel：面板 id 或标题");
     if(op.key==="zoom"&&op.value!=null&&!(Number(op.value)>0))throw new Error("zoom 的 value 是倍数，比如 1.2");
