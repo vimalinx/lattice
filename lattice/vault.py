@@ -301,13 +301,15 @@ class Vault:
         return self.git("rev-parse", "HEAD").strip()
 
     def commit_only(self, folder, message, actor="me"):
-        """Commit one folder and nothing else: what an agent is in the middle of stays out of it, and what is committed
-        here cannot be swept into an agent's step, where undoing that step would take it too."""
-        self.git("add", "-A", "--", folder, check=False)
-        if not self.git("diff", "--cached", "--name-only", "--", folder).strip():
+        """Commit one folder (or several) and nothing else: what an agent is in the middle of stays out of it, and what is
+        committed here cannot be swept into an agent's step, where undoing that step would take it too."""
+        folders = (folder,) if isinstance(folder, str) else tuple(folder)
+        self.git("add", "-A", "--", *folders, check=False)
+        names = self.git("diff", "--cached", "--name-only", "--", *folders).splitlines()
+        if not names:
             return None
         name, email = ("我", "me@lattice.local") if actor == "me" else (f"Lattice · {actor}", f"{actor}@lattice.local")
-        self.git("-c", f"user.name={name}", "-c", f"user.email={email}", "commit", "-q", "-m", message, "--", folder)
+        self.git("-c", f"user.name={name}", "-c", f"user.email={email}", "commit", "-q", "-m", message, "--", *names)
         return self.git("rev-parse", "HEAD").strip()
 
     def head(self):

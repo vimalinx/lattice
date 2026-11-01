@@ -442,6 +442,8 @@ def shell(ctx, command, timeout=None, gpu=False):
     bridge = ctx.bridge
     limit = max(3, min(int(timeout or bridge.config.read()["shell_timeout"]), 600))
     began = time.monotonic()
+    # What has been said so far goes into history first, so nothing put back after the command can take it away.
+    ctx.l.vault.commit_only(APPEND_ONLY, "轨迹与对话", "lattice")
 
     def start(done):
         def finish(result):

@@ -225,6 +225,8 @@ function messageKey(pid,m,answers){
   (meta.actions||[]).filter(a=>undone.has(a.id)).map(a=>a.id),(meta.suggestions||[]).map(x=>st.data.decisions?.[m.id+":"+x.id]||""),mine,
   (st.data.cards?.[m.id]||[]).map(c=>c.id)].join("|");
 }
+// Questions an old bug lost, put back from what the AI wrote down at the time.
+const RESTORED={words:"当时没存下来，这是从 AI 的思考记录里找回的原话，可能不完整",gist:"当时没存下来，这是根据 AI 的思考记录写的转述，不是原话"};
 function messageEl(pid,m,answers,key){
  const st=Chat[pid],p=Dock.panels[pid],meta=m.meta||{},list=st.data.messages,at=list.indexOf(m),next=list[at+1];
  // A reply that broke off: the last one can be answered again; one already answered again says so.
@@ -232,13 +234,13 @@ function messageEl(pid,m,answers,key){
  const mine=m.role==="user";
  const r=mine?{html:markdown(m.content),blocks:[]}:replyHtml(meta.imported?adaptImported(m.content):m.content);
  const incomplete=!mine&&meta.stop_reason&&meta.stop_reason!=="end_turn";
- const foot='<div class="msg-foot">'+(mine?"":'<span>'+esc(meta.imported||agentTitle(meta.agent||p.agent))+'</span>')+'<time>'+esc(fmtDate(m.at,true))+'</time>'+(mine?"":usageLabel(meta.usage))+
+ const foot='<div class="msg-foot">'+(mine?"":'<span>'+esc(meta.imported||agentTitle(meta.agent||p.agent))+'</span>')+(meta.restored?"":'<time>'+esc(fmtDate(m.at,true))+'</time>')+(mine?"":usageLabel(meta.usage))+
   (m.content.trim()?iconButton("copy","msg-copy","复制",'data-pid="'+pid+'" data-mid="'+m.id+'"'):"")+(!mine&&m.content.trim()?messageTools(pid,m):"")+'</div>';
  const html=mine?'<div class="msg from-me" data-mid="'+m.id+'"><div class="bubble">'+
    (meta.skill_title?'<div class="msg-skill"'+(meta.skill?' data-skill-open="'+esc(meta.skill)+'" data-tip="看看、改改这个技能"':"")+'>'+svg("store",11)+' 按技能「'+esc(meta.skill_title)+'」</div>':"")+
    (meta.selection?'<div class="msg-quote"'+(meta.anchor?' data-action="quote-go" data-pid="'+pid+'" data-mid="'+m.id+'" title="回到原处"':"")+'>'+esc(shorten(meta.selection,180))+(meta.anchor?.label?'<small>'+esc(meta.anchor.label)+'</small>':"")+'</div>':"")+
    (meta.attach?.length?messageTiles(meta.attach):"")+
-   '<div class="markdown msg-body">'+r.html+'</div></div>'+foot+'</div>'
+   '<div class="markdown msg-body">'+r.html+'</div></div>'+(RESTORED[meta.restored]?'<div class="msg-note">'+RESTORED[meta.restored]+'</div>':"")+foot+'</div>'
   :'<div class="msg from-ai" data-mid="'+m.id+'">'+skillsUsed(meta.skills||olderSkills(list,at))+thinkingHtml(meta.thinking,meta.think_seconds)+stepsHtml(meta.steps)+'<div class="markdown msg-body">'+r.html+'</div>'+
    (redone?'<div class="msg-note">这次没有答完，下面是重新回答的</div>':incomplete?'<div class="msg-note">'+esc(meta.stop_reason==="cancelled"?"已停止 · 保留了部分回答":meta.stop_reason==="max_tokens"?"达到回复长度上限":"没有正常结束 · 只保留了收到的部分")+
     (canRetry?button(svg("refresh",12)+" 重新回答","chat-retry",'data-pid="'+pid+'"',"ghost xs"):"")+'</div>':"")+
