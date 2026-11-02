@@ -725,7 +725,9 @@ details.api summary span{font-size:11.5px}
 .cm-host:not(.cm-md) .cm-scroller{font-family:var(--mono);font-size:var(--code-size,12.5px);line-height:1.65}
 .cm-host.cm-md .cm-scroller{font-family:inherit;font-size:var(--note-size,16px);line-height:var(--line-height,1.8)}
 /* The reading width is counted in characters of the interface's size; at the notes' larger size it widens with them. */
-.cm-host.editor.cm-md .cm-content{max-width:calc(var(--read-width,42em) * var(--note-scale,1) + 48px);width:100%;margin:0 auto;padding:12px 24px 35vh}
+/* Side room is on the scroller: a multi-line selection is drawn across the content box, so padding there would show as selection beside the text. */
+.cm-host.editor.cm-md .cm-scroller{padding:0 24px}
+.cm-host.editor.cm-md .cm-content{max-width:calc(var(--read-width,42em) * var(--note-scale,1));width:100%;margin:0 auto;padding:12px 0 35vh}
 .cm-host.editor .cm-gutters{padding-left:4px}
 .tk-kw{color:var(--tk-kw)}.tk-str{color:var(--tk-str)}.tk-num{color:var(--tk-num)}.tk-com{color:var(--tk-com);font-style:italic}.tk-fn{color:var(--tk-fn)}
 .tk-type{color:var(--tk-type)}.tk-prop{color:var(--tk-prop)}.tk-op,.tk-punc{color:var(--tk-op)}.tk-tag{color:var(--tk-tag)}.tk-attr{color:var(--tk-type)}.tk-bad{color:var(--red)}
@@ -754,7 +756,8 @@ details.api summary span{font-size:11.5px}
 .markdown img{max-width:100%;border-radius:8px}
 .markdown a.tag{color:var(--ai);background:var(--ai-glow);border-radius:10px;padding:0 6px}
 .mine-box .cm-host{background:var(--panel);border-radius:6px;min-height:70px}
-.mine-box .cm-content{padding:6px 10px}
+.mine-box .cm-scroller{padding:0 10px}
+.mine-box .cm-content{padding:6px 0}
 .card-view .md-split .cm-content,.topic-view .md-split .cm-content{padding-bottom:24px!important}
 /* notes: the folder tree */
 .note-row.on{background:var(--accent-glow)}.note-row.on .t{color:var(--accent)}
@@ -788,7 +791,8 @@ details.api summary span{font-size:11.5px}
 .doc-view>.md-split>div{overflow:visible}
 .panel-file .doc-view>.doc-head{flex:none;max-width:calc(var(--read-width,42em) * var(--note-scale,1) + 48px);width:100%;margin:0 auto;padding-left:24px;padding-right:24px}
 .panel-file .file>.doc-head+.file-tools{max-width:calc(var(--read-width,42em) * var(--note-scale,1) + 48px);width:100%;margin:0 auto;padding-left:24px}
-.card-view .cm-host.editor .cm-content,.topic-view .cm-host.editor .cm-content{max-width:none;margin:0;padding:10px 14px 24px!important}
+.card-view .cm-host.editor .cm-scroller,.topic-view .cm-host.editor .cm-scroller{padding:0 14px}
+.card-view .cm-host.editor .cm-content,.topic-view .cm-host.editor .cm-content{max-width:none;margin:0;padding:10px 0 24px!important}
 .cm-rb0,.cm-rb0 *{color:var(--rb0)!important}.cm-rb1,.cm-rb1 *{color:var(--rb1)!important}.cm-rb2,.cm-rb2 *{color:var(--rb2)!important}
 .cm-rb-bad,.cm-rb-bad *{color:var(--red)!important;text-decoration:underline wavy var(--red)}
 .act.act-new{margin-top:4px;color:var(--subtle);border:1px dashed var(--line)}
@@ -1152,7 +1156,8 @@ input[type=checkbox],input[type=radio],input[type=range]{accent-color:var(--acce
 .skp-desc{margin:0;color:var(--muted);font-size:13px;line-height:1.7}
 .skp-edit{height:min(56vh,620px);overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel-hi)}
 .skp-edit .cm-host,.skp-edit .cm-editor{min-height:100%}
-.skp-edit .cm-host.editor.cm-md .cm-content{padding:14px 22px 30vh}
+.skp-edit .cm-host.editor.cm-md .cm-scroller{padding:0 22px}
+.skp-edit .cm-host.editor.cm-md .cm-content{padding:14px 0 30vh}
 .skp-state{font-size:12px;color:var(--ai)}
 .sc-try{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:2px}
 .sc-try>span{font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:4px}
