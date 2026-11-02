@@ -48,16 +48,16 @@ class Sandbox:
     def __init__(self, root, projects=lambda: [], extra=lambda: [], network=lambda: False, proxy=None):
         self.root = Path(root).resolve()
         self.projects, self.extra, self.network, self.proxy = projects, extra, network, proxy
-        self.bwrap = None if host.WINDOWS else shutil.which("bwrap")
+        self.bwrap = shutil.which("bwrap") if host.LINUX else None
         self._ok = None
 
     @property
     def isolated(self):
         """Whether what runs here is kept apart from the rest of this computer (bubblewrap on Linux)."""
-        return not host.WINDOWS and self.available()
+        return host.LINUX and self.available()
 
     def available(self):
-        if host.WINDOWS:
+        if not host.LINUX:
             return True
         if self._ok is None:
             self._ok = bool(self.bwrap) and subprocess.run([self.bwrap, "--unshare-all", "--ro-bind", "/usr", "/usr", "--symlink", "usr/bin", "/bin",

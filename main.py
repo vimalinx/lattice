@@ -9,7 +9,7 @@ import sys
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-from PySide6.QtWidgets import QApplication, QMainWindow
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -203,6 +203,16 @@ def main():
         server=QLocalServer(app)
         if not server.listen("lattice-studio"):
             print("实例锁创建失败："+server.errorString(),file=sys.stderr)
+            sys.exit(1)
+    if appscheme.host.MACOS:
+        import subprocess
+        git = appscheme.host.tool("git")
+        try:
+            ready = git and subprocess.run([git, "--version"], capture_output=True, timeout=15).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            ready = False
+        if not ready:
+            QMessageBox.critical(None, "Lattice 需要 Git", "请先在终端执行 xcode-select --install 安装 Apple 命令行工具，然后重新打开 Lattice。")
             sys.exit(1)
     window=MainWindow(screenshot=args.screenshot)
     if server:

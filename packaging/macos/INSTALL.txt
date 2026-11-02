@@ -1,0 +1,17 @@
+Lattice macOS 预览版
+适用：Apple Silicon（M1 及以后），macOS 13 或更新。
+将 Lattice.app 拖到 Applications 后打开。
+
+这是未获 Apple Developer ID 签名、未公证的测试构建。
+macOS 可能阻止首次打开；确认文件来源后，可在“系统设置 > 隐私与安全性”允许打开。
+如果系统未提供允许选项，请等待开发者签名和公证后的版本。
+
+依赖：Git（首次使用前在终端执行 xcode-select --install，安装 Apple 命令行工具）。
+Python 与 Qt 已包含；uv 已包含。第一次运行学习库代码时需联网下载 Python 3.12 和所需包。
+在设置 > 模型连接中填写自己的模型服务 API Key。
+学习库默认位于 ~/Lattice；配置、日志位于 ~/Library/Application Support/lattice。
+
+macOS 版没有沙箱，所以 AI 运行代码和命令默认关闭；在设置里打开后，AI 的命令用你的权限运行，
+能碰到学习库以外的文件，也能联网。“沙箱可以上网”这个开关在这里不起作用。
+Apple Silicon 的 GPU 检测沿用原项目，尚未验证实际 MPS 训练。
+Intel Mac 不在此安装包支持范围内。

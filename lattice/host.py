@@ -17,12 +17,21 @@ import tempfile
 import threading
 
 WINDOWS = sys.platform == "win32"
+MACOS = sys.platform == "darwin"
+LINUX = sys.platform.startswith("linux")
+SYSTEM = "Windows" if WINDOWS else "macOS" if MACOS else "Linux"
 # Where Lattice's own files are: next to main.py when run from source, the bundle's folder when frozen.
 APP = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
 # Its bin folder holds uv, and MinGit (whose git.exe is in cmd).
-BUNDLED = [p for base in dict.fromkeys((Path(sys.executable).parent, APP)) for p in (base / "bin", base / "bin" / "git" / "cmd")
+BUNDLED = [p for base in dict.fromkeys((Path(sys.executable).parent, APP)) for p in (base / "bin", base / "bin" / "git" / "cmd", base / "bin" / "git" / "bin")
            if p.is_dir()] if getattr(sys, "frozen", False) else []
 
+
+# Finder does not inherit a terminal's PATH. Include shipped tools and common toolchains.
+if MACOS:
+    os.environ["PATH"] = os.pathsep.join(dict.fromkeys([
+        *map(str, BUNDLED), *os.environ.get("PATH", "").split(os.pathsep),
+        "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]))
 
 # ---- folders ----------------------------------------------------------------------------------------
 
@@ -30,14 +39,14 @@ def config_home():
     """Settings (providers.json, localrouter.toml): ~/.config on Linux, %APPDATA% on Windows."""
     if WINDOWS:
         return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
-    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / "Library" / "Application Support" if MACOS else Path.home() / ".config"))
 
 
 def data_home():
     """Lattice's own data (logs, web profile, usage): ~/.local/share on Linux, %LOCALAPPDATA% on Windows."""
     if WINDOWS:
         return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    return Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / "Library" / "Application Support" if MACOS else Path.home() / ".local" / "share"))
 
 
 def runtime_dir():

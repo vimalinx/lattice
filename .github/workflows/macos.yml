@@ -1,0 +1,52 @@
+# Lattice for Apple Silicon: the tests, the build, a start of the built program, and the DMG. It is ad hoc signed, not
+# notarized, so it is a preview. A tag v* adds the DMG to the release the Windows workflow publishes.
+name: macOS Apple Silicon
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: macos-15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r requirements.txt pyinstaller==6.22.3 pillow uv==0.13.6 pytest
+      - name: The tag says the version
+        if: github.ref_type == 'tag'
+        run: test "${GITHUB_REF_NAME#v}" = "$(python -c 'from lattice import __version__; print(__version__)')"
+      - run: python -m pytest tests/ -q
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - run: bash packaging/macos/build.sh
+        env:
+          PYTHON: python
+          QT_QPA_PLATFORM: offscreen
+      - name: Start bundled application
+        run: |
+          export LATTICE_VAULT="$RUNNER_TEMP/lattice-vault"
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/lattice-config"
+          export XDG_DATA_HOME="$RUNNER_TEMP/lattice-data"
+          dist/Lattice.app/Contents/MacOS/Lattice --screenshot "$RUNNER_TEMP/lattice.png"
+          test -s "$RUNNER_TEMP/lattice.png"
+          test -d "$LATTICE_VAULT/.git"
+          codesign --verify --deep --strict dist/Lattice.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lattice-macos-arm64-preview
+          path: |
+            dist/*.dmg
+            dist/SHA256SUMS.txt
+      - name: Add to the release
+        if: github.ref_type == 'tag'
+        run: |
+          # The Windows workflow creates the release; it can take a while.
+          for i in $(seq 1 60); do gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 && break; sleep 30; done
+          gh release upload "$GITHUB_REF_NAME" dist/*.dmg dist/SHA256SUMS.txt

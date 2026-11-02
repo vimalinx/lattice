@@ -296,8 +296,8 @@ const SETTINGS_RENDER={
  async run(c){
   const env=await rpc("env_info",{name:Settings.env||"default"}).catch(()=>null),acc=await rpc("accelerator").catch(()=>null);
   const rows=Object.keys({...c.default_runners,...c.runners}).sort().map(ext=>'<div class="runner-row"><code>'+esc(ext)+'</code><input data-runner="'+esc(ext)+'" value="'+esc(c.runners[ext]??"")+'" placeholder="'+esc(c.default_runners[ext]||"")+'"/></div>').join("");
-  return '<h3>运行</h3><label class="check"><input type="checkbox" data-cfg="agent_auto_run"'+(c.agent_auto_run?" checked":"")+'/> 允许 AI 自己运行代码和命令 <small>都在沙箱里：看不到家目录和你的其他文件</small></label>'+
-   '<label class="check"><input type="checkbox" data-cfg="agent_network"'+(c.agent_network!==false?" checked":"")+'/> 沙箱可以上网 <small>经过 Lattice 的代理：能装包下载、拉数据集、调网上的接口，连不了这台电脑和局域网；访问了哪些网站记在学习轨迹里。改了之后新开的运行和内核才按新的来</small></label>'+
+  return '<h3>运行</h3><label class="check"><input type="checkbox" data-cfg="agent_auto_run"'+(c.agent_auto_run?" checked":"")+'/> 允许 AI 自己运行代码和命令 <small>'+(S.data.sandbox?.isolated?"都在沙箱里：看不到家目录和你的其他文件":"这台电脑没有沙箱：AI 的命令用你的权限直接运行，碰得到学习库以外的文件")+'</small></label>'+
+   '<label class="check"><input type="checkbox" data-cfg="agent_network"'+(c.agent_network!==false?" checked":"")+'/> 沙箱可以上网 <small>'+(S.data.sandbox?.isolated?"经过 Lattice 的代理：能装包下载、拉数据集、调网上的接口，连不了这台电脑和局域网；访问了哪些网站记在学习轨迹里。改了之后新开的内核才生效":"这台电脑没有沙箱，这个开关不起作用：AI 的命令直接联网")+'</small></label>'+
    '<label class="check"><input type="checkbox" data-cfg="gpu"'+(c.gpu!==false?" checked":"")+'/> 允许用显卡计算 <small>AI 需要时（训练、CUDA）和你运行导入了 torch / jax 之类的 Python 时用；实验笔记的内核可以单独切到显卡，空闲 15 分钟自动关掉</small></label>'+
    (acc?'<div class="accel-box"><div class="field-label">这台电脑 <small>自动识别，不会唤醒显卡；AI 装 torch 之类的库时按这个选版本</small></div>'+
     (acc.accelerators.length?acc.accelerators.map(a=>'<div class="accel-row'+(a.kind===acc.preferred?" on":"")+'">'+svg(a.kind===acc.preferred?"check":"spark",13)+'<b>'+esc(a.name)+'</b>'+

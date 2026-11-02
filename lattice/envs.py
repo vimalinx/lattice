@@ -45,7 +45,7 @@ class Envs:
         self.vault, self.root = vault, vault.root
         self.uv = host.tool("uv")
         # Without a Python of the system's own (Windows), uv brings one of its own the first time.
-        self.python_base = python or (None if host.WINDOWS else shutil.which("python3")) or "3.12"
+        self.python_base = python or (None if host.WINDOWS or host.MACOS else shutil.which("python3")) or "3.12"
         self.locks = {}
 
     def lock(self, name):

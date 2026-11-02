@@ -142,9 +142,12 @@ document.addEventListener("dragover",e=>{if(spaceDrag&&e.target.closest?.(".st-t
 document.addEventListener("drop",e=>{const to=e.target.closest?.(".st-tab")?.dataset.space;if(spaceDrag&&to){e.preventDefault();moveSpaceTo(spaceDrag,to);}spaceDrag=null;});
 
 /* Hovering a state shows its windows above its tab. A window is dragged from there onto another state, whose list shows as
-   the pointer reaches it: it moves there, or with Ctrl held is shown there too. The list is redrawn under the drag, which a
+   the pointer reaches it: it moves there, or with Ctrl (Option on a Mac) held is shown there too. The list is redrawn under the drag, which a
    browser drag does not survive, so this one follows the mouse itself. */
 const Peek={id:null,timer:null,hide:null,drag:null};
+// Ctrl and a click is the right button on a Mac, where copying by dragging is Option's, as in Finder.
+const MAC=/Mac/.test(navigator.platform);
+function copying(e){return MAC?e.altKey:e.ctrlKey;}
 function spaceWindows(id){const out=[];if(Dock.spaces[id])eachStack(s=>s.tabs.forEach(pid=>{if(!out.includes(pid))out.push(pid);}),Dock.spaces[id]);return out;}
 function peekShow(id){
  const tab=el('.st-tab[data-space="'+CSS.escape(id)+'"]'),sp=spaceOf(id);if(!tab||!sp)return;
@@ -154,7 +157,7 @@ function peekShow(id){
  let box=el("#st-peek");if(!box){box=h('<div id="st-peek" class="st-peek"></div>');document.body.appendChild(box);}
  const list=spaceWindows(id),row=pid=>{const p=Dock.panels[pid],t=Dock.types[p.type],icon=typeof t?.icon==="function"?t.icon(p):t?.icon;
   return '<div class="st-win" data-pid="'+esc(pid)+'" data-space="'+esc(id)+'" title="'+esc(panelTitle(pid))+'">'+svg(icon||"layout",13)+'<span>'+esc(panelTitle(pid))+'</span></div>';};
- box.innerHTML='<div class="menu-label">'+esc(sp.name)+(at<9?'<small>Ctrl Shift '+(at+1)+' · 右键改</small>':"")+'</div>'+(list.map(row).join("")||'<p class="side-empty">还没有窗口</p>');
+ box.innerHTML='<div class="menu-label">'+esc(sp.name)+(at<9?'<small>'+(MAC?"⌘ ⇧ ":"Ctrl Shift ")+(at+1)+' · 右键改</small>':"")+'</div>'+(list.map(row).join("")||'<p class="side-empty">还没有窗口</p>');
  const r=tab.getBoundingClientRect();box.style.left=Math.max(8,Math.min(r.left,innerWidth-box.offsetWidth-8))+"px";box.style.bottom=innerHeight-r.top+6+"px";
 }
 function peekHide(){clearTimeout(Peek.timer);clearTimeout(Peek.hide);Peek.id=null;el("#st-peek")?.remove();}
@@ -175,12 +178,12 @@ function peekDrag(down,win){
   all(".st-tab").forEach(t=>t.classList.toggle("drop",t.dataset.space===d.to&&d.to!==d.from));};
  const move=e=>{
   if(!d.ghost){if(Math.hypot(e.clientX-down.clientX,e.clientY-down.clientY)<5)return;d.ghost=h('<div class="st-ghost"></div>');document.body.appendChild(d.ghost);document.body.classList.add("st-dragging");}
-  d.ghost.style.left=e.clientX+12+"px";d.ghost.style.top=e.clientY-38+"px";d.copy=e.ctrlKey;
+  d.ghost.style.left=e.clientX+12+"px";d.ghost.style.top=e.clientY-38+"px";d.copy=copying(e);
   const under=document.elementFromPoint(e.clientX,e.clientY),tab=under?.closest?.(".st-tab");
   if(tab){d.to=tab.dataset.space;if(d.to!==Peek.id)peekShow(d.to);}else d.to=under?.closest?.("#st-peek")?Peek.id:null;
   clearTimeout(Peek.hide);paint();
  };
- const key=e=>{if(e.key==="Escape"){d.to=null;d.cancel=true;up(e);}else if(e.key==="Control"){d.copy=e.type==="keydown";paint();}};
+ const key=e=>{if(e.key==="Escape"){d.to=null;d.cancel=true;up(e);}else if(e.key==="Control"||e.key==="Alt"){d.copy=copying(e);paint();}};
  const up=e=>{
   document.removeEventListener("mousemove",move);document.removeEventListener("mouseup",up);document.removeEventListener("keydown",key,true);document.removeEventListener("keyup",key,true);
   d.ghost?.remove();document.body.classList.remove("st-dragging");all(".st-tab.drop").forEach(t=>t.classList.remove("drop"));Peek.drag=null;

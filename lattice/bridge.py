@@ -1259,7 +1259,7 @@ class Bridge(QObject):
                 "active_practices": [p for p in l.practices() if p["state"] == "active"],
                 "agent_may_run_code": bool(self.config.read()["agent_auto_run"]), "sandbox": self.sandbox.available(), "today": tools.today(),
                 # Facts about where things run, so an agent does not have to guess why something failed.
-                "where_things_run": {"system": "Windows" if host.WINDOWS else "Linux", "shell": host.shell_name(),
+                "where_things_run": {"system": host.SYSTEM, "shell": host.shell_name(),
                                      "sandbox": "有：bubblewrap 隔离" if self.sandbox.isolated else "没有：AI 的命令和运行用学习者的权限直接运行",
                                      "sandbox_network": ("能上互联网（经过 Lattice 的代理），连不了这台电脑和局域网" if self.config.read()["agent_network"]
                                                          else "学习者在设置里关掉了沙箱联网") if self.sandbox.isolated else "能联网（没有沙箱）",

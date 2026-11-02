@@ -4,9 +4,10 @@ from pathlib import Path
 import os
 import runpy
 import stat
+import sys
 
 ROOT = Path(__file__).resolve().parent
-if os.name == 'posix':
+if sys.platform.startswith('linux'):
     runtime = Path(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}'))
     if runtime.is_dir():
         os.environ.setdefault('XDG_RUNTIME_DIR', str(runtime))

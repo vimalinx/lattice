@@ -139,8 +139,8 @@ DEFAULTS = {
     "timeout": 120, "temperature": 0.35,
     # Seconds a notebook cell, a file run and an agent's shell command may take.
     "kernel_timeout": 120, "run_timeout": 120, "shell_timeout": 60,
-    # Agents run code and shell commands in the sandbox, never with the learner's own permissions.
-    "agent_auto_run": True,
+    # Whether agents may run code and shell commands. macOS has no sandbox, so there they ask first.
+    "agent_auto_run": not host.MACOS,
     # What runs in the sandbox reaches the internet through Lattice's proxy (never this machine or the local network).
     "agent_network": True,
     # Runs that ask for it (or the learner's own Python that imports torch, jax…) use the NVIDIA GPU through nvidia-run.
