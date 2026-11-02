@@ -169,7 +169,7 @@ async function renderHome(node){
 function homesChanged(){clearTimeout(MapState.htimer);MapState.htimer=setTimeout(()=>Object.keys(Dock.panels).filter(pid=>Dock.panels[pid].type==="home").forEach(pid=>renderHome(Dock.els[pid])),1200);}
 
 /* ---- settings: everything is changeable here ------------------------------------------------------------- */
-const SETTINGS_PAGES=[["look","外观与交互","sun"],["layout","工作区与左栏","layout"],["agents","四个 AI","bot"],["apis","模型连接","link"],["web","联网","search"],
+const SETTINGS_PAGES=[["look","外观与交互","sun"],["layout","工作状态与左栏","layout"],["agents","四个 AI","bot"],["apis","模型连接","link"],["web","联网","search"],
  ["usage","用量","bars"],["run","运行与环境","terminal"],["vault","学习库","folder"],["rules","学习库的规矩","shield"],["keys","快捷键","cmd"]];
 panelType("settings",{side:"mine",icon:"sliders",title:()=>"设置",
  mount(p,node,pid){node.innerHTML='<div class="settings-shell"><nav class="settings-nav"></nav><div class="settings" data-keep-scroll></div></div>';renderSettings(node,p.page||"look");},
@@ -227,7 +227,7 @@ const SETTINGS_RENDER={
    '<div class="range-row"><input type="range" min="20" max="120" step="1" data-ui-range="read_width" value="'+(readChars(u.read_width)||42)+'"'+(readChars(u.read_width)?"":" disabled")+'/>'+
    '<b data-range-out="read_width">'+(readChars(u.read_width)?readChars(u.read_width)+" 字":"不限")+'</b>'+
    '<label class="check inline-check"><input type="checkbox" data-read-unlimited'+(readChars(u.read_width)?"":" checked")+'/> 不限</label></div>'+
-   '<h3>每种窗口的大小</h3><p class="muted">新开的窗口按这里的比例显示，文字、代码、间距和图标一起缩放。某一个窗口还可以单独调：鼠标放在它上面按 Ctrl + 滚轮，或者聚焦后按 Ctrl + = / Ctrl + - / Ctrl + 0，标签上右键也能调；单独调过的会在标签上显示百分比，跟着工作区一起记住。</p>'+
+   '<h3>每种窗口的大小</h3><p class="muted">新开的窗口按这里的比例显示，文字、代码、间距和图标一起缩放。某一个窗口还可以单独调：鼠标放在它上面按 Ctrl + 滚轮，或者聚焦后按 Ctrl + = / Ctrl + - / Ctrl + 0，标签上右键也能调；单独调过的会在标签上显示百分比，跟着工作状态一起记住。</p>'+
    '<div class="zoom-grid">'+ZOOM_KINDS.map(([k,t])=>'<label>'+esc(t)+'<span class="unit"><input type="number" step="5" min="60" max="250" data-zoom-kind="'+k+'" value="'+Math.round((Number(u.zoom?.[k])||1)*100)+'"/>%</span></label>').join("")+'</div>'+
    (Object.values(Dock.panels).some(p=>p.zoom)?'<div class="inline"><span class="muted">有 '+Object.values(Dock.panels).filter(p=>p.zoom).length+' 个窗口单独调过大小。</span>'+button("全部恢复成各自的默认","zoom-reset-all","","ghost sm")+'</div>':"")+
    '<label>笔记默认的显示方式<select data-ui="md_mode">'+opt(u.md_mode||"live",MD_MODES)+'</select></label>'+
@@ -240,16 +240,15 @@ const SETTINGS_RENDER={
    '<label>停下多少秒后提交我的编辑<input type="number" min="5" max="3600" data-cfg="commit_idle" value="'+esc(c.commit_idle)+'"/></label>';
  },
  layout(){
-  const list=spaceList(),b=(t,a,id,extra="")=>button(t,a,'data-space="'+esc(id)+'" '+extra,"ghost xs");
-  return '<h3>工作区</h3><p class="muted">工作区是一套窗口的摆法，在底部状态栏最左边切换和管理；左栏不跟着变。同一个对话、同一个文件可以同时出现在几个工作区里。'+
-   '在工作区里拖动、分栏、浮出都会自动记住；「设为默认」以后，「恢复默认」就回到那时的样子。</p>'+
-   '<div class="preset-list">'+list.map((sp,i)=>'<div class="preset'+(sp.hidden?" off":"")+'">'+svg(sp.icon||"layout",14)+' <b>'+esc(sp.name)+'</b>'+
-    (sp.id===Dock.space?'<span class="chip on">当前</span>':"")+(sp.hidden?'<span class="chip">隐藏了</span>':"")+
-    '<span class="grow"></span>'+
-    (sp.hidden?b("显示","space-show",sp.id):sp.id===Dock.space?b("把现在的样子设为默认","space-keep",sp.id):b("切换","space",sp.id))+
-    b("改","space-edit",sp.id)+b("恢复默认","space-reset",sp.id)+(i>0?iconButton("arrowup","space-move","往上挪",'data-space="'+esc(sp.id)+'" data-dir="-1"'):"")+
-    (sp.hidden?"":b(sp.builtin?"隐藏":"删除","space-remove",sp.id))+'</div>').join("")+'</div>'+
-   '<div class="inline">'+button(svg("plus",13)+" 新工作区","space-new","","primary sm")+'</div>'+
+  const b=(t,a,id,extra="")=>button(t,a,'data-space="'+esc(id)+'" '+extra,"ghost xs");
+  return '<h3>工作状态</h3><p class="muted">工作状态是一套窗口组合，在底栏切换（Ctrl + Shift + 1～9）；左栏、外观和主题不跟着变。同一个对话、同一个文件可以同时出现在几个工作状态里。'+
+   '拖动、分栏、浮出都会自动记住。底栏的「＋」新建，标签上右键改名、复制、存成模板、关闭，拖动调顺序。</p>'+
+   '<div class="preset-list">'+spaceList().map(sp=>'<div class="preset'+(sp.hidden?" off":"")+'">'+svg(sp.icon||"layout",14)+' <b>'+esc(sp.name)+'</b>'+
+    (sp.id===Dock.space?'<span class="chip on">当前</span>':"")+(sp.hidden?'<span class="chip">已关闭</span>':"")+'<span class="grow"></span>'+
+    (sp.hidden?b("打开","space-reopen",sp.id):sp.id===Dock.space?"":b("切换","space",sp.id))+b("改名","space-rename",sp.id)+(sp.hidden?"":b("关闭","space-close",sp.id))+b("删除","space-delete",sp.id)+'</div>').join("")+'</div>'+
+   ((S.ui.templates||[]).length?'<h3>我的模板</h3><div class="preset-list">'+S.ui.templates.map(t=>'<div class="preset">'+svg(t.icon||"layout",14)+' <b>'+esc(t.name)+'</b><span class="grow"></span>'+
+    button("用它新建","space-from",'data-template="'+esc(t.id)+'"',"ghost xs")+button("删除","space-template-delete",'data-template="'+esc(t.id)+'"',"ghost xs")+'</div>').join("")+'</div>':"")+
+   '<div class="inline">'+button(svg("plus",13)+" 新工作状态","space-blank","","primary sm")+'</div>'+
    '<h3>左栏</h3><p class="muted">活动栏的图标只换左栏里的列表，窗口不动（Ctrl + 1～8）。收起、展开左栏：点它右上角的按钮、再点一次当前列表的图标，或者按 Ctrl + B。</p>'+
    '<label>左栏宽度<input type="number" min="180" max="560" data-side-width value="'+esc(S.ui.side.width)+'"/></label>'+
    '<label class="check"><input type="checkbox" data-ui="activity_plus"'+(S.ui.activity_plus?" checked":"")+'/> 活动栏里也放一个「＋」 <small>（和每组标签末尾的「＋」是同一个菜单）</small></label>';

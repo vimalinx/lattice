@@ -141,7 +141,7 @@ def screen(ctx):
     return {**state, **({"around_you": around} if around else {})}
 
 
-@tool("tabs", {"tutor", "flash", "coach"}, "界面上开着的全部标签：主窗口里每个工作区的、浮出的、学习者拿到单独窗口里的。每个有 id（给 tab 读内容用）、种类、标题、"
+@tool("tabs", {"tutor", "flash", "coach"}, "界面上开着的全部标签：主窗口里每个工作状态的、浮出的、学习者拿到单独窗口里的。每个有 id（给 tab 读内容用）、种类、标题、"
       "文件路径或网址、在不在前台、是不是学习者正在用的、有没有没保存的修改；在前台的还带着它此刻看到哪里（哪一节、哪几行、哪几格、网页读到哪）。")
 def tabs(ctx):
     return ctx.bridge.tab_list(ctx.thread)
@@ -713,13 +713,13 @@ UI_OP = {"type": "object", "properties": {"do": {"type": "string", "enum": ["ope
                                           "apply": {"type": "boolean"}, "replace": {"type": "boolean"}, "delete": {"type": "boolean"}}, "required": ["do"]}
 
 
-@tool("ui", {"tutor", "coach"}, "控制整个界面，ops 按顺序执行。界面分成几个工作区（状态栏上切换，见 screen 的 workspace），每个是一套窗口组合；左栏独立于工作区，只放一个列表，换列表不动窗口；"
-      "同一个面板（比如主会话）可以同时出现在几个工作区。下面的操作都作用在学习者眼前的这个工作区；对话工作区可以放任何面板，由你按需要安排。\n"
+@tool("ui", {"tutor", "coach"}, "控制整个界面，ops 按顺序执行。界面按标签页组织。工作状态（底栏上切换，见 screen 的 workspace）只决定一套窗口组合；左栏独立于它，只用来浏览和打开标签，换列表不动窗口；"
+      "同一个面板（比如主会话）可以同时出现在几个工作状态。下面的操作都作用在这段对话所在的工作状态；学习者切走了也还是落在那里，底栏的标签上会亮一个点。\n"
       "- open：打开面板。panel 是 chat（给 agent：tutor 主会话 / flash 快答）、file（给 path）、map（可给 topic）、journal、review（回顾到期的卡）、library（卡片库）、memory（记忆：理解阶段、到期预报、回顾记录）、noteinfo（笔记旁边的大纲、反向链接、出链和标签）、skills（技能商城）、settings、home、web（给 url：在学习者这边的阅读器里打开一个网页或 PDF，读成文字、能点链接，不用跳去浏览器）；where 是 left / right / top / bottom（贴着 to 指定的面板分栏）、float（浮出）或 tab（默认：放进 to 所在的那组标签，不给 to 就放进同一侧最近用的那组）。\n"
       "- close / focus / float：panel 是面板 id 或标题（从 screen 里看）。\n"
       "- move：把 panel 移到 to 旁边，where 同上。\n"
-      "- layout：整个替换这个工作区的布局。spec 是 {\"split\": \"h\"或\"v\", \"sizes\": [0.5, 0.5], \"parts\": [spec, ...]}，叶子是 {\"tabs\": [面板, ...]}；面板可以是已有面板的 id，也可以是一个 open 那样的对象。\n"
-      "- workspace：切到 name 那个工作区（名字或 id）。new 为 true 时新建一个并切过去：name、icon、spec（同 layout，不给就照现在的样子）。"
+      "- layout：整个替换这个工作状态的布局。spec 是 {\"split\": \"h\"或\"v\", \"sizes\": [0.5, 0.5], \"parts\": [spec, ...]}，叶子是 {\"tabs\": [面板, ...]}；面板可以是已有面板的 id，也可以是一个 open 那样的对象。\n"
+      "- workspace：切到 name 那个工作状态（名字或 id）；学习者已经切走时不能切。new 为 true 时新建一个并切过去：name、icon、spec（同 layout，不给就照现在的样子）。"
       "sidebar：open 为 false 时收起左栏，true 展开；list 换左栏的列表（topics、cards、notes、lessons、work、practice、files、skills），窗口不动。\n"
       "- theme：设计并套用一个主题（颜色和风格）。name 是主题名（同名就是在原来的上面改；name 为「默认」时回到默认外观）；base 是 dark 或 light，从哪种外观改起；"
       "vars 是要改的颜色变量 {名字: CSS 颜色}，能改的有 bg（窗口底色）、panel（面板）、panel-hi（弹窗和输入框）、surface（卡片和按钮）、surface-hover、line、line-soft（边框）、"
@@ -742,7 +742,7 @@ def ui(ctx, ops):
                 ctx.act("调整了界面：" + "、".join(dict.fromkeys(o.get("do", "") for o in ops)), "ui:" + result["snapshot"], False)
                 result = {**result, "note": "这里只有面板的情况。学习库里有什么（卡片、笔记、主题、练习……）用 list、graph、read 查"}
             done(result)
-        ctx.bridge.ui_request(ctx.agent, ops, finish)
+        ctx.bridge.ui_request(ctx.agent, ctx.thread, ops, finish)
     return Later(start)
 
 
@@ -844,7 +844,7 @@ def open_file(ctx, file=None, line=None, highlight=None, cell=None, page=None, a
     absolute, rel = ctx.l.resolve(path)
     if not absolute.exists():
         raise ValueError("文件不存在：" + path)
-    ctx.bridge.announce({"type": "open", "path": rel or str(absolute), "line": line, "highlight": highlight, "cell": cell, "page": page, "agent": ctx.agent})
+    ctx.bridge.announce({"type": "open", "thread": ctx.thread, "path": rel or str(absolute), "line": line, "highlight": highlight, "cell": cell, "page": page, "agent": ctx.agent})
     ctx.act("在你那边打开了 " + (rel or str(absolute)).rsplit("/", 1)[-1], "file:" + (rel or str(absolute)), False)
     return {"opened": rel or str(absolute)}
 

@@ -1196,7 +1196,7 @@ class Bridge(QObject):
             ref = t.get("path") or t.get("url") or ""
             flags = [x for x in ("学习者正在用" if t.get("focused") else "", "在前台" if t.get("showing") and not t.get("focused") else "",
                                  "有没保存的修改" if t.get("dirty") else "", f"在单独窗口「{t['window']}」" if t.get("window") else "",
-                                 f"在「{t['space']}」工作区" if t.get("space") else "") if x]
+                                 f"在「{t['space']}」工作状态" if t.get("space") else "") if x]
             lines.append(f"- {t['id']} {t['kind']}「{t.get('title') or ''}」" + (f" {ref}" if ref and ref not in (t.get("title") or "") else "")
                          + (f"（{'，'.join(flags)}）" if flags else ""))
         more = f"\n- 还有 {len(tabs) - 50} 个，用 tabs 看全部" if len(tabs) > 50 else ""
@@ -2539,11 +2539,11 @@ class Bridge(QObject):
         self.config.save_ui({**self.config.read()["ui"], key: value})
         self.announce({"type": "ui_setting", "key": key, "value": value})
 
-    def ui_request(self, agent, ops, done):
+    def ui_request(self, agent, thread, ops, done):
         """Ask the interface to carry out an agent's UI operations; done() gets what actually happened."""
         ident = uid()
         self.ui_waiters[ident] = done
-        self.announce({"type": "ui", "request": ident, "ops": ops, "agent": agent})
+        self.announce({"type": "ui", "request": ident, "ops": ops, "agent": agent, "thread": thread})
         QTimer.singleShot(20000, lambda: self.ui_waiters.pop(ident, None) and done({"error": "界面没有响应"}))
 
     def rpc_ui_done(self, request, result):

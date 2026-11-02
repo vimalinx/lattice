@@ -28,7 +28,7 @@ function renderActivity(){
   Object.entries(SIDE_SECTIONS).map(([k,s],i)=>'<button class="act'+(k===now?" on":"")+'" data-action="side-list" data-list="'+k+'" title="'+esc(s.title)+" · Ctrl "+(i+1)+'">'+svg(s.icon,19)+
    (k==="cards"&&S.data.due?'<i class="badge">'+S.data.due+'</i>':"")+'</button>').join("")+
   // After the lists, so it does not read as one of them.
-  (S.ui.activity_plus?'<button class="act act-new" data-action="new-menu" title="新建、打开窗口、新工作区">'+svg("plus",19)+'</button>':"")+
+  (S.ui.activity_plus?'<button class="act act-new" data-action="new-menu" title="新建、打开窗口、新工作状态">'+svg("plus",19)+'</button>':"")+
   '<span class="grow"></span>'+
   SIDE_LAUNCH.map(([i,t,a])=>'<button class="act" data-action="'+a+'" title="'+esc(t)+'">'+svg(i,18)+'</button>').join("")+
   '<button class="act" data-action="theme" title="切换明暗">'+svg(S.ui.theme==="dark"?"sun":"moon",17)+'</button>'+

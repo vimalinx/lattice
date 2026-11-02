@@ -1,8 +1,8 @@
 "use strict";
-/* The panel layout: splits, tab stacks and floating windows, one arrangement per workspace (spaces.js).
+/* The panel layout: splits, tab stacks and floating windows, one arrangement per working state (spaces.js).
    Panels are shared: the same panel can sit in several workspaces, so the main conversation is one conversation everywhere.
    What opens lands in an existing stack of the same side in the workspace on screen. */
-const Dock={layout:null,spaces:{},space:"chat",panels:{},els:{},types:{},focus:null,lastStack:{ai:null,mine:null},saveTimer:null,drag:null};
+const Dock={layout:null,spaces:{},space:"chat",panels:{},els:{},types:{},focus:null,lastStack:{ai:null,mine:null},saveTimer:null,drag:null,origin:{},notice:new Set(),away:false};
 function panelType(name,def){Dock.types[name]=def;}
 function newId(prefix){return prefix+Math.random().toString(36).slice(2,10);}
 function stackNode(tabs){return {t:"stack",id:newId("s"),tabs,active:tabs[0]||null};}
@@ -265,7 +265,7 @@ function restoreScroll(node){
  }
 }
 function renderDock(){
- const host=el("#dock");if(!host)return;
+ const host=el("#dock");if(!host||Dock.away)return;
  // A page inside a window (a book, an app) is lost when it leaves the document, so a window that has one waits here while
  // the rest is rebuilt, and one still on show is moved to its new place whole. A book on a tab behind stays here, its size
  // kept, so it is as it was when its tab comes back.
@@ -317,7 +317,7 @@ function stackEl(s,floating=null){
   requestAnimationFrame(()=>{restoreScroll(panel);if(t?.shown)t.shown(p,panel);marksShown(s.active);if(panel.querySelector(".mermaid:not([data-processed='true'])"))scheduleMermaid();});
  }
  else if(!s.tabs.length)node.lastElementChild.appendChild(h('<div class="stack-empty">'+emptyState("layout","这里是空的",s.keep?"从左栏打开的东西放在这里，也可以把标签拖进来。":"把标签拖到这里，或者从上面的「＋」打开。")+
-  (s.keep?'<button class="ghost xs" data-action="stack-unkeep" data-stack="'+s.id+'">不要这一块</button>':"")+'</div>'));
+  (s.keep?button("不要这一块","stack-unkeep",'data-stack="'+s.id+'"',"ghost xs"):"")+'</div>'));
  return node;
 }
 function saveLayout(){
@@ -329,6 +329,7 @@ function saveLayout(){
 }
 /* Every workspace's arrangement comes back as it was left; one never opened yet is built from its default when first shown. */
 function loadLayout(saved){
+ seedSpaces(saved);
  Dock.panels=saved?.panels||{};
  // A layout saved before there were workspaces becomes the conversation workspace.
  Dock.spaces=saved?.spaces||(saved?.layout?.root?{chat:saved.layout}:{});
@@ -339,7 +340,7 @@ function loadLayout(saved){
  const used=usedPanels();Object.keys(Dock.panels).forEach(pid=>{if(!used.has(pid))delete Dock.panels[pid];});
  Dock.space=spaceOf(saved?.space)&&!spaceOf(saved.space).hidden?saved.space:visibleSpaces()[0].id;
  Object.keys(Dock.panels).forEach(mountPanel);
- if(!Dock.spaces[Dock.space])Dock.spaces[Dock.space]=layoutFromSpec(spaceOf(Dock.space).spec);
+ if(!Dock.spaces[Dock.space])Dock.spaces[Dock.space]=layoutFromSpec(spaceSpec(spaceOf(Dock.space)));
  Object.values(Dock.spaces).forEach(l=>{Dock.layout=l;l.floats=l.floats||[];tidy();});
  setLayout(Dock.spaces[Dock.space]);
  renderDock();
@@ -486,9 +487,12 @@ function buildSpec(spec,used){
  const sizes=(spec.sizes&&spec.sizes.length===parts.length?spec.sizes:parts.map(()=>1/parts.length)).map(Number);
  return {t:"split",id:newId("n"),dir:spec.split==="v"?"v":"h",sizes,kids:parts};
 }
-async function runUiOps(ops){
+async function runUiOps(ops,thread){
  const snapshot=newId("u");
  UiSnapshots[snapshot]={dock:dockSnapshot(),ui:JSON.parse(JSON.stringify(S.ui))};
+ // What an AI does stays in the working state it was asked from, even when the learner has gone to another.
+ const here=Dock.space,focus=Dock.focus,from=Dock.origin[thread],away=from&&from!==here&&Dock.spaces[from]&&!spaceOf(from)?.hidden?from:null;
+ if(away){Dock.away=true;Dock.space=away;Dock.layout=Dock.spaces[away];}
  const results=[];
  for(const op of ops||[]){
   try{
@@ -506,11 +510,12 @@ async function runUiOps(ops){
    }else if(op.do==="layout"){
     setLayout(layoutFromSpec(op.spec||{}));await dropUnused();results.push({ok:true});
    }else if(op.do==="workspace"){
+    if(away)throw new Error("学习者已经离开这个工作状态，这里不能切换");
     const found=findSpace(op.name);
     if(op.new){
-     if(!op.name)throw new Error("新工作区要给 name");
+     if(!op.name)throw new Error("新工作状态要给 name");
      createSpace({name:String(op.name).slice(0,20),icon:SPACE_ICONS.includes(op.icon)?op.icon:"layout",spec:op.spec||null});
-    }else{if(!found)throw new Error("没有这个工作区："+op.name+"；有："+visibleSpaces().map(x=>x.name).join("、"));switchSpace(found.id);}
+    }else{if(!found)throw new Error("没有这个工作状态："+op.name+"；有："+visibleSpaces().map(x=>x.name).join("、"));switchSpace(found.id);}
     results.push({ok:true,workspace:currentSpace().name});
    }else if(op.do==="theme"){
     results.push(themeOp(op));
@@ -528,9 +533,12 @@ async function runUiOps(ops){
    }else throw new Error("不认识的操作："+op.do);
   }catch(e){results.push({ok:false,error:e.message});}
  }
- tidy();renderDock();saveLayout();renderSide();
+ tidy();
  const panels=[];eachStack(s=>s.tabs.forEach(pid=>panels.push({id:pid,title:panelTitle(pid),type:Dock.panels[pid].type})));
- return {snapshot,workspace:currentSpace().name,results,panels};
+ const workspace=currentSpace().name;
+ if(away){Dock.away=false;Dock.space=here;Dock.layout=Dock.spaces[here];Dock.focus=focus;Dock.notice.add(away);}
+ renderDock();saveLayout();renderSide();renderStatus();
+ return {snapshot,workspace,results,panels};
 }
 async function restoreUi(snapshot){
  const s=UiSnapshots[snapshot];if(!s)return toast("这次改动之前的界面已经找不到了（重启过）","error");

@@ -92,7 +92,7 @@ label.check input{margin:0}
 #side-gutter{flex:0 0 4px;cursor:col-resize;background:transparent;margin-left:-4px;z-index:2}
 #side-gutter:hover{background:var(--accent)}
 .side-head{display:flex;align-items:center;gap:4px;padding:10px 10px 6px 14px;font-size:12.5px}
-.side-head b{flex:1;letter-spacing:.3px}
+.side-head b{flex:1;min-width:0;white-space:nowrap;letter-spacing:.3px}
 .side-sep{width:1px;height:14px;background:var(--line-soft);margin:0 2px}
 .side-body{flex:1;overflow:auto;padding:0 6px 24px}
 .side-row{display:flex;align-items:center;gap:7px;padding:4px 8px 4px calc(8px + var(--d,0)*14px);border-radius:6px;cursor:pointer;white-space:nowrap;min-width:0;font-size:12.5px;color:var(--text)}
@@ -125,8 +125,17 @@ label.check input{margin:0}
 .stage-chips{display:flex;flex-wrap:wrap;gap:4px;margin:0 4px 8px}
 .stage-chips button{border:1px solid var(--line);background:transparent;border-radius:20px;padding:1px 8px;font-size:11px;color:var(--muted)}
 .stage-chips button.on{color:var(--accent);border-color:var(--accent)}
-#status{flex:0 0 24px;display:flex;align-items:center;gap:14px;padding:0 12px;font-size:11px;color:var(--subtle);background:var(--bg);border-top:1px solid var(--line-soft);white-space:nowrap;overflow:hidden}
+#status{flex:0 0 28px;display:flex;align-items:center;gap:14px;padding:0 12px 0 0;font-size:11px;color:var(--subtle);background:var(--bg);border-top:1px solid var(--line-soft);white-space:nowrap;overflow:hidden}
 #status a,#status span{display:inline-flex;align-items:center;gap:4px;color:var(--subtle)}
+.st-tabs{flex:0 1 auto;min-width:96px;height:100%;display:flex;align-items:stretch;overflow-x:auto;scrollbar-width:none}
+.st-tab{flex:0 0 auto;max-width:150px;display:flex;align-items:center;gap:5px;padding:0 10px;border:0;border-top:2px solid transparent;background:transparent;color:var(--subtle);font-size:11.5px}
+#status .st-tab span{display:block;color:inherit;overflow:hidden;text-overflow:ellipsis}
+.st-tab:hover{color:var(--text);background:var(--surface)}
+.st-tab.on{color:var(--text);background:var(--panel);border-top-color:var(--accent)}
+.st-tab i{flex:0 0 auto;width:6px;height:6px;border-radius:50%;background:var(--ai)}
+.st-add{flex:0 0 auto;width:28px;display:grid;place-items:center;border:0;background:transparent;color:var(--subtle)}
+.st-add:hover{color:var(--text);background:var(--surface)}
+#status>a:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis}
 #status .working{color:var(--ai)}
 #status .warn{color:var(--amber)}
 #dock-wrap{flex:1;min-width:0;min-height:0;position:relative}
@@ -668,11 +677,6 @@ details.api summary span{font-size:11.5px}
 .side-head .icon{width:24px;height:24px}
 .stack-empty .ghost.xs{margin-top:10px}
 .preset.off{opacity:.55}
-.space-form{display:flex;flex-direction:column;gap:10px}
-.icon-pick{display:flex;flex-wrap:wrap;gap:4px}
-.icon-pick button{width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--line-soft);border-radius:8px;background:transparent;color:var(--muted)}
-.icon-pick button:hover{color:var(--text);background:var(--surface)}
-.icon-pick button.on{color:var(--accent);border-color:var(--accent);background:var(--accent-glow)}
 .inline.end{justify-content:flex-end}
 /* the card library */
 .library{height:100%;display:flex;flex-direction:column;min-height:0}

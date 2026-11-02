@@ -18,8 +18,7 @@ function refreshChats(){Object.keys(Chat).forEach(pid=>loadChat(pid));}
 function renderStatus(){
  const bar=el("#status");if(!bar)return;
  const busy=(S.data.busy||[]).length,running=(S.data.running||[]).length,topic=S.data.active_topic;
- const sp=currentSpace();
- bar.innerHTML='<a data-action="space-menu" title="工作区：一套窗口的摆法，在这里切换和管理">'+svg(sp.icon||"layout",12)+' '+esc(sp.name)+'</a>'+(topic?'<a data-action="open-doc" data-id="'+esc(topic)+'" title="正在学的主题">'+svg("map",12)+' '+esc(topicTitle(topic))+'</a>':'<span>'+svg("bot",12)+' 默认对话</span>')+
+ bar.innerHTML=spaceTabs()+(topic?'<a data-action="open-doc" data-id="'+esc(topic)+'" title="正在学的主题">'+svg("map",12)+' '+esc(topicTitle(topic))+'</a>':'<span>'+svg("bot",12)+' 默认对话</span>')+
   (busy?'<span class="working">'+svg("bot",12)+' '+busy+' 个 AI 在工作</span>':"")+(running?'<span class="working">'+svg("play",12)+' '+running+' 个运行中</span>':"")+
   '<span class="grow"></span>'+(S.data.sandbox?.isolated?'<span title="AI 的命令和运行都在沙箱里">'+svg("shield",12)+' 沙箱</span>':
    S.data.sandbox?.ok?'<span title="这台电脑上没有沙箱：AI 的命令和运行用你的权限直接运行">'+svg("play",12)+' 直接运行</span>':'<span class="warn">'+svg("shield",12)+' 沙箱不可用</span>')+
@@ -51,7 +50,7 @@ function saveUi(now=false){
 const NEW_ITEMS=[
  ["写记录","new-note","edit","随手写，关掉后 AI 帮你整理"],["写代码","new-code","code","任何语言，写完就能运行"],["新实验笔记","new-notebook","flask","Jupyter 格式，在沙箱内核里运行"],
  ["新知识卡","new-card","card","自己记下一个知识点"],["主会话","open-agent","bot","",'data-agent="tutor"'],["快答","open-agent","spark","",'data-agent="flash"'],
- ["新工作区…","space-new","layout","自己搭一套窗口组合"]];
+ ["新工作状态","space-blank","layout","一块空白，自己往里放"]];
 // Panels that already have a button of their own; the palette still lists them as commands.
 const PANEL_ITEMS=[["开始","open-home","home",""],["知识图","open-map","network",""],["学习轨迹","open-journal","history",""],["回顾","open-review","refresh",""],["卡片库","open-library","card",""],["批注","open-marks","marker",""],["问答","open-asked","spark",""],["记忆","open-memory","calendar",""],
  ["快速打开笔记 · Ctrl O","note-switcher","document",""],["技能商城","open-skills","store",""],["应用","open-apps","apps",""],["今天的日记","note-daily","calendar",""],["大纲与链接","open-noteinfo","list",""],["设置","open-settings","sliders",""]];
@@ -66,7 +65,7 @@ function openMenuHtml(){
   '<button data-action="book-add">'+svg("book",14)+'<span>打开电子书</span></button></div>'+
   '<hr/><div class="menu-label">打开窗口</div><div class="menu-grid">'+OPEN_ITEMS.map(([t,a,i,x])=>'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+'</span></button>').join("")+'</div>'+
   '<hr/><button data-action="note-switcher">'+svg("search",14)+'<span>打开一篇笔记或文件… <small>Ctrl O</small></span></button>'+
-  '<button data-action="space-new">'+svg("layout",14)+'<span>新工作区…</span></button>';
+  '<button data-action="space-blank">'+svg("layout",14)+'<span>新工作状态</span></button>';
 }
 // From a group's own +: whatever is opened goes into that group.
 function stackMenu(anchor,stack){Dock.into={stack,until:Date.now()+15000};popMenu(anchor,openMenuHtml(),{cls:"menu-wide"});}
@@ -234,6 +233,7 @@ async function onEvent(evt){
  if(WINDOW&&["ui","open","open_annotation","app_check","open_panel","window_closed"].includes(evt.type))return;
  if(evt.type==="open_panel")return openPanel(evt.params);
  if(evt.type==="window_closed")return fromWindow(evt.params,evt.origin||{});
+ if(evt.type==="agent"&&evt.kind==="finished"&&Dock.origin[evt.thread]&&Dock.origin[evt.thread]!==Dock.space){Dock.notice.add(Dock.origin[evt.thread]);renderStatus();}
  if(evt.type==="agent"&&String(evt.thread||"").startsWith("compare:"))return compareEvent(evt);
  if(evt.type==="agent"&&evt.agent==="builder"){appAgentEvent(evt);if(evt.kind==="finished")refreshState();return;}
  if(evt.type==="agent"&&evt.kind==="finished"&&evt.agent==="flash")askedFinished(evt.thread);
@@ -252,9 +252,9 @@ async function onEvent(evt){
  if(evt.type==="kernel"){kernelEvent(evt);if(["run_finished","batch_finished"].includes(evt.kind))journalsChanged();return;}
  if(evt.type==="notice"){toast(evt.message);return;}
  if(evt.type==="web")return readerEvent(evt);
- if(evt.type==="ui"){const result=await runUiOps(evt.ops);return rpc("ui_done",{request:evt.request,result});}
+ if(evt.type==="ui"){const result=await runUiOps(evt.ops,evt.thread);return rpc("ui_done",{request:evt.request,result});}
  if(evt.type==="changed"){fileChanged(evt);embedsChanged(evt.paths);if(evt.paths.some(p=>p.startsWith("skills/")))skillsChanged();sideChanged(evt.paths);mapsChanged();journalsChanged();homesChanged();if(evt.paths.some(p=>p.startsWith("annotations/")))marksChanged();if(evt.external||evt.paths.some(p=>/^(topics|cards|lessons|notes|insights|notebooks)\//.test(p)))refreshState();return;}
- if(evt.type==="open"){openFile(evt.path,{line:evt.line,highlight:evt.highlight,cell:evt.cell,page:evt.page});return;}
+ if(evt.type==="open"){const from=Dock.origin[evt.thread];if(from&&from!==Dock.space)return runUiOps([{do:"open",panel:"file",path:evt.path}],evt.thread);openFile(evt.path,{line:evt.line,highlight:evt.highlight,cell:evt.cell,page:evt.page});return;}
  if(evt.type==="env"){
   toast(evt.message,evt.ok?"info":"error");
   // A run that waited for the learner's install goes again.
@@ -543,6 +543,7 @@ function initInteractions(){
   if(mod&&e.key.toLowerCase()==="n"){e.preventDefault();safe(()=>newScratch("note"));return;}
   if(mod&&e.key.toLowerCase()==="j"){e.preventDefault();const f=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="flash")||openPanel({type:"chat",agent:"flash"});activate(f);setTimeout(()=>Dock.els[f]?.querySelector(".composer textarea")?.focus(),50);return;}
   if(mod&&e.key.toLowerCase()==="b"){e.preventDefault();setSideOpen(!sideOpen());return;}
+  if(mod&&e.shiftKey&&!e.altKey&&/^Digit[1-9]$/.test(e.code)){const sp=visibleSpaces()[Number(e.code.slice(5))-1];if(sp){e.preventDefault();switchSpace(sp.id);}return;}
   if(mod&&!e.altKey&&!e.shiftKey&&/^[1-9]$/.test(e.key)){const k=Object.keys(SIDE_SECTIONS)[Number(e.key)-1];if(k){e.preventDefault();showList(k);}return;}
   if(mod&&e.key.toLowerCase()==="w"&&Dock.focus){e.preventDefault();safe(()=>closePanel(Dock.focus));return;}
  });
@@ -554,8 +555,9 @@ function initInteractions(){
   wheel+=e.deltaY;if(Math.abs(wheel)<60)return;stepZoom(pid,wheel<0?1:-1);wheel=0;
  },{passive:false,capture:true});
  document.addEventListener("contextmenu",e=>{
-  const tab=e.target.closest?.(".tab");
+  const tab=e.target.closest?.(".tab"),state=e.target.closest?.(".st-tab");
   if(tab){e.preventDefault();tabMenu(tab.dataset.pid,{x:e.clientX,y:e.clientY});}
+  else if(state){e.preventDefault();spaceMenu(state.dataset.space,{x:e.clientX,y:e.clientY});}
  });
  document.addEventListener("mouseup",e=>{if(e.button!==2)setTimeout(()=>onSelect(e),0);});
  document.addEventListener("scroll",()=>{hidePop();reportScreen();},true);
