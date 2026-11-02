@@ -227,6 +227,28 @@ function messageKey(pid,m,answers){
 }
 // Questions an old bug lost, put back from what the AI wrote down at the time.
 const RESTORED={words:"当时没存下来，这是从 AI 的思考记录里找回的原话，可能不完整",gist:"当时没存下来，这是根据 AI 的思考记录写的转述，不是原话"};
+/* What a reply calls a file becomes a link to it, once the program has checked there is such a file. */
+const FILE_WORD=/(?:~\/|\.{0,2}\/)?[\w\u4e00-\u9fff+-][\w\u4e00-\u9fff.+-]*(?:\/[\w\u4e00-\u9fff.+-]+)*\.[A-Za-z][A-Za-z0-9]{0,7}(?![\w\u4e00-\u9fff])/g;
+const FileLinks={spots:[],timer:null};
+function fileLink(path,inner){const a=document.createElement("a");a.className="file-ref";a.dataset.action="open-file";a.dataset.path=path;a.title="打开 "+path;a.append(inner);return a;}
+function linkFiles(root){
+ for(const body of all(".msg-body",root)){
+  for(const code of all("code",body))if(!code.closest("pre,a,.lblock"))FileLinks.spots.push({code,words:[code.textContent.trim()]});
+  const walk=document.createTreeWalker(body,NodeFilter.SHOW_TEXT,{acceptNode:n=>n.parentElement.closest("code,pre,a,.katex,.lblock")?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT});
+  for(let n=walk.nextNode();n;n=walk.nextNode()){const words=n.nodeValue.match(FILE_WORD);if(words)FileLinks.spots.push({text:n,words});}
+ }
+ clearTimeout(FileLinks.timer);FileLinks.timer=setTimeout(fileLinksCheck,60);
+}
+async function fileLinksCheck(){
+ const spots=FileLinks.spots;FileLinks.spots=[];if(!spots.length)return;
+ const refs=await safe(()=>rpc("file_refs",{words:[...new Set(spots.flatMap(s=>s.words))]}));if(!refs)return;
+ for(const s of spots){
+  if(s.code){const r=refs[s.words[0]];if(r?.text===s.words[0]&&s.code.isConnected!==false&&s.code.parentNode)s.code.replaceWith(fileLink(r.path,s.code.cloneNode(true)));continue;}
+  const parts=[];let rest=s.text.nodeValue;
+  for(const w of s.words){const r=refs[w];if(!r)continue;const at=rest.indexOf(w);if(at<0)continue;const cut=at+w.length-r.text.length;parts.push(rest.slice(0,cut),fileLink(r.path,r.text));rest=rest.slice(at+w.length);}
+  if(parts.length&&s.text.parentNode)s.text.replaceWith(...parts,rest);
+ }
+}
 function messageEl(pid,m,answers,key){
  const st=Chat[pid],p=Dock.panels[pid],meta=m.meta||{},list=st.data.messages,at=list.indexOf(m),next=list[at+1];
  // A reply that broke off: the last one can be answered again; one already answered again says so.
@@ -252,6 +274,7 @@ function messageEl(pid,m,answers,key){
  if(r.blocks.length)mountBlocks(node,r.blocks,{thread:st.thread,message:m.id,answers,pid});
  if(meta.changes?.length)mountInlineChanges(node);
  if(meta.attach?.length){hydrateVault(node);fillTextTiles(node);}
+ if(!mine)linkFiles(node);
  return node;
 }
 function messageTools(pid,m){

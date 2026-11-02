@@ -341,7 +341,13 @@ async function saveFile(pid){
   if(st.raw||(!d.doc&&!d.card&&!d.topic))r=await rpc("file_write",{path:p.path,content:st.text,mtime:st.mtime});
   else r=await rpc("doc_save",{path:p.path,mtime:st.mtime,...st.fields});
   st.mtime=r.mtime;st.fields=null;
-  if(r.path&&r.path!==p.path){p.path=r.path;saveLayout();}
+  const doc=d.doc||d.card||d.topic;if(doc&&r.title)doc.title=r.title;
+  // A new title renames the file: everything showing its name follows, without redrawing what is being typed in.
+  if(r.path&&r.path!==p.path){
+   const old=p.path;p.path=d.path=r.path;if(Notes.current===old)Notes.current=r.path;saveLayout();
+   const crumbs=Dock.els[pid]?.querySelector(".file-bar .crumbs");if(crumbs){crumbs.title=r.path;crumbs.innerHTML=r.path.split("/").map(esc).join('<i>/</i>');}
+   safe(async()=>{await refreshState();sideChanged([old,r.path]);noteInfoChanged();});
+  }
  }catch(e){
   if(e.conflict){st.conflict=true;st.dirty=true;renderFile(pid);return;}
   st.dirty=true;throw e;

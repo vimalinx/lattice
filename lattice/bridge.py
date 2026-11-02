@@ -344,6 +344,29 @@ class Bridge(QObject):
         self._local_save("starred", starred[:200])
         return starred[:200]
 
+    def rpc_file_refs(self, words):
+        """Which of these words in a reply name a file that is there: {word: {"text": the file's part of it, "path": what to open}}.
+        A bare name counts when only one file has it; words run into the text before them are tried from each later start."""
+        l = self.lattice
+        by_name = {}
+        for rel in l.vault.files():
+            by_name.setdefault(rel.rsplit("/", 1)[-1], []).append(rel)
+        found = {}
+        for word in [str(w)[:200] for w in (words or [])[:400]]:
+            try:
+                absolute, rel = l.resolve(word)
+                if absolute.is_file():
+                    found[word] = {"text": word, "path": rel or str(absolute)}
+                    continue
+            except (ValueError, OSError):
+                pass
+            for start in range(len(word)):
+                tail = word[start:]
+                if "/" not in tail and len(by_name.get(tail, ())) == 1:
+                    found[word] = {"text": tail, "path": by_name[tail][0]}
+                    break
+        return found
+
     def rpc_tree(self, path=""):
         return self.lattice.tree(path)
 
