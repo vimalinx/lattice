@@ -58,7 +58,7 @@
 
 ## 快速开始
 
-Windows 上直接到 [Releases](https://github.com/vimalinx/lattice/releases) 下载安装包，见下面的 [Windows](#windows)。Linux 上从源码运行：
+Windows 上直接到 [Releases](https://github.com/vimalinx/lattice/releases) 下载安装包，见下面的 [Windows](#windows)。Apple Silicon 的 Mac 可以下载预览版，见 [macOS 预览版](#macos-预览版)。Linux 上从源码运行：
 
 ```bash
 git clone https://github.com/vimalinx/lattice.git
@@ -96,7 +96,7 @@ Windows 版由 GitHub Actions 构建（`.github/workflows/windows.yml`）：每�
 - 最左边的活动栏和左栏只用来**浏览和打开标签**：主题、知识卡、笔记、课程、实验与代码、练习与薄弱点、文件、技能，点图标（Ctrl+1～8）只换左栏里的列表，主体的窗口一动不动，所以可以开着主会话翻文件夹。再点一次当前的图标、点左栏右上角的收起按钮或按 Ctrl+B 收起左栏。
 - 底栏的**工作状态**只负责切换窗口组合：每个标签是一套开着的窗口和它们的摆法，切走时原样留着，切回来还是那样（Ctrl+Shift+1～9，拖动调顺序）。左栏、外观和主题不跟着变。
   - 底栏的「＋」新建：空白，或者从模板开始。模板按要做的事命名，和左栏的列表不是一回事：学习（主会话、快答）、写作（一大块笔记，旁边是大纲与链接，没有 AI）、复习（卡片库、回顾、记忆）、阅读（文档、大纲、快答）、动手（代码和实验、快答）、梳理（知识图、主会话）、定制（技能商城、主会话）、整理（一大块地方、快答），以及自己存的。
-  - 鼠标在底栏的标签上停一下，上方会列出这个工作状态里的窗口：点一下跳过去；拖到别的标签上移动过去，按住 Ctrl 拖是复制（同一个窗口同时出现在两边）。拖动时经过哪个标签，就显示哪个的窗口列表。
+  - 鼠标在底栏的标签上停一下，上方会列出这个工作状态里的窗口：点一下跳过去；拖到别的标签上移动过去，按住 Ctrl（Mac 上是 Option）拖是复制（同一个窗口同时出现在两边）。拖动时经过哪个标签，就显示哪个的窗口列表。
   - 标签上右键：改名、复制一份、存成模板、关闭。关闭不会丢东西，布局留着，从「＋」里能重新打开；设置的「工作状态与左栏」里可以彻底删除。
   - AI 在哪个工作状态里被问，就只动那个工作状态的窗口；你切走以后它打开的东西也落在那里，答完或动过窗口时底栏的标签上亮一个点。
 - 同一个对话、同一个文件可以同时出现在几个工作状态里，是同一个窗口：在「复习」里问快答，和在「学习」里问的是同一段对话。关掉标签只是把它拿出这个工作状态。
@@ -232,6 +232,18 @@ python3 tests/runtime_smoke_v1.py
 QT_QPA_PLATFORM=offscreen python3 tests/gui_probe_v1.py
 python3 tests/seed_demo.py --launch   # 在 /tmp/lattice-demo 里放一份演示数据并打开
 ```
+
+## macOS 预览版
+
+[Releases](https://github.com/vimalinx/lattice/releases) 里的 `Lattice-*-macos-arm64-preview.dmg` 适用于 Apple Silicon（M1 及以后）和 macOS 13 或更新。构建和签名的做法见 [`packaging/macos/BUILD.md`](packaging/macos/BUILD.md)。
+
+- 没有 Apple Developer ID 签名和公证，macOS 可能阻止打开；确认来源后可在「系统设置 → 隐私与安全性」里允许，系统不给这个选项时只能等签名版。
+- 需要 Git：第一次使用前在终端运行 `xcode-select --install`。Python、Qt 和 uv 已经包含在内；第一次运行学习库里的代码时要联网下载 Python 3.12 和需要的包。
+- **没有沙箱，所以 AI 运行代码和命令默认关闭。** 在设置的「运行」里打开后，AI 的命令用你的权限运行，碰得到学习库以外的文件，也能联网。
+- 配置和日志在 `~/Library/Application Support/lattice`，学习库默认在 `~/Lattice`。
+- 还没验证过：干净的 Mac、macOS 13、Intel（不支持）、MPS 训练。
+
+最初的 macOS 适配由项目的一位朋友完成。
 
 ## 许可
 
