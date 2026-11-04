@@ -56,4 +56,7 @@ jobs:
           path: Lattice-*-linux-x64.tar.gz
       - name: Add to the release
         if: github.ref_type == 'tag'
-        run: gh release upload "$GITHUB_REF_NAME" Lattice-*-linux-x64.tar.gz --clobber || gh release create "$GITHUB_REF_NAME" Lattice-*-linux-x64.tar.gz --verify-tag
+        # The Windows build makes the release, with its notes; wait for it, as the macOS build does.
+        run: |
+          for i in $(seq 1 60); do gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 && break; sleep 30; done
+          gh release upload "$GITHUB_REF_NAME" Lattice-*-linux-x64.tar.gz --clobber
