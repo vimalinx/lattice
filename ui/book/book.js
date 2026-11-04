@@ -7,6 +7,20 @@ const query = new URLSearchParams(location.search);
 let look = {};
 try { look = JSON.parse(query.get("look") || "{}"); } catch { /* the defaults in book.css stand */ }
 let theme = query.get("theme") === "light" ? "light" : "dark";
+// The words of this page in the language Lattice speaks (lang); Chinese is what is written here.
+const WORDS = { en: { "书": "Book", "目录": "Contents", "在书里搜索": "Search the book", "这本书的批注": "Annotations in this book", "批注": "Annotations",
+    "滚动或翻页": "Scroll or turn pages", "翻页": "Pages", "滚动": "Scroll", "缩小": "Smaller", "放大": "Larger", "正在打开…": "Opening…",
+    "这本书没有目录": "This book has no contents", "没找到": "Not found", "正在搜索…": "Searching…", "{0} 处": "{0} found",
+    "第 {0} / {1} 页": "Page {0} of {1}", "第 {0} 页": "Page {0}", "这本书有 DRM 保护，打不开": "This book is protected by DRM and cannot be opened",
+    "打不开这本书：": "Cannot open this book: " } }[query.get("lang")] || {};
+const t = (text, ...values) => (WORDS[text] ?? text).replace(/\{(\d)\}/g, (_, i) => values[i]);
+document.documentElement.lang = query.get("lang") === "en" ? "en" : "zh-CN";
+document.title = t(document.title);
+for (const node of document.querySelectorAll("#bar button, #loading")) {
+    if (node.title) node.title = t(node.title);
+    if (node.children.length === 0 && node.textContent.trim()) node.textContent = t(node.textContent.trim());
+}
+$("search").placeholder = t($("search").placeholder);
 function applyLook() {
     for (const [k, v] of Object.entries(look)) if (typeof v === "string" && v) document.documentElement.style.setProperty("--" + k, v);
     document.documentElement.style.colorScheme = theme;
@@ -73,7 +87,7 @@ function followLink(event) {
 function list(items, draw) {
     const side = $("side");
     side.replaceChildren(...items.map(draw));
-    if (!items.length) side.append(Object.assign(document.createElement("p"), { textContent: "这本书没有目录" }));
+    if (!items.length) side.append(Object.assign(document.createElement("p"), { textContent: t("这本书没有目录") }));
 }
 function entry(text, go, depth = 0, note = "") {
     const button = document.createElement("button");
@@ -100,7 +114,7 @@ async function openPdf(data, name, at) {
     // Set before the document goes in: the viewer says the pages are ready as soon as the first one has loaded.
     let doc = null;
     const showing = async page => clip((await (await doc.getPage(page)).getTextContent()).items.map(i => i.str).join(" ")).slice(0, 400);
-    const where = async page => ({ at: "p" + page, label: `第 ${page} / ${doc.numPages} 页`, section: "", progress: page / doc.numPages, showing: await showing(page) });
+    const where = async page => ({ at: "p" + page, label: t("第 {0} / {1} 页", page, doc.numPages), section: "", progress: page / doc.numPages, showing: await showing(page) });
     eventBus.on("pagesinit", () => {
         viewer.currentScaleValue = "page-width";
         const page = Number(/^p(\d+)$/.exec(at || "")?.[1]);
@@ -115,7 +129,7 @@ async function openPdf(data, name, at) {
     const meta = await doc.getMetadata().catch(() => ({}));
     const title = clip(meta.info?.Title) || name;
     eventBus.on("updatefindmatchescount", ({ matchesCount }) => { $("found").textContent = matchesCount.total ? `${matchesCount.current} / ${matchesCount.total}` : ""; });
-    eventBus.on("updatefindcontrolstate", ({ state, matchesCount }) => { $("found").textContent = state === 1 ? "没找到" : matchesCount?.total ? `${matchesCount.current} / ${matchesCount.total}` : ""; });
+    eventBus.on("updatefindcontrolstate", ({ state, matchesCount }) => { $("found").textContent = state === 1 ? t("没找到") : matchesCount?.total ? `${matchesCount.current} / ${matchesCount.total}` : ""; });
     box.addEventListener("click", followLink, true);
     /* Marks are kept in shares of their page, one rectangle a line, so they stand through zooming. */
     const pageDiv = n => viewer.getPageView(n - 1)?.div;
@@ -148,7 +162,7 @@ async function openPdf(data, name, at) {
         const first = pageOf(range.startContainer), last = pageOf(range.endContainer);
         if (!first || !last) return null;
         const page = Number(first.dataset.pageNumber);
-        return { at: { page, rects: rectsOf(range, page, Number(last.dataset.pageNumber)) }, label: `第 ${page} 页`, ...around(layerOf(first), layerOf(last), range) };
+        return { at: { page, rects: rectsOf(range, page, Number(last.dataset.pageNumber)) }, label: t("第 {0} 页", page), ...around(layerOf(first), layerOf(last), range) };
     };
     const paint = n => {
         const div = pageDiv(n);
@@ -247,7 +261,7 @@ async function openBook(data, name, at) {
         $("flow").onclick = () => {
             const scrolled = renderer.getAttribute("flow") === "scrolled";
             renderer.setAttribute("flow", scrolled ? "paginated" : "scrolled");
-            $("flow").textContent = scrolled ? "滚动" : "翻页";
+            $("flow").textContent = scrolled ? t("滚动") : t("翻页");
         };
     }
     styles();
@@ -297,13 +311,13 @@ async function openBook(data, name, at) {
             view.clearSearch();
             const side = $("side"), rows = [];
             side.hidden = false;
-            side.replaceChildren(Object.assign(document.createElement("p"), { textContent: "正在搜索…" }));
+            side.replaceChildren(Object.assign(document.createElement("p"), { textContent: t("正在搜索…") }));
             for await (const result of view.search({ query: words })) {
                 if (result === "done" || !result.subitems) continue;
                 for (const item of result.subitems) rows.push(entry(item.excerpt.pre.slice(-20) + item.excerpt.match + item.excerpt.post.slice(0, 40), () => view.goTo(item.cfi), 0, result.label || ""));
                 if (rows.length > 200) break;
             }
-            $("found").textContent = rows.length ? rows.length + " 处" : "没找到";
+            $("found").textContent = rows.length ? t("{0} 处", rows.length) : t("没找到");
             list(rows, x => x);
         },
         zoom(step) { size = Math.min(220, Math.max(60, size + step * 10)); styles(); },
@@ -382,7 +396,7 @@ addEventListener("message", async event => {
         } catch (error) {
             console.error(error);
             const drm = /DRM|encrypt/i.test(String(error?.message || error));
-            send({ book: "error", message: drm ? "这本书有 DRM 保护，打不开" : "打不开这本书：" + String(error?.message || error) });
+            send({ book: "error", message: drm ? t("这本书有 DRM 保护，打不开") : t("打不开这本书：") + String(error?.message || error) });
         }
     }
 });

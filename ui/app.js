@@ -1,36 +1,54 @@
-"use strict";
+import {$t,LOCALE} from "./i18n.js";
+import {Dock} from "./state.js";
+import {S,WINDOW,all,ask,askText,closeModal,el,emptyState,esc,fmtDate,h,kindName,modal,rpc,safe,shorten,svg,toast} from "./core.js";
+import {activeTheme,applyTheme,themeColorPick,themeOp} from "./theme.js";
+import {VIEW_KEYS,activate,splitOut,applyView,closePanel,eachStack,findPanel,float,fromWindow,initDock,loadLayout,onePanel,openPanel,panelTitle,refreshTab,restoreUi,runUiOps,saveLayout,setView,setZoom,sideOf,stackNode,stepZoom,toWindow,unfloat,viewOf,windowTitleShown,zoomDefault,zoomOf,spaceFlash,followingPanel} from "./dock.js";
+import {currentSpace,mainSpaces,sendToSpace,setTopicOf,spaceAction,spaceFromWindow,spaceMenu,spaceOf,spaceTabs,switchSpace,topicHere,topicOf,visibleSpaces} from "./spaces.js";
+import {focusEditor,gridAction} from "./editor.js";
+import {CODE_EXT,snippetRuns} from "./blocks.js";
+import {Chat,SESSION_AGENTS,agentTitle,attachMenu,chatEvent,chatModel,chatMoreMenu,chatRetry,chatSend,conversationMarkdown,endPractice,escalate,fitComposer,followingPanels,loadChat,messageToCard,modelMenu,openPractice,renderChat,sessionAction,setChatModel,startPractice,toBottomButton,topicMenu,topicTitle,updateComposer} from "./chat.js";
+import {importAction,importChat,importEvent} from "./imports.js";
+import {openAttachment} from "./attach.js";
+import {Files,Organizer,fileAction,fileChange,fileChanged,fileIcon,fileInput,fileKey,fileScreen,flushAll,kernelEvent,openFile,renderOrganizer,runEvent,runFile,showHistory,versionAction} from "./files.js";
+import {embedsChanged,notesAction,openWiki,renderTags,showTag,switcher,switcherFilter} from "./notes.js";
+import {Reader,openWeb,readerAction,readerEvent} from "./reader.js";
+import {Books} from "./books.js";
+import {anchorGo,askedFinished,markAction,marksChanged,marksFollow,openAnnotation,openAsked,openMarks,selectionAnchor} from "./marks.js";
+import {appAction,appAgentEvent,appBuildEvent,appCheck,appLive} from "./apps.js";
+import {skillAction,skillMenu,skillsChanged} from "./skillstore.js";
+import {changeAction,compareAction,compareEvent,restoreVersion,skillChangeEvent,wideWindow} from "./skillchange.js";
+import {SIDE_SECTIONS,Side,initSideResize,renderActivity,renderSide,setSideOpen,showList,sideChanged,sideInput,sideList,sideOpen,topicFold} from "./side.js";
+import {Settings,cardViewsChanged,homesChanged,journalsChanged,libraryInput,loadJournal,loadMap,loadReview,mapsChanged,renderLibrary,renderSettings,settingsAction,settingsAutosave,settingsChange} from "./panels.js";
+import {pickPath,writeClipboard} from "./popups.js";
 /* Boot, the top bar, routing of backend events and clicks, and reporting what is on screen. */
-const Sel={text:"",timer:null,el:null,anchor:null};
+export const Sel={text:"",timer:null,el:null,anchor:null};
 /* Selected text is only context until the learner hands it to a conversation; letting go of it clears it everywhere. */
-function clearSelection(){
+export function clearSelection(){
  Sel.text="";Sel.anchor=null;hidePop();all("iframe.book-frame").forEach(f=>f.contentWindow?.postMessage({book:"unselect"},"*"));
  if(Sel.el?.setSelectionRange&&Sel.el.isConnected)Sel.el.setSelectionRange(Sel.el.selectionEnd,Sel.el.selectionEnd);
  Sel.el=null;window.getSelection()?.removeAllRanges();reportScreen();
 }
-async function refreshState(){
+export async function refreshState(){
  const st=await safe(()=>rpc("state"));if(!st)return;
- Object.assign(S.data,st);renderTop();sideChanged([]);homesChanged();cardViewsChanged();
+ Object.assign(S.data,st);S.data.active_topic=topicOf();renderTop();sideChanged([]);homesChanged();cardViewsChanged();
  const titles=el("#doc-titles");if(titles)titles.innerHTML=(S.data.docs||[]).slice(0,800).map(d=>'<option value="'+esc(d.title)+'">').join("");
  Object.keys(Dock.panels).forEach(refreshTab);
 }
-function refreshChats(){Object.keys(Chat).forEach(pid=>loadChat(pid));}
+export function refreshChats(){Object.keys(Chat).forEach(pid=>loadChat(pid));}
 /* The status bar: where the conversation is, what is working, what is running. */
-function renderStatus(){
+export function renderStatus(){
  const bar=el("#status");if(!bar)return;
  const busy=(S.data.busy||[]).length,running=(S.data.running||[]).length,topic=S.data.active_topic;
- bar.innerHTML=spaceTabs()+(topic?'<a data-action="open-doc" data-id="'+esc(topic)+'" title="正在学的主题">'+svg("map",12)+' '+esc(topicTitle(topic))+'</a>':'<span>'+svg("bot",12)+' 默认对话</span>')+
-  (busy?'<span class="working">'+svg("bot",12)+' '+busy+' 个 AI 在工作</span>':"")+(running?'<span class="working">'+svg("play",12)+' '+running+' 个运行中</span>':"")+
-  '<span class="grow"></span>'+(S.data.sandbox?.isolated?'<span title="AI 的命令和运行都在沙箱里">'+svg("shield",12)+' 沙箱</span>':
-   S.data.sandbox?.ok?'<span title="这台电脑上没有沙箱：AI 的命令和运行用你的权限直接运行">'+svg("play",12)+' 直接运行</span>':'<span class="warn">'+svg("shield",12)+' 沙箱不可用</span>')+
-  '<a data-action="open-vault" title="在系统里打开学习库">'+svg("folder",12)+' '+esc(S.data.vault||"")+'</a>';
+ bar.innerHTML=spaceTabs()+(topic?"<a data-action=\"open-doc\" data-id=\""+esc(topic)+"\" title=\""+$t("正在学的主题")+"\">"+svg("map",12)+" "+esc(topicTitle(topic))+"</a>":"<span>"+svg("bot",12)+" "+$t("默认对话")+"</span>")+(busy?"<span class=\"working\">"+svg("bot",12)+" "+busy+" "+$t("个 AI 在工作")+"</span>":"")+(running?"<span class=\"working\">"+svg("play",12)+" "+running+" "+$t("个运行中")+"</span>":"")+"<span class=\"grow\"></span>"+(S.data.sandbox?.isolated?"<span title=\""+$t("AI 的命令和运行都在沙箱里")+"\">"+svg("shield",12)+" "+$t("沙箱")+"</span>":
+   S.data.sandbox?.ok?"<span title=\""+$t("这台电脑上没有沙箱：AI 的命令和运行用你的权限直接运行")+"\">"+svg("play",12)+" "+$t("直接运行")+"</span>":"<span class=\"warn\">"+svg("shield",12)+" "+$t("沙箱不可用")+"</span>")+"<a data-action=\"open-vault\" title=\""+$t("在系统里打开学习库")+"\">"+svg("folder",12)+" "+esc(S.data.vault||"")+"</a>";
 }
 function renderTop(){renderStatus();renderActivity();}
 /* Interface preferences live in the machine's config; appearance applies at once. */
 // Reading width in characters of body text, so headings and paragraphs share one column and it widens with the text.
 const READ_WIDTH={narrow:34,medium:42,wide:54};
-function readChars(v){if(v==="none"||v===0)return 0;return Math.min(120,Math.max(20,Number(v)||READ_WIDTH[v]||42));}
-function readWidth(v){const chars=readChars(v);return chars?Math.round(chars*(Number(S.ui.font_size)||14.5))+"px":"none";}
-function applyUi(){
+export function readChars(v){if(v==="none"||v===0)return 0;return Math.min(120,Math.max(20,Number(v)||READ_WIDTH[v]||42));}
+export function readWidth(v){const chars=readChars(v);return chars?Math.round(chars*(Number(S.ui.font_size)||14.5))+"px":"none";}
+export function applyUi(){
  const u=S.ui,root=document.documentElement;
  root.dataset.theme=u.theme==="light"?"light":"dark";root.dataset.density=u.density||"comfortable";
  root.style.setProperty("--font-size",(Number(u.font_size)||14.5)+"px");root.style.setProperty("--code-size",(Number(u.code_font_size)||13)+"px");
@@ -42,30 +60,25 @@ function applyUi(){
  renderActivity();
 }
 let uiTimer=null;
-function saveUi(now=false){
+export function saveUi(now=false){
  clearTimeout(uiTimer);
- const go=()=>rpc("ui_save",{ui:S.ui}).then(u=>{S.ui=u;}).catch(e=>toast(e.message,"error"));
+ // A separate window's copy of the working states may be old: the main window's are kept.
+ const go=()=>rpc("ui_save",{ui:S.ui,...(WINDOW?{keep:["templates"]}:{})}).then(u=>{S.ui=u;}).catch(e=>toast(e.message,"error"));
  if(now)return go();uiTimer=setTimeout(go,500);
 }
 const NEW_ITEMS=[
- ["写记录","new-note","edit","随手写，关掉后 AI 帮你整理"],["写代码","new-code","code","任何语言，写完就能运行"],["新实验笔记","new-notebook","flask","Jupyter 格式，在沙箱内核里运行"],
- ["新知识卡","new-card","card","自己记下一个知识点"],["主会话","open-agent","bot","",'data-agent="tutor"'],["快答","open-agent","spark","",'data-agent="flash"'],
- ["新工作状态","space-blank","layout","一块空白，自己往里放"]];
+ [$t("写记录"),"new-note","edit",$t("随手写，关掉后 AI 帮你整理")],[$t("写代码"),"new-code","code",$t("任何语言，写完就能运行")],[$t("新实验笔记"),"new-notebook","flask",$t("Jupyter 格式，在沙箱内核里运行")],
+ [$t("新知识卡"),"new-card","card",$t("自己记下一个知识点")],[$t("主会话"),"open-agent","bot","",'data-agent="tutor"'],[$t("快答"),"open-agent","spark","",'data-agent="flash"'],
+ [$t("新工作状态"),"space-blank","layout",$t("一块空白，自己往里放")]];
 // Panels that already have a button of their own; the palette still lists them as commands.
-const PANEL_ITEMS=[["开始","open-home","home",""],["知识图","open-map","network",""],["学习轨迹","open-journal","history",""],["回顾","open-review","refresh",""],["卡片库","open-library","card",""],["批注","open-marks","marker",""],["问答","open-asked","spark",""],["记忆","open-memory","calendar",""],
- ["快速打开笔记 · Ctrl O","note-switcher","document",""],["技能商城","open-skills","store",""],["应用","open-apps","apps",""],["今天的日记","note-daily","calendar",""],["大纲与链接","open-noteinfo","list",""],["设置","open-settings","sliders",""]];
+const PANEL_ITEMS=[[$t("开始"),"open-home","home",""],[$t("知识图"),"open-map","network",""],[$t("学习轨迹"),"open-journal","history",""],[$t("回顾"),"open-review","refresh",""],[$t("卡片库"),"open-library","card",""],[$t("批注"),"open-marks","marker",""],[$t("问答"),"open-asked","spark",""],[$t("记忆"),"open-memory","calendar",""],
+ [$t("快速打开笔记 · Ctrl O"),"note-switcher","document",""],[$t("技能商城"),"open-skills","store",""],[$t("应用"),"open-apps","apps",""],[$t("今天的日记"),"note-daily","calendar",""],[$t("大纲与链接"),"open-noteinfo","list",""],[$t("设置"),"open-settings","sliders",""]];
 // What a group of tabs can open: something new, or any window. The same list is behind the activity bar's +, when it is shown.
-const OPEN_ITEMS=[["主会话","open-agent","bot",'data-agent="tutor"'],["快答","open-agent","spark",'data-agent="flash"'],["开始","open-home","home"],["知识图","open-map","network"],
- ["卡片库","open-library","card"],["批注","open-marks","marker"],["回顾","open-review","refresh"],["记忆","open-memory","calendar"],["大纲与链接","open-noteinfo","list"],["学习轨迹","open-journal","history"],["应用","open-apps","apps"],["技能商城","open-skills","store"],["设置","open-settings","sliders"]];
+const OPEN_ITEMS=[[$t("主会话"),"open-agent","bot",'data-agent="tutor"'],[$t("快答"),"open-agent","spark",'data-agent="flash"'],[$t("开始"),"open-home","home"],[$t("知识图"),"open-map","network"],
+ [$t("卡片库"),"open-library","card"],[$t("批注"),"open-marks","marker"],[$t("回顾"),"open-review","refresh"],[$t("记忆"),"open-memory","calendar"],[$t("大纲与链接"),"open-noteinfo","list"],[$t("学习轨迹"),"open-journal","history"],[$t("应用"),"open-apps","apps"],[$t("技能商城"),"open-skills","store"],[$t("设置"),"open-settings","sliders"]];
 function openMenuHtml(){
  const item=([t,a,i,d,x])=>'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+(d?'<small>'+esc(d)+'</small>':"")+'</span></button>';
- return '<div class="menu-label">新建</div><div class="menu-grid">'+NEW_ITEMS.slice(0,4).map(([t,a,i,d,x])=>item([t,a,i,"",x])).join("")+
-  '<button data-action="note-new" data-folder="">'+svg("notenew",14)+'<span>新笔记</span></button>'+
-  '<button data-action="import-chat">'+svg("download",14)+'<span>导入 AI 对话</span></button>'+
-  '<button data-action="book-add">'+svg("book",14)+'<span>打开电子书</span></button></div>'+
-  '<hr/><div class="menu-label">打开窗口</div><div class="menu-grid">'+OPEN_ITEMS.map(([t,a,i,x])=>'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+'</span></button>').join("")+'</div>'+
-  '<hr/><button data-action="note-switcher">'+svg("search",14)+'<span>打开一篇笔记或文件… <small>Ctrl O</small></span></button>'+
-  '<button data-action="space-blank">'+svg("layout",14)+'<span>新工作状态</span></button>';
+ return "<div class=\"menu-label\">"+$t("新建")+"</div><div class=\"menu-grid\">"+NEW_ITEMS.slice(0,4).map(([t,a,i,d,x])=>item([t,a,i,"",x])).join("")+"<button data-action=\"note-new\" data-folder=\"\">"+svg("notenew",14)+"<span>"+$t("新笔记")+"</span></button><button data-action=\"import-chat\">"+svg("download",14)+"<span>"+$t("导入 AI 对话")+"</span></button><button data-action=\"book-add\">"+svg("book",14)+"<span>"+$t("打开电子书")+"</span></button></div><hr/><div class=\"menu-label\">"+$t("打开窗口")+"</div><div class=\"menu-grid\">"+OPEN_ITEMS.map(([t,a,i,x])=>'<button data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+'</span></button>').join("")+"</div><hr/><button data-action=\"note-switcher\">"+svg("search",14)+"<span>"+$t("打开一篇笔记或文件…")+" <small>Ctrl O</small></span></button><button data-action=\"space-blank\">"+svg("layout",14)+"<span>"+$t("新工作状态")+"</span></button>";
 }
 // From a group's own +: whatever is opened goes into that group.
 function stackMenu(anchor,stack){Dock.into={stack,until:Date.now()+15000};popMenu(anchor,openMenuHtml(),{cls:"menu-wide"});}
@@ -76,10 +89,10 @@ function newMenu(anchor){
  closeMenus();document.body.appendChild(menu);
  menu.style.top=Math.max(8,Math.min(r.top,innerHeight-menu.offsetHeight-8))+"px";
 }
-function closeMenus(){all(".menu").forEach(m=>m.remove());Menus.owner=null;}
+export function closeMenus(){all(".menu").forEach(m=>m.remove());Menus.owner=null;}
 /* A small menu next to what opened it (above it for things at the bottom), kept inside the window. */
-const Menus={reopen:null,owner:null};
-function popMenu(anchor,html,opts={}){
+export const Menus={reopen:null,owner:null};
+export function popMenu(anchor,html,opts={}){
  closeMenus();Menus.reopen=null;
  const r=anchor.getBoundingClientRect?anchor.getBoundingClientRect():{left:anchor.x,right:anchor.x,top:anchor.y,bottom:anchor.y};
  const menu=h('<div class="menu '+(opts.cls||"")+'">'+html+'</div>');if(opts.width)menu.style.minWidth=opts.width+"px";document.body.appendChild(menu);
@@ -89,26 +102,20 @@ function popMenu(anchor,html,opts={}){
  menu.style.left=Math.max(8,Math.min(r.left,innerWidth-w-8))+"px";menu.style.top=Math.max(8,Math.min(y,innerHeight-ht-8))+"px";
  return menu;
 }
-function tabMenu(pid,at){
+export function tabMenu(pid,at){
  const p=Dock.panels[pid];if(!p)return;
  const floating=Dock.layout.floats.some(f=>f.stack.tabs.includes(pid));
- popMenu(at,'<div class="menu-label">这个窗口的大小'+(p.zoom?"（单独调过）":"")+'</div><div class="zoom-row">'+
-  '<button data-action="zoom-step" data-pid="'+pid+'" data-dir="-1" title="缩小 · Ctrl -">A−</button><b>'+Math.round(zoomOf(p)*100)+'%</b>'+
-  '<button data-action="zoom-step" data-pid="'+pid+'" data-dir="1" title="放大 · Ctrl =">A+</button></div>'+
-  (p.zoom?'<button data-action="zoom-step" data-pid="'+pid+'" data-dir="0">'+svg("undo",14)+'<span>恢复成这种面板的默认（'+Math.round(zoomDefault(p)*100)+'%）</span></button>':"")+'<hr/>'+
-  (WINDOW?"":(floating?"":'<button data-action="dock-float" data-pid="'+pid+'">'+svg("float",14)+'<span>浮出</span></button>')+
-   '<button data-action="dock-window" data-pid="'+pid+'">'+svg("external",14)+'<span>放大成单独的窗口</span></button>')+
-  '<button data-action="dock-close" data-pid="'+pid+'">'+svg("close",14)+'<span>关闭</span></button>');
+ popMenu(at,"<div class=\"menu-label\">"+$t("这个窗口的大小")+(p.zoom?$t("（单独调过）"):"")+"</div><div class=\"zoom-row\"><button data-action=\"zoom-step\" data-pid=\""+pid+"\" data-dir=\"-1\" title=\""+$t("缩小 · Ctrl -")+"\">A−</button><b>"+Math.round(zoomOf(p)*100)+"%</b><button data-action=\"zoom-step\" data-pid=\""+pid+"\" data-dir=\"1\" title=\""+$t("放大 · Ctrl =")+"\">A+</button></div>"+(p.zoom?"<button data-action=\"zoom-step\" data-pid=\""+pid+"\" data-dir=\"0\">"+svg("undo",14)+"<span>"+$t("恢复成这种面板的默认（{0}%）",Math.round(zoomDefault(p)*100))+"</span></button>":"")+"<hr/>"+(onePanel()?"":(floating?"":"<button data-action=\"dock-float\" data-pid=\""+pid+"\">"+svg("float",14)+"<span>"+$t("浮出")+"</span></button>")+(WINDOW?"":"<button data-action=\"dock-window\" data-pid=\""+pid+"\">"+svg("external",14)+"<span>"+$t("放大成单独的窗口")+"</span></button>"))+(onePanel()?"":"<button data-action=\"tab-split\" data-where=\"right\" data-pid=\""+pid+"\">"+svg("split",14)+"<span>"+$t("分到右边")+"</span></button><button data-action=\"tab-split\" data-where=\"bottom\" data-pid=\""+pid+"\">"+svg("split",14)+"<span>"+$t("分到下面")+"</span></button>"+(WINDOW?[]:mainSpaces()).filter(x=>x.id!==Dock.space).map(x=>"<button data-action=\"tab-send\" data-to=\""+esc(x.id)+"\" data-pid=\""+pid+"\">"+svg(x.icon||"layout",14)+"<span>"+$t("移到「{0}」",esc(x.name))+"</span></button>").join("")+"<hr/>")+"<button data-action=\"dock-close\" data-pid=\""+pid+"\">"+svg("close",14)+"<span>"+$t("关闭")+"</span></button>");
  Menus.reopen=()=>tabMenu(pid,at);
 }
 function panelHere(){const a=document.activeElement?.closest?.(".panel");return a?.dataset.pid||(Dock.panels[Dock.focus]?Dock.focus:null);}
 async function newScratch(kind){
- const stamp=new Date().toLocaleString("zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}).replace(/[\/: ]/g,"");
+ const stamp=new Date().toLocaleString(LOCALE,{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}).replace(/[\/: ]/g,"");
  let path;
- if(kind==="note")path=(await rpc("doc_create",{kind:"note",title:"随手记 "+stamp,topic:S.data.active_topic}))?.path;
- else if(kind==="notebook"){const name=await askText("实验笔记的名字","实验 "+stamp,{ok:"新建"});if(!name)return;path=(await rpc("doc_create",{kind:"notebook",title:name,topic:S.data.active_topic})).path;}
+ if(kind==="note")path=(await rpc("doc_create",{kind:"note",title:$t("随手记")+" "+stamp,topic:S.data.active_topic}))?.path;
+ else if(kind==="notebook"){const name=await askText($t("实验笔记的名字"),$t("实验")+" "+stamp,{ok:$t("新建")});if(!name)return;path=(await rpc("doc_create",{kind:"notebook",title:name,topic:S.data.active_topic})).path;}
  else{
-  const name=await askText("文件名","草稿-"+stamp+".py",{hint:"扩展名决定语言：.py .c .rs .go .js .sh …",selectStem:true,ok:"新建"});if(!name)return;
+  const name=await askText($t("文件名"),$t("草稿-{0}.py",stamp),{hint:$t("扩展名决定语言：.py .c .rs .go .js .sh …"),selectStem:true,ok:$t("新建")});if(!name)return;
   path=(await rpc("file_create",{folder:"code",name})).path;
  }
  await refreshState();
@@ -116,31 +123,31 @@ async function newScratch(kind){
 }
 /* ---- the command palette -------------------------------------------------------------------------------- */
 function palette(){
- modal('<div class="palette"><div class="palette-input">'+svg("search",18)+'<input id="palette-q" placeholder="找卡片、笔记、主题、文件，或者输入命令…" autocomplete="off"/></div><div class="palette-list" id="palette-list"></div><div class="palette-hint">↑↓ 选择 · Enter 打开 · Esc 关闭</div></div>',"palette-modal");
+ modal("<div class=\"palette\"><div class=\"palette-input\">"+svg("search",18)+"<input id=\"palette-q\" placeholder=\""+$t("找卡片、笔记、主题、文件，或者输入命令…")+"\" autocomplete=\"off\"/></div><div class=\"palette-list\" id=\"palette-list\"></div><div class=\"palette-hint\">"+$t("↑↓ 选择 · Enter 打开 · Esc 关闭")+"</div></div>","palette-modal");
  paletteFilter("");setTimeout(()=>el("#palette-q")?.focus(),20);
 }
 let paletteSeq=0;
 async function paletteFilter(q){
  const term=q.trim().toLowerCase(),seq=++paletteSeq;
- const commands=NEW_ITEMS.concat(PANEL_ITEMS).filter(c=>!term||c[0].toLowerCase().includes(term)).map(([t,a,i,d,x])=>'<button class="pal-item" data-action="'+a+'" '+(x||"")+'>'+svg(i,14)+'<span>'+esc(t)+'</span><em>命令</em></button>');
+ const commands=NEW_ITEMS.concat(PANEL_ITEMS).filter(c=>!term||c[0].toLowerCase().includes(term)).map(([t,a,i,d,x])=>"<button class=\"pal-item\" data-action=\""+a+"\" "+(x||"")+">"+svg(i,14)+"<span>"+esc(t)+"</span><em>"+$t("命令")+"</em></button>");
  const docs=(S.data.docs||[]).filter(d=>!term||d.title.toLowerCase().includes(term)).slice(0,term?30:12)
   .map(d=>'<button class="pal-item" data-action="open-file" data-path="'+esc(d.path)+'">'+svg(fileIcon(d.path),14)+'<span>'+esc(d.title)+'</span><em>'+esc(kindName[d.kind]||d.kind)+'</em></button>');
  const box=el("#palette-list");if(!box)return;
- box.innerHTML=(term?docs.concat(commands):commands.concat(docs)).join("")||'<p class="muted pad">没有找到</p>';
+ box.innerHTML=(term?docs.concat(commands):commands.concat(docs)).join("")||"<p class=\"muted pad\">"+$t("没有找到")+"</p>";
  if(term.length>=2){
   const hits=await safe(()=>rpc("search",{query:term}));
   if(seq!==paletteSeq||!hits||!el("#palette-list"))return;
   const seen=new Set((S.data.docs||[]).filter(d=>d.title.toLowerCase().includes(term)).map(d=>d.path));
-  const more=hits.filter(x=>x.kind==="annotation"||!seen.has(x.path)).slice(0,20).map(x=>'<button class="pal-item" '+(x.kind==="annotation"?'data-action="open-ref" data-ref="'+esc(x.ref)+'"':x.kind==="message"?'data-action="open-thread" data-thread="'+esc(x.thread)+'" data-agent="'+esc(x.agent||"tutor")+'"':'data-action="open-file" data-path="'+esc(x.path)+'"')+'>'+svg(x.kind==="message"?"bot":x.kind==="annotation"?"marker":fileIcon(x.path),14)+'<span>'+esc(x.title)+'<small>'+esc(x.excerpt)+'</small></span><em>'+esc(kindName[x.kind]||"对话")+'</em></button>');
+  const more=hits.filter(x=>x.kind==="annotation"||!seen.has(x.path)).slice(0,20).map(x=>'<button class="pal-item" '+(x.kind==="annotation"?'data-action="open-ref" data-ref="'+esc(x.ref)+'"':x.kind==="message"?'data-action="open-thread" data-thread="'+esc(x.thread)+'" data-agent="'+esc(x.agent||"tutor")+'"':'data-action="open-file" data-path="'+esc(x.path)+'"')+'>'+svg(x.kind==="message"?"bot":x.kind==="annotation"?"marker":fileIcon(x.path),14)+'<span>'+esc(x.title)+'<small>'+esc(x.excerpt)+'</small></span><em>'+esc(kindName[x.kind]||$t("对话"))+'</em></button>');
   el("#palette-list").insertAdjacentHTML("beforeend",more.join(""));
  }
 }
 /* ---- what is on screen, for the agents ------------------------------------------------------------------- */
-const Dwell={path:null,since:0,where:"",recent:[]};
-let screenTimer=null;
-function reportScreen(){clearTimeout(screenTimer);screenTimer=setTimeout(()=>safe(sendScreen),1200);}
+export const Dwell={path:null,since:0,where:"",recent:[]};
+export let screenTimer=null;
+export function reportScreen(){clearTimeout(screenTimer);screenTimer=setTimeout(()=>safe(sendScreen),1200);}
 function screenOf(pid){const p=Dock.panels[pid],t=Dock.types[p?.type];return t?.screen?{panel:pid,type:p.type,title:panelTitle(pid),...t.screen(p,Dock.els[pid])}:{panel:pid,type:p?.type};}
-function sendScreen(){
+export function sendScreen(){
  marksFollow();
  const stacks=[];eachStack((s,f)=>stacks.push({tabs:s.tabs.map(pid=>({id:pid,title:panelTitle(pid),type:Dock.panels[pid].type,zoom:Math.round(zoomOf(Dock.panels[pid])*100)+"%"})),showing:s.active,floating:!!f}));
  const shown=[];eachStack(s=>{if(s.active)shown.push(s.active);});
@@ -153,15 +160,15 @@ function sendScreen(){
    x:+((r.left-area.left)/area.width).toFixed(3),y:+((r.top-area.top)/area.height).toFixed(3),w:+(r.width/area.width).toFixed(3),h:+(r.height/area.height).toFixed(3)};
  }).filter(Boolean):[];
  const state={layout:{stacks,focused:Dock.focus||null,nesting:layoutShape(Dock.layout.root),windows},ai:{panels:ai},mine:{files:mine.filter(x=>x.type==="file"),other:mine.filter(x=>x.type!=="file")},
-  look:{base:S.ui.theme,theme:S.ui.theme_custom||"默认",...(activeTheme()?{vars:activeTheme().vars,font:activeTheme().font||undefined,css:activeTheme().css?activeTheme().css.slice(0,600):undefined}:{}),saved:Object.keys(S.ui.themes||{})},
-  workspace:{now:currentSpace().name,sidebar:sideOpen()?sideList():"收起",all:visibleSpaces().map(x=>x.name)},theme:S.ui.theme,
+  look:{base:S.ui.theme,theme:S.ui.theme_custom||$t("默认"),...(activeTheme()?{vars:activeTheme().vars,font:activeTheme().font||undefined,css:activeTheme().css?activeTheme().css.slice(0,600):undefined}:{}),saved:Object.keys(S.ui.themes||{})},
+  workspace:{now:currentSpace().name,sidebar:sideOpen()?sideList():$t("收起"),all:visibleSpaces().map(x=>x.name)},theme:S.ui.theme,
   open_but_hidden:stacks.flatMap(s=>s.tabs).filter(t=>!shown.includes(t.id)).map(t=>t.title),recent_files:Dwell.recent.slice(0,20),selection:Sel.text?shorten(Sel.text,600):undefined,selection_from:Sel.anchor?.label||undefined,
   tabs:tabList(shown)};
- if(WINDOW)state.layout.title=windowTitleShown;
+ if(WINDOW)state.layout.title=Dock.own?spaceOf(Dock.own)?.name||"":windowTitleShown;
  return rpc("screen",{state,...(WINDOW?{window:WINDOW}:{})});
 }
 /* Every tab, in every workspace, for the agents' tab directory: what it is, where, and for one on show what it shows. */
-function tabList(shown){
+export function tabList(shown){
  const here=new Set();eachStack(s=>s.tabs.forEach(pid=>here.add(pid)));
  // In use: the learner's panel in focus, or, while they type to an AI, the one of theirs they used last.
  const using=sideOf(Dock.focus)==="mine"?Dock.focus:Dock.lastMine;
@@ -180,13 +187,13 @@ async function tabRead(evt){
  if((evt.window||null)!==(WINDOW||null))return;
  const pid=evt.panel,p=Dock.panels[pid],node=Dock.els[pid];
  const answer=result=>rpc("ui_done",{request:evt.request,result});
- if(!p)return answer({error:"这个标签已经关掉了"});
+ if(!p)return answer({error:$t("这个标签已经关掉了")});
  const view=safe(()=>{const {panel,type,title,...rest}=screenOf(pid);return rest;});
  try{
   if(p.type==="file"){
    const st=Files[pid];let draft;
    if(st?.dirty)draft=st.raw||!st.fields?st.text:(st.fields.body??null);
-   else if(st?.cellDrafts?.size)draft=[...st.cellDrafts].map(([id,src])=>"# 单元格 "+id+"（没保存）\n"+String(src)).join("\n\n");
+   else if(st?.cellDrafts?.size)draft=[...st.cellDrafts].map(([id,src])=>$t("# 单元格 {0}（没保存）",id)+"\n"+String(src)).join("\n\n");
    return answer({type:"file",path:p.path,view,...(draft!=null?{draft:String(draft)}:{})});
   }
   if(p.type==="chat")return answer({type:"chat",thread:Chat[pid]?.thread||p.thread||null,draft:Chat[pid]?.input||""});
@@ -211,28 +218,30 @@ function trackDwell(){
   }
   Dwell.path=path;Dwell.since=Date.now();Dwell.where="";
  }
- if(path){const sc=fileScreen(pid);Dwell.where=sc.viewport?.section||(sc.visible_cells?"第 "+sc.visible_cells.map(c=>c.index).join("、")+" 格":"");}
+ if(path){const sc=fileScreen(pid);Dwell.where=sc.viewport?.section||(sc.visible_cells?$t("第 {0} 格",sc.visible_cells.map(c=>c.index).join("、")):"");}
 }
-function viewedFlush(pid){if(Dock.panels[pid]?.path===Dwell.path){Dock.focus=null;trackDwell();}}
+export function viewedFlush(pid){if(Dock.panels[pid]?.path===Dwell.path){Dock.focus=null;trackDwell();}}
 /* The one-line note sent with each message: what the learner is looking at. */
-function screenNote(){
+export function screenNote(){
  const shown=[];eachStack(s=>{if(s.active&&sideOf(s.active)==="mine")shown.push(s.active);});
  const pid=shown.includes(Dock.focus)?Dock.focus:shown.find(x=>Dock.panels[x].type==="file")||shown[0];
  if(!pid)return "";
  const sc=screenOf(pid);
- if(sc.type!=="file")return "我开着「"+sc.title+"」";
- let note="我正在看 "+sc.path;
- if(sc.viewport)note+=(sc.viewport.section?"「"+sc.viewport.section+"」一节，":"（")+"第 "+sc.viewport.from+"–"+sc.viewport.to+" 行"+(sc.viewport.section?"":"）");
- if(sc.visible_cells?.length)note+="，第 "+sc.visible_cells.map(c=>c.index).join("、")+" 格";
- if(sc.dirty)note+="，有没保存的修改";
+ if(sc.type!=="file")return $t("我开着「{0}」",sc.title);
+ let note=$t("我正在看")+" "+sc.path;
+ if(sc.viewport)note+=(sc.viewport.section?$t("「{0}」一节，",sc.viewport.section):"（")+$t("第 {0}–{1} 行",sc.viewport.from,sc.viewport.to)+(sc.viewport.section?"":"）");
+ if(sc.visible_cells?.length)note+=$t("，第 {0} 格",sc.visible_cells.map(c=>c.index).join("、"));
+ if(sc.dirty)note+=$t("，有没保存的修改");
  return note;
 }
 /* ---- events from the backend ---------------------------------------------------------------------------------- */
 async function onEvent(evt){
  // Moving panels, opening things and checking apps are the main window's to do; a separate window shows its panel.
- if(WINDOW&&["ui","open","open_annotation","app_check","open_panel","window_closed"].includes(evt.type))return;
+ // A window holding a working state does what an AI asked from it; the main window, what was asked from it.
+ if(["ui","open"].includes(evt.type)&&(evt.window||"")!==(Dock.own?WINDOW:""))return;
+ if(WINDOW&&["open_annotation","app_check","open_panel","window_closed"].includes(evt.type)||onePanel()&&["ui","open"].includes(evt.type))return;
  if(evt.type==="open_panel")return openPanel(evt.params);
- if(evt.type==="window_closed")return fromWindow(evt.params,evt.origin||{});
+ if(evt.type==="window_closed")return evt.state?spaceFromWindow(evt.state,evt.unit):fromWindow(evt.params,evt.origin||{});
  if(evt.type==="agent"&&evt.kind==="finished"&&Dock.origin[evt.thread]&&Dock.origin[evt.thread]!==Dock.space){Dock.notice.add(Dock.origin[evt.thread]);renderStatus();}
  if(evt.type==="agent"&&String(evt.thread||"").startsWith("compare:"))return compareEvent(evt);
  if(evt.type==="agent"&&evt.agent==="builder"){appAgentEvent(evt);if(evt.kind==="finished")refreshState();return;}
@@ -244,6 +253,10 @@ async function onEvent(evt){
  if(evt.type==="app_check")return appCheck(evt);
  if(evt.type==="skill_change"){skillsChanged();return skillChangeEvent(evt);}
  if(evt.type==="annotations")return marksChanged();
+ // Settings saved in another window (the look, a state renamed): every window is the one program.
+ // The list of states, changed in the main window (renamed, reordered).
+ if(evt.type==="states"){if(WINDOW){S.states=evt.list;renderStatus();}return;}
+ if(evt.type==="ui_saved"){S.ui=evt.ui;applyUi();renderStatus();return renderSide();}
  if(evt.type==="ui_setting"){S.ui[evt.key]=evt.value;for(const pid of Object.keys(Dock.panels))if(Dock.panels[pid].type==="settings")renderSettings(Dock.els[pid],Dock.panels[pid].page);return;}
  if(evt.type==="open_annotation")return openAnnotation(evt.id);
  if(evt.type==="saved"){sideChanged([]);return;}
@@ -270,11 +283,13 @@ async function onAction(a){
  switch(kind){
  case "dock-close":return closePanel(pid);
  case "dock-float":return float(pid);
+ case "tab-split":if(!splitOut(pid,a.dataset.where))toast($t("这一组只有这一个标签，没有东西可分"));return;
+ case "tab-send":return sendToSpace(pid,Dock.space,a.dataset.to,false);
  case "dock-window":return toWindow(pid);
  case "import-chat":return importChat("",a.dataset.pid||null);
  case "book-external":return rpc("file_external",{path:Dock.panels[a.dataset.pid]?.path});
- case "book-add":{const picked=await pickPath({mode:"files",title:"打开电子书",ok:"打开",hint:"PDF、EPUB、MOBI、AZW3、FB2、CBZ；会复制进学习库的 books/，原文件不动"});if(!picked?.length)return;
-  const paths=await rpc("books_add",{paths:picked},0);if(!paths.length)return toast("没有认识的电子书格式");paths.forEach(openFile);return sideChanged([]);}
+ case "book-add":{const picked=await pickPath({mode:"files",title:$t("打开电子书"),ok:$t("打开"),hint:$t("PDF、EPUB、MOBI、AZW3、FB2、CBZ；会复制进学习库的 books/，原文件不动")});if(!picked?.length)return;
+  const paths=await rpc("books_add",{paths:picked},0);if(!paths.length)return toast($t("没有认识的电子书格式"));paths.forEach(openFile);return sideChanged([]);}
  case "import-read":case "import-save":case "import-paste":return importAction(kind);
  case "dock-unfloat":return unfloat(pid);
  case "window-return":return rpc("window_return",{window:WINDOW});
@@ -284,10 +299,10 @@ async function onAction(a){
  case "palette":return palette();
  case "theme":
   // With a theme of its own in use, the button goes back to the plain look first.
-  if(S.ui.theme_custom){S.ui.theme_custom=null;toast("回到默认主题；设置的「外观」里可以再选回来");}else S.ui.theme=S.ui.theme==="dark"?"light":"dark";
+  if(S.ui.theme_custom){S.ui.theme_custom=null;toast($t("回到默认主题；设置的「外观」里可以再选回来"));}else S.ui.theme=S.ui.theme==="dark"?"light":"dark";
   applyUi();return saveUi();
  case "theme-use":S.ui.theme_custom=a.dataset.name||null;if(S.ui.theme_custom)S.ui.theme=S.ui.themes[S.ui.theme_custom].base;applyUi();saveUi();return renderSettings(a.closest(".panel"),"look");
- case "theme-delete":{if(!await ask("删掉以后可以再让 AI 做一个。",{title:"删除主题「"+a.dataset.name+"」？",danger:true,ok:"删除"}))return;themeOp({name:a.dataset.name,delete:true});return renderSettings(a.closest(".panel"),"look");}
+ case "theme-delete":{if(!await ask($t("删掉以后可以再让 AI 做一个。"),{title:$t("删除主题「{0}」？",a.dataset.name),danger:true,ok:$t("删除")}))return;themeOp({name:a.dataset.name,delete:true});return renderSettings(a.closest(".panel"),"look");}
  case "side-collapse":return setSideOpen(false);
  case "side-list":return a.dataset.list===sideList()&&sideOpen()?setSideOpen(false):showList(a.dataset.list);
  case "side-stage":Side.stage=a.dataset.stage;return renderSide();
@@ -298,7 +313,7 @@ async function onAction(a){
  case "new-note":return newScratch("note");
  case "new-code":return newScratch("code");
  case "new-notebook":return newScratch("notebook");
- case "new-card":{const title=await askText("知识卡的标题","",{ok:"新建"});if(!title)return;const r=await rpc("doc_create",{kind:"card",title,topic:S.data.active_topic});await refreshState();return openFile(r.path);}
+ case "new-card":{const title=await askText($t("知识卡的标题"),"",{ok:$t("新建")});if(!title)return;const r=await rpc("doc_create",{kind:"card",title,topic:S.data.active_topic});await refreshState();return openFile(r.path);}
  case "open-agent":return openPanel({type:"chat",agent:a.dataset.agent});
  case "open-map":return openPanel({type:"map",topic:S.data.active_topic||null});
  case "open-journal":return openPanel({type:"journal"});
@@ -312,7 +327,7 @@ async function onAction(a){
  case "open-apps":case "app-open":case "app-reload":case "app-stop":case "app-build":case "app-change":case "app-source":return appAction(kind,a);
  case "open-settings":{const page=a.dataset.page,had=findPanel({type:"settings"}),id=openPanel({type:"settings",...(page?{page}:{})});if(had&&page)renderSettings(Dock.els[id],page);return;}
  case "open-file":return openFile(a.dataset.path||a.dataset.id,{line:a.dataset.line?Number(a.dataset.line):null,highlight:a.dataset.highlight||null});
- case "open-doc":{const d=(S.data.docs||[]).find(x=>x.id===a.dataset.id);if(d)return openFile(d.path);return toast("找不到这个文档，它可能已经被删除","error");}
+ case "open-doc":{const d=(S.data.docs||[]).find(x=>x.id===a.dataset.id);if(d)return openFile(d.path);return toast($t("找不到这个文档，它可能已经被删除"),"error");}
  case "open-dir":Side.open.add(a.dataset.path);return showList("files");
  case "open-thread":return openPanel({type:"chat",agent:a.dataset.agent||"tutor",thread:a.dataset.thread});
  case "open-practice":return openPractice(a.dataset.id);
@@ -324,10 +339,10 @@ async function onAction(a){
  case "files-view":S.ui.files_view=S.ui.files_view==="folders"?"":"folders";saveUi();return renderSide();
  case "files-fold":{const k=a.dataset.key,on=a.dataset.on==="1";Side.fileOpen[on?"delete":"add"](k);Side.fileShut[on?"add":"delete"](k);return renderSide();}
  case "tree-toggle":{const p=a.dataset.path;Side.open.has(p)?Side.open.delete(p):Side.open.add(p);return renderSide();}
- case "project-add":{const path=await pickPath({mode:"dir",title:"挂载一个本地目录",ok:"挂载",hint:"挂载后你能读写，AI 只读"});if(!path)return;const r=await rpc("project_add",{path},0);if(r){delete Side.entries[""];await refreshState();renderSide();toast("已挂载 "+r.name+"：你能读写，AI 只读");}return;}
- case "project-remove":if(!await ask("目录本身不会被改动。",{title:"取消挂载这个目录？",ok:"取消挂载",cancel:"留着"}))return;await rpc("project_remove",{id:a.dataset.id});delete Side.entries[""];await refreshState();return renderSide();
- case "import-md":{const folder=await pickPath({mode:"dir",title:"从已有的 Markdown 笔记目录导入",ok:"导入",hint:"只复制，原来的文件不动"});if(!folder)return;const r=await rpc("import_markdown",{folder},0);if(r){toast("导入了 "+r.count+" 篇");sideChanged(["notes/x"]);refreshState();}return;}
- case "export":{const path=await pickPath({mode:"save",title:"导出学习库",ok:"导出",name:"lattice-learning.zip",ext:".zip",hint:"一个 ZIP，不含 API Key"});if(!path)return;const r=await rpc("export",{path},0);if(r)toast("已导出到 "+r);return;}
+ case "project-add":{const path=await pickPath({mode:"dir",title:$t("挂载一个本地目录"),ok:$t("挂载"),hint:$t("挂载后你能读写，AI 只读")});if(!path)return;const r=await rpc("project_add",{path},0);if(r){delete Side.entries[""];await refreshState();renderSide();toast($t("已挂载 {0}：你能读写，AI 只读",r.name));}return;}
+ case "project-remove":if(!await ask($t("目录本身不会被改动。"),{title:$t("取消挂载这个目录？"),ok:$t("取消挂载"),cancel:$t("留着")}))return;await rpc("project_remove",{id:a.dataset.id});delete Side.entries[""];await refreshState();return renderSide();
+ case "import-md":{const folder=await pickPath({mode:"dir",title:$t("从已有的 Markdown 笔记目录导入"),ok:$t("导入"),hint:$t("只复制，原来的文件不动")});if(!folder)return;const r=await rpc("import_markdown",{folder},0);if(r){toast($t("导入了 {0} 篇",r.count));sideChanged(["notes/x"]);refreshState();}return;}
+ case "export":{const path=await pickPath({mode:"save",title:$t("导出学习库"),ok:$t("导出"),name:"lattice-learning.zip",ext:".zip",hint:$t("一个 ZIP，不含 API Key")});if(!path)return;const r=await rpc("export",{path},0);if(r)toast($t("已导出到")+" "+r);return;}
  case "chat-send":return chatSend(pid);
  case "chat-starter":return chatSend(pid,a.dataset.say);
  case "chat-retry":return chatRetry(pid);
@@ -335,7 +350,7 @@ async function onAction(a){
  case "chat-topic-menu":return topicMenu(pid,a);
  case "chat-attach":return attachMenu(pid,a);
  case "chat-attach-add":{const st=Chat[pid];if(st&&!st.attach.some(x=>x.path===a.dataset.path))st.attach.push({path:a.dataset.path});updateComposer(pid);return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
- case "chat-attach-pick":{const picked=await pickPath({mode:"files",title:"附上文件",ok:"附上",hint:"会复制进学习库的 data/附件/，原文件不动"});if(!picked?.length)return;const paths=await rpc("attach_files",{paths:picked},0);const st=Chat[pid];if(!paths?.length||!st)return;
+ case "chat-attach-pick":{const picked=await pickPath({mode:"files",title:$t("附上文件"),ok:$t("附上"),hint:$t("会复制进学习库的 data/附件/，原文件不动")});if(!picked?.length)return;const paths=await rpc("attach_files",{paths:picked},0);const st=Chat[pid];if(!paths?.length||!st)return;
   paths.forEach(x=>{if(!st.attach.some(y=>y.path===x))st.attach.push({path:x});});await refreshState();updateComposer(pid);return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
  case "chat-attach-sel":{const st=Chat[pid];if(st&&Sel.text){st.quote=Sel.text;st.quoteAt=Sel.anchor;clearSelection();updateComposer(pid);}return Dock.els[pid]?.querySelector(".composer textarea")?.focus();}
  case "quote-go":{const m=Chat[pid]?.data?.messages.find(x=>String(x.id)===a.dataset.mid),q=m?.meta?.anchor;if(q)return anchorGo(q.source,{...q,text:m.meta.selection});return;}
@@ -345,8 +360,8 @@ async function onAction(a){
   if(Menus.reopen)Menus.reopen();return;}
  case "chat-model":return modelMenu(pid,a.closest(".menu")?Dock.els[pid]?.querySelector(".model-tag")||a:a);
  case "chat-model-set":return setChatModel(pid,a.dataset.api,a.dataset.model);
- case "chat-model-other":{const m=chatModel(pid),name=await askText("模型名",m.model,{hint:"用「"+((S.config?.apis||[]).find(x=>x.id===m.api)?.label||m.api)+"」这个连接",ok:"换上"});if(name&&name.trim())setChatModel(pid,m.api,name.trim());return;}
- case "msg-copy":{const m=Chat[pid]?.data?.messages.find(x=>String(x.id)===a.dataset.mid);if(m){await writeClipboard(m.content);toast("已复制");}return;}
+ case "chat-model-other":{const m=chatModel(pid),name=await askText($t("模型名"),m.model,{hint:$t("用「{0}」这个连接",((S.config?.apis||[]).find(x=>x.id===m.api)?.label||m.api)),ok:$t("换上")});if(name&&name.trim())setChatModel(pid,m.api,name.trim());return;}
+ case "msg-copy":{const m=Chat[pid]?.data?.messages.find(x=>String(x.id)===a.dataset.mid);if(m){await writeClipboard(m.content);toast($t("已复制"));}return;}
  case "zoom-step":{const dir=Number(a.dataset.dir),again=Menus.reopen;stepZoom(pid,dir||0);if(dir&&again)again();return;}
  case "chat-more":return chatMoreMenu(pid,a);
  case "view-step":case "view-set":case "view-reset":case "ui-set":case "ui-step":{
@@ -365,57 +380,57 @@ async function onAction(a){
   }
   if(again)again();return;
  }
- case "chat-copy-all":await writeClipboard(conversationMarkdown(pid));return toast("整段对话已复制（Markdown）");
+ case "chat-copy-all":await writeClipboard(conversationMarkdown(pid));return toast($t("整段对话已复制（Markdown）"));
  case "chat-save-note":{const st=Chat[pid],topic=st.data?.head?.topic||null;
-  const r=await rpc("doc_create",{kind:"note",title:"对话 · "+(topic?topicTitle(topic):agentTitle(Dock.panels[pid].agent))+" · "+fmtDate(new Date().toISOString()),topic,body:conversationMarkdown(pid)});
+  const r=await rpc("doc_create",{kind:"note",title:$t("对话 ·")+" "+(topic?topicTitle(topic):agentTitle(Dock.panels[pid].agent))+" · "+fmtDate(new Date().toISOString()),topic,body:conversationMarkdown(pid)});
   await refreshState();return openFile(r.path);}
- case "zoom-reset-all":Object.keys(Dock.panels).forEach(x=>{if(Dock.panels[x].zoom)setZoom(x,null);});return toast("所有窗口都回到了各自面板的默认大小");
+ case "zoom-reset-all":Object.keys(Dock.panels).forEach(x=>{if(Dock.panels[x].zoom)setZoom(x,null);});return toast($t("所有窗口都回到了各自面板的默认大小"));
  case "chat-cancel":return rpc("cancel",{thread:Chat[pid].thread});
  case "chat-task":return chatSend(pid,"",{task:a.dataset.task});
  case "session-kept":{const k=a.dataset.key;Side.archOpen.has(k)?Side.archOpen.delete(k):Side.archOpen.add(k);return renderSide();}
  case "session-new":case "session-open":case "session-more":case "session-rename":case "session-archive":case "session-delete":return sessionAction(kind,a);
- case "chat-new":{if(SESSION_AGENTS.has(Dock.panels[pid]?.agent))return sessionAction("session-new",a);if(!await ask("之前的对话还在，可以在学习库的 threads/ 里找到，也能被搜索到。",{title:"开一段新会话？",ok:"开新会话"}))return;await rpc("thread_new",{agent:Dock.panels[pid].agent,topic:S.data.active_topic||""});return loadChat(pid,false);}
+ case "chat-new":{if(SESSION_AGENTS.has(Dock.panels[pid]?.agent))return sessionAction("session-new",a);if(!await ask($t("之前的对话还在，可以在学习库的 threads/ 里找到，也能被搜索到。"),{title:$t("开一段新会话？"),ok:$t("开新会话")}))return;const p=Dock.panels[pid];await rpc("thread_new",{agent:p.agent,topic:(p.space?topicOf(p.space):S.data.active_topic)||"",...(p.space?{space:p.space}:{})});return loadChat(pid,false);}
  case "practice-start":return startPractice(pid,a.dataset.mid);
  case "practice-end":return endPractice(pid);
  case "message-card":return messageToCard(pid,a.dataset.mid);
  case "message-escalate":return escalate(pid,a.dataset.mid);
- case "handoff":{let tutor=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="tutor"&&!Dock.panels[x].thread);if(!tutor)tutor=openPanel({type:"chat",agent:"tutor"});else activate(tutor);
-  return setTimeout(()=>chatSend(tutor,"快答刚把一个问题转交给你了，请接住它。"),300);}
- case "undo":{await rpc("undo",{id:a.dataset.id});toast("已撤销");await refreshState();refreshChats();return renderOrganizer();}
+ case "handoff":{let tutor=followingPanel("tutor");if(!tutor)tutor=openPanel({type:"chat",agent:"tutor"});else activate(tutor);
+  return setTimeout(()=>chatSend(tutor,$t("快答刚把一个问题转交给你了，请接住它。")),300);}
+ case "undo":{await rpc("undo",{id:a.dataset.id});toast($t("已撤销"));await refreshState();refreshChats();return renderOrganizer();}
  case "suggestion":{await rpc("suggestion",{thread:Chat[pid].thread,message:Number(a.dataset.mid),id:a.dataset.sid,decision:a.dataset.decision});return loadChat(pid);}
  case "quiz-answer":{
   const block=a.closest(".lblock"),choice=block.querySelector("input[type=radio]:checked"),free=block.querySelector("textarea");
-  const answer=(choice?.value||free?.value||"").trim();if(!answer)return toast("先写下你的回答");
+  const answer=(choice?.value||free?.value||"").trim();if(!answer)return toast($t("先写下你的回答"));
   const [message,index]=a.dataset.key.split(":");const chatPid=a.closest(".panel").dataset.pid,src=Chat[chatPid],question=block.dataset.question||"";
   const sent={message:Number(message),block:Number(index),question};
-  if(Dock.panels[chatPid]?.agent!=="tutor")return chatSend(chatPid,"我的回答："+answer,{answer:sent,selection:""});
+  if(Dock.panels[chatPid]?.agent!=="tutor")return chatSend(chatPid,$t("我的回答：")+answer,{answer:sent,selection:""});
   // The tutor's small questions are checked by the quick-answer side, so the explanation is not interrupted.
-  let side=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="flash"&&!Dock.panels[x].thread);
+  let side=spaceFlash();
   if(!side)side=openPanel({type:"chat",agent:"flash"});else if(!Dock.els[side]?.offsetParent)activate(side);
   for(let i=0;i<60&&!Chat[side]?.data;i++)await new Promise(r=>setTimeout(r,100));
-  if(!Chat[side]?.data)return toast("快答还没打开，等一下再交","error");
-  await chatSend(side,"我的回答："+answer,{answer:{...sent,thread:src.thread},selection:"主会话的小问题："+shorten(question.replace(/[#*`]/g,""),400)});
+  if(!Chat[side]?.data)return toast($t("快答还没打开，等一下再交"),"error");
+  await chatSend(side,$t("我的回答：")+answer,{answer:{...sent,thread:src.thread},selection:$t("主会话的小问题：")+shorten(question.replace(/[#*`]/g,""),400)});
   src.data.answers={...(src.data.answers||{}),[a.dataset.key]:answer};renderChat(chatPid);
-  return toast("交给快答看了，主会话接着讲");
+  return;
  }
  case "survey-send":case "survey-skip":{
   // The whole survey goes back to the conversation that asked, as one message; skipping says so, and it teaches on.
   const block=a.closest(".lblock"),info=JSON.parse(block.dataset.survey||"{}"),[message,index]=a.dataset.key.split(":"),chatPid=a.closest(".panel").dataset.pid;
-  const sent={message:Number(message),block:Number(index),question:info.title||"摸底问卷"};
-  if(kind==="survey-skip")return chatSend(chatPid,"先不填问卷了，直接讲吧。",{answer:sent,selection:""});
+  const sent={message:Number(message),block:Number(index),question:info.title||$t("摸底问卷")};
+  if(kind==="survey-skip")return chatSend(chatPid,$t("先不填问卷了，直接讲吧。"),{answer:sent,selection:""});
   const lines=[...block.querySelectorAll(".survey-qs>li")].map((li,i)=>{
    const picked=[...li.querySelectorAll("input:checked")].map(x=>x.value),free=li.querySelector("textarea")?.value.trim();
-   return (i+1)+". "+String(info.questions?.[i]||"").replace(/\s+/g," ")+"\n   → "+(picked.length?picked.join("、"):free||"（没填）");
+   return (i+1)+". "+String(info.questions?.[i]||"").replace(/\s+/g," ")+"\n   → "+(picked.length?picked.join("、"):free||$t("（没填）"));
   });
-  if(lines.every(x=>x.endsWith("（没填）")))return toast("至少答一题，或者点「跳过，直接讲」");
-  return chatSend(chatPid,"我的摸底问卷：\n\n"+lines.join("\n"),{answer:sent,selection:""});
+  if(lines.every(x=>x.endsWith("（没填）")))return toast($t("至少答一题，或者点「跳过，直接讲」"));
+  return chatSend(chatPid,$t("我的摸底问卷：")+"\n\n"+lines.join("\n"),{answer:sent,selection:""});
  }
  case "card-reveal":{const card=a.closest(".mini-card");card.querySelector(".mini-answer").hidden=false;a.parentElement.remove();return;}
- case "code-copy":{const n=el("#"+a.dataset.target);if(n){await writeClipboard(n.textContent);toast("已复制");}return;}
+ case "code-copy":{const n=el("#"+a.dataset.target);if(n){await writeClipboard(n.textContent);toast($t("已复制"));}return;}
  case "code-run":{const n=el("#"+a.dataset.target);if(!n)return;const r=await rpc("run",{code:n.textContent,lang:a.dataset.lang});snippetRuns[a.dataset.target]={run:r.run,outputs:[]};
-  const box=el('[data-snippet="'+a.dataset.target+'"]');if(box)box.innerHTML='<div class="run-head"><span class="run-state s-running">运行中…</span></div>';return;}
+  const box=el('[data-snippet="'+a.dataset.target+'"]');if(box)box.innerHTML="<div class=\"run-head\"><span class=\"run-state s-running\">"+$t("运行中…")+"</span></div>";return;}
  case "code-take":{const n=el("#"+a.dataset.target);if(!n)return;const ext=CODE_EXT[(a.dataset.lang||"").toLowerCase()]||".txt";
-  const name=await askText("存成哪个文件","片段-"+new Date().toLocaleTimeString("zh-CN",{hour12:false}).replace(/:/g,"")+ext,{hint:"放在 code/ 里",selectStem:true,ok:"存下"});if(!name)return;
+  const name=await askText($t("存成哪个文件"),$t("片段-")+new Date().toLocaleTimeString(LOCALE,{hour12:false}).replace(/:/g,"")+ext,{hint:$t("放在 code/ 里"),selectStem:true,ok:$t("存下")});if(!name)return;
   const r=await rpc("file_create",{folder:"code",name,content:n.textContent});await refreshState();return openFile(r.path);}
  case "quote-clear":if(Chat[pid]){Chat[pid].quote="";Chat[pid].quoteAt=null;}return updateComposer(pid);
  case "ask-flash":case "ask-tutor":{
@@ -431,9 +446,9 @@ async function onAction(a){
  case "topic-fold":return topicFold(a.dataset.id);
  case "topic-row":{if(a.dataset.id===(S.data.active_topic||""))return topicFold(a.dataset.id);Side.topicShut.delete(a.dataset.id);}
  // falls through: learning in another topic
- case "topic-focus":{await rpc("focus",{topic:a.dataset.id});await refreshState();followingPanels().forEach(x=>loadChat(x));
-  let tutor=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="tutor"&&!Dock.panels[x].thread);if(!tutor)openPanel({type:"chat",agent:"tutor"});else activate(tutor);return;}
- case "topic-delete":{if(!await ask("里面的卡片、笔记和对话都会留下，只是不再属于它。主题文件会留在学习库的历史里。",{title:"删除这个主题？",...{danger:true,ok:"删除"}}))return;
+ case "topic-focus":{await rpc("focus",{topic:a.dataset.id});setTopicOf(Dock.space,a.dataset.id);await refreshState();followingPanels().forEach(x=>loadChat(x));
+  const tutor=followingPanel("tutor");if(!tutor)openPanel({type:"chat",agent:"tutor"});else activate(tutor);return;}
+ case "topic-delete":{if(!await ask($t("里面的卡片、笔记和对话都会留下，只是不再属于它。主题文件会留在学习库的历史里。"),{title:$t("删除这个主题？"),...{danger:true,ok:$t("删除")}}))return;
   await rpc("topic_delete",{id:a.dataset.id});const p=a.closest(".panel")?.dataset.pid;if(p)await closePanel(p);await refreshState();return followingPanels().forEach(x=>loadChat(x));}
  case "version-diff":case "version-restore":return versionAction(kind,a);
  case "file-history":return showHistory(pid);
@@ -454,20 +469,20 @@ async function openRef(ref){
  if(kind==="practice")return openPractice(id);
  const d=(S.data.docs||[]).find(x=>x.id===id);if(d)return openFile(d.path);
  await refreshState();const again=(S.data.docs||[]).find(x=>x.id===id);if(again)return openFile(again.path);
- toast("找不到它了，可能已经被撤销或删除","error");
+ toast($t("找不到它了，可能已经被撤销或删除"),"error");
 }
 /* ---- selection: ask about anything selected ----------------------------------------------------------------------- */
-function hidePop(){el("#sel-pop")?.remove();}
+export function hidePop(){el("#sel-pop")?.remove();}
 // Hands text to that conversation's input, with where it came from, and waits for the learner's own question.
-function askAbout(agent,text,anchor){
- let target=Object.keys(Chat).find(x=>Dock.panels[x]?.agent===agent&&!Dock.panels[x].thread);
+export function askAbout(agent,text,anchor){
+ let target=followingPanel(agent);
  if(!target)target=openPanel({type:"chat",agent});else activate(target);
  const go=()=>{if(!Chat[target]?.data)return setTimeout(go,150);Chat[target].quote=text;Chat[target].quoteAt=anchor;updateComposer(target);Dock.els[target]?.querySelector(".composer textarea")?.focus();};
  go();
 }
-function showSelPop(rect){
+export function showSelPop(rect){
  if(!rect||S.ui.selection_popup===false)return;hidePop();
- const pop=h('<div id="sel-pop">'+(Sel.anchor?'<button data-action="mark-add">'+svg("marker",13)+' 高亮</button><button data-action="mark-note">'+svg("edit",13)+' 批注</button>':"")+'<button data-action="ask-flash">'+svg("spark",13)+' 问快答</button><button data-action="ask-tutor">'+svg("bot",13)+' 问主会话</button></div>');
+ const pop=h("<div id=\"sel-pop\">"+(Sel.anchor?"<button data-action=\"mark-add\">"+svg("marker",13)+" "+$t("高亮")+"</button><button data-action=\"mark-note\">"+svg("edit",13)+" "+$t("批注")+"</button>":"")+"<button data-action=\"ask-flash\">"+svg("spark",13)+" "+$t("问快答")+"</button><button data-action=\"ask-tutor\">"+svg("bot",13)+" "+$t("问主会话")+"</button></div>");
  document.body.appendChild(pop);
  const x=Math.min(Math.max(8,rect.left+rect.width/2-pop.offsetWidth/2),innerWidth-pop.offsetWidth-8),y=rect.top-pop.offsetHeight-8;
  pop.style.left=x+"px";pop.style.top=(y<8?rect.bottom+8:y)+"px";
@@ -503,7 +518,7 @@ function initInteractions(){
    // A / on its own picks a skill for this message.
    if(t.value==="/"){t.value="";if(Chat[pid])Chat[pid].input="";safe(()=>skillMenu(pid,t.closest(".capsule")||t));}
    return;}
-  if(t.dataset.uiRange){S.ui[t.dataset.uiRange]=Number(t.value);const out=t.parentElement.querySelector("[data-range-out]");if(out)out.textContent=t.value+" 字";applyUi();return saveUi();}
+  if(t.dataset.uiRange){S.ui[t.dataset.uiRange]=Number(t.value);const out=t.parentElement.querySelector("[data-range-out]");if(out)out.textContent=t.value+" "+$t("字");applyUi();return saveUi();}
   if(t.dataset.apiQuery!==undefined){Settings.apiQuery=t.value;const n=t.closest(".panel");renderSettings(n,"apis").then(()=>{const f=n.querySelector("[data-api-query]");if(f){f.focus();f.setSelectionRange(f.value.length,f.value.length);}});return;}
   if(t.closest?.(".panel-settings")&&settingsAutosave(t,false))return;
   if(t.dataset.sideInput&&sideInput(t))return;
@@ -539,9 +554,9 @@ function initInteractions(){
   if(fileKey(e))return;
   if(mod&&e.key.toLowerCase()==="k"){e.preventDefault();palette();return;}
   if(mod&&e.key.toLowerCase()==="o"){e.preventDefault();switcher();return;}
-  if(mod&&e.key.toLowerCase()==="s"){e.preventDefault();safe(async()=>{await flushAll();toast("已保存");});return;}
+  if(mod&&e.key.toLowerCase()==="s"){e.preventDefault();safe(async()=>{await flushAll();toast($t("已保存"));});return;}
   if(mod&&e.key.toLowerCase()==="n"){e.preventDefault();safe(()=>newScratch("note"));return;}
-  if(mod&&e.key.toLowerCase()==="j"){e.preventDefault();const f=Object.keys(Chat).find(x=>Dock.panels[x]?.agent==="flash")||openPanel({type:"chat",agent:"flash"});activate(f);setTimeout(()=>Dock.els[f]?.querySelector(".composer textarea")?.focus(),50);return;}
+  if(mod&&e.key.toLowerCase()==="j"){e.preventDefault();const f=spaceFlash()||openPanel({type:"chat",agent:"flash"});activate(f);setTimeout(()=>Dock.els[f]?.querySelector(".composer textarea")?.focus(),50);return;}
   if(mod&&e.key.toLowerCase()==="b"){e.preventDefault();setSideOpen(!sideOpen());return;}
   if(mod&&e.shiftKey&&!e.altKey&&/^Digit[1-9]$/.test(e.code)){const sp=visibleSpaces()[Number(e.code.slice(5))-1];if(sp){e.preventDefault();switchSpace(sp.id);}return;}
   if(mod&&!e.altKey&&!e.shiftKey&&/^[1-9]$/.test(e.key)){const k=Object.keys(SIDE_SECTIONS)[Number(e.key)-1];if(k){e.preventDefault();showList(k);}return;}
@@ -562,34 +577,43 @@ function initInteractions(){
  document.addEventListener("mouseup",e=>{if(e.button!==2)setTimeout(()=>onSelect(e),0);});
  document.addEventListener("scroll",()=>{hidePop();reportScreen();},true);
  addEventListener("resize",reportScreen);
+ // The window in front says which state is in front, and so which topic is being learned.
+ addEventListener("focus",topicHere);
  document.addEventListener("focusin",()=>reportScreen());
  setInterval(trackDwell,2000);
  setInterval(()=>safe(flushAll),25000);
 }
 async function boot(){
  try{
-  if(typeof qt==="undefined"||!qt.webChannelTransport)throw new Error("必须由 Lattice 桌面程序启动（缺少本地 Qt WebChannel）");
+  if(typeof qt==="undefined"||!qt.webChannelTransport)throw new Error($t("必须由 Lattice 桌面程序启动（缺少本地 Qt WebChannel）"));
   new QWebChannel(qt.webChannelTransport,async channel=>{
    try{
     S.bridge=channel.objects.backend;
     S.bridge.event.connect(raw=>safe(()=>onEvent(JSON.parse(raw))));
-    S.data=await rpc("bootstrap");S.config=S.data.config;S.ui=S.config.ui;S.version=S.data.version;
-    el("#app").innerHTML='<div id="shell"><nav id="activity"></nav><aside id="side"></aside><div id="side-gutter"></div><div id="dock-wrap"><div id="dock"></div><div id="floats"></div></div></div>'+
-     '<footer id="status"></footer><div id="dock-keep"></div><div id="organizer" hidden></div><div id="drop-mark"></div><datalist id="doc-titles"></datalist>';
+    S.data=await rpc("bootstrap");S.config=S.data.config;S.ui=S.config.ui;S.version=S.data.version;S.states=S.data.states||[];
+    el("#app").innerHTML="<div id=\"shell\"><nav id=\"activity\" aria-label=\""+$t("左栏的列表")+"\"></nav><aside id=\"side\" aria-label=\""+$t("列表")+"\"></aside><div id=\"side-gutter\"></div><main id=\"dock-wrap\"><div id=\"dock\"></div><div id=\"floats\"></div></main></div><footer id=\"status\" aria-label=\""+$t("状态栏")+"\"></footer><div id=\"dock-keep\"></div><div id=\"organizer\" hidden></div><div id=\"drop-mark\"></div><datalist id=\"doc-titles\"></datalist>";
     applyUi();initInteractions();initSideResize();
     if(WINDOW){
+     const params=await rpc("window_params",{window:WINDOW});
+     if(params?.state&&!params.type){
+      // A whole working state: the whole interface, for that state.
+      Dock.own=params.state;document.body.classList.add("state-window");
+      const unit=params.unit||{};
+      loadLayout({panels:unit.panels||{},spaces:unit.layout?.root?{[Dock.own]:unit.layout}:{},space:Dock.own});
+      await refreshState();renderSide();reportScreen();topicHere();return;
+     }
      // A separate window: just its panel, filling it.
      document.body.classList.add("separate-window");
-     const params=await rpc("window_params",{window:WINDOW}),sp=visibleSpaces()[0].id,pid="w"+WINDOW.slice(0,10);
-     if(!params){el("#dock-wrap").innerHTML=emptyState("layout","这个窗口里的面板已经放回主窗口了","可以关掉这个窗口。");return;}
+     const sp=visibleSpaces()[0].id,pid="w"+WINDOW.slice(0,10);
+     if(!params){el("#dock-wrap").innerHTML=emptyState("layout",$t("这个窗口里的面板已经放回主窗口了"),$t("可以关掉这个窗口。"));return;}
      loadLayout({panels:{[pid]:params},spaces:{[sp]:{root:stackNode([pid]),floats:[]}},space:sp});
      await refreshState();refreshTab(pid);reportScreen();return;
     }
     loadLayout(S.data.layout);for(const w of S.data.returned_windows||[])fromWindow(w.params,w.origin||{});
-    await refreshState();renderSide();reportScreen();
-    if(S.data.migrated)toast("已把原来的学习数据迁移成文件，放在 "+S.data.vault);
-    if(S.data.problems?.length)console.warn("读不了的文件",S.data.problems);
-   }catch(err){console.error(err);el("#app").innerHTML='<div class="boot">初始化失败：'+esc(err.message)+'<br/><button class="btn" onclick="location.reload()">重试</button></div>';}
+    await refreshState();renderSide();reportScreen();topicHere();
+    if(S.data.migrated)toast($t("已把原来的学习数据迁移成文件，放在")+" "+S.data.vault);
+    if(S.data.problems?.length)console.warn($t("读不了的文件"),S.data.problems);
+   }catch(err){console.error(err);el("#app").innerHTML="<div class=\"boot\">"+$t("初始化失败：")+esc(err.message)+"<br/><button class=\"btn\" onclick=\"location.reload()\">"+$t("重试")+"</button></div>";}
   });
  }catch(e){el("#app").innerHTML='<div class="boot">'+esc(e.message)+'</div>';}
 }

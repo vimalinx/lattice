@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 import sys
 
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
+from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 from PySide6.QtWebChannel import QWebChannel
@@ -15,9 +16,10 @@ from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngin
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from lattice.bridge import APP_HOME, Bridge
-from lattice import __version__, appscheme
+from lattice import __version__, appscheme, i18n
 
 ROOT=appscheme.host.APP
+LOG=logging.getLogger("lattice")
 # Apps get a scheme of their own; it has to be known before the application object exists.
 appscheme.register()
 
@@ -38,6 +40,8 @@ class LatticePage(QWebEnginePage):
     def javaScriptConsoleMessage(self,level,message,line,source):
         if level==QWebEnginePage.JavaScriptConsoleMessageLevel.ErrorMessageLevel:
             print(f"[Lattice JS] {message} @ {source}:{line}",file=sys.stderr)
+            # Stderr goes nowhere in a packaged build; the log is where a report of a broken page can be read.
+            LOG.error("page: %s @ %s:%s",message,source,line)
 
 
 class WindowBridge(QObject):
@@ -67,8 +71,8 @@ def secure(page):
 
 
 class SeparateWindow(QMainWindow):
-    """One panel in a window of its own, to make it big or put it on another screen: Lattice's page showing just that
-    panel, on the same bridge. Closing it puts the panel back into the main window."""
+    """One panel, or one whole working state, in a window of its own, to make it big or put it on another screen:
+    Lattice's page showing just that, on the same bridge. Closing it puts it back into the main window."""
     def __init__(self,main,ident,title):
         super().__init__()
         self.main,self.ident,self.quitting,self.flushed=main,ident,False,False
@@ -85,7 +89,7 @@ class SeparateWindow(QMainWindow):
         self.page.setWebChannel(self.channel)
         secure(self.page)
         url=QUrl.fromLocalFile(str(ROOT/"ui"/"index.html"))
-        url.setQuery("window="+ident)
+        url.setQuery(f"window={ident}&lang={i18n.LANG}")
         self.view.load(url)
         self.resize(main.size())
 
@@ -97,7 +101,7 @@ class SeparateWindow(QMainWindow):
             # What is being typed there is written out first; then the panel goes back.
             self.flushed=True
             event.ignore()
-            self.page.runJavaScript("typeof flushAll==='function'&&flushAll()",lambda _:QTimer.singleShot(400,self.close))
+            self.page.runJavaScript("window.flushLayout?.();window.flushAll?.()",lambda _:QTimer.singleShot(400,self.close))
             return
         try:
             self.main.bridge.event.disconnect(self.relay.event)
@@ -140,7 +144,10 @@ class MainWindow(QMainWindow):
         self.channel.registerObject("backend",self.bridge)
         self.page.setWebChannel(self.channel)
         secure(self.page)
-        self.view.load(QUrl.fromLocalFile(str(ROOT/"ui"/"index.html")))
+        url=QUrl.fromLocalFile(str(ROOT/"ui"/"index.html"))
+        # The page's language comes with its address, so text the modules make as they load has it too.
+        url.setQuery("lang="+i18n.LANG)
+        self.view.load(url)
         if screenshot:
             self.view.loadFinished.connect(lambda ok:QTimer.singleShot(3500,lambda:self.save_screenshot(screenshot)))
 
@@ -153,6 +160,13 @@ class MainWindow(QMainWindow):
         window=SeparateWindow(self,ident,title)
         self.windows[ident]=window
         window.show()
+
+    def raise_window(self,ident):
+        if ident in self.windows:
+            window=self.windows[ident]
+            window.showNormal() if window.isMinimized() else window.show()
+            window.raise_()
+            window.activateWindow()
 
     def close_window(self,ident):
         if ident in self.windows:

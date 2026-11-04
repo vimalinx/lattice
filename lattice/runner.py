@@ -8,6 +8,8 @@ permissions; a run started by an agent goes through the sandbox.
 """
 from __future__ import annotations
 
+from .i18n import tr
+
 import base64
 from pathlib import Path
 import queue
@@ -61,9 +63,9 @@ def missing_tool(template, python):
 
 def tool_hint(program):
     if program == "rustc":
-        return "系统里找不到 rustc。安装 Rust：curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+        return tr("系统里找不到 rustc。安装 Rust：curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh")
     package = INSTALL_HINTS.get(program, program)
-    return f"系统里找不到 {program}。装好以后再运行（Arch：pacman -S {package}；Debian/Ubuntu：apt install {package}）。"
+    return tr("系统里找不到 {0}。装好以后再运行（Arch：pacman -S {1}；Debian/Ubuntu：apt install {2}）。", program, package, package)
 
 
 def command_for(template, path, python, scratch):

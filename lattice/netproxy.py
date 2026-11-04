@@ -6,6 +6,8 @@ git, npm and the rest use when HTTP(S)_PROXY is set. What was reached, and what 
 command's result can say where it went."""
 from __future__ import annotations
 
+from .i18n import tr
+
 import asyncio
 from collections import deque
 import logging
@@ -35,7 +37,7 @@ class NetProxy:
                 ready = threading.Event()
                 threading.Thread(target=self._run, args=(ready,), daemon=True, name="lattice-netproxy").start()
                 if not ready.wait(10):
-                    raise RuntimeError("沙箱的联网代理没有启动")
+                    raise RuntimeError(tr("沙箱的联网代理没有启动"))
         return self.path
 
     def _run(self, ready):

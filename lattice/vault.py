@@ -7,6 +7,8 @@ metadata.lattice, conversations and the journal as JSON lines. Any other file
 """
 from __future__ import annotations
 
+from .i18n import tr
+
 from datetime import datetime
 import json
 import os
@@ -21,7 +23,9 @@ from . import host
 VAULT_PATH = Path(os.environ.get("LATTICE_VAULT") or Path.home() / "Lattice")
 # Markdown kinds take their meaning from the folder they sit in; everything else is a plain file.
 MD_KINDS = {"topics": "topic", "cards": "card", "lessons": "lesson", "notes": "note", "insights": "insight"}
-FOLDERS = (*MD_KINDS, "notebooks", "code", "data", "envs", "threads", "journal", "annotations")
+# The working states, a file each (states.py).
+STATES = "states"
+FOLDERS = (*MD_KINDS, "notebooks", "code", "data", "envs", "threads", "journal", "annotations", STATES)
 SKIP_DIRS = {".git", ".lattice", "__pycache__", "node_modules", ".venv", "venv", "target", ".ipynb_checkpoints"}
 IGNORED = """.lattice/index.db*
 .lattice/cache/
@@ -118,7 +122,7 @@ class Vault:
     def path(self, rel):
         target = (self.root / rel).resolve()
         if not target.is_relative_to(self.root.resolve()):
-            raise VaultError("路径不在学习库内：" + str(rel))
+            raise VaultError(tr("路径不在学习库内：") + str(rel))
         return target
 
     def rel(self, path):
@@ -131,7 +135,7 @@ class Vault:
             rel = f"{folder}/{base}{'' if n == 1 else f' ({n})'}{ext}"
             if rel == current or not self.path(rel).exists():
                 return rel
-        raise VaultError("同名文件太多")
+        raise VaultError(tr("同名文件太多"))
 
     def _stat(self, rel):
         st = self.path(rel).stat()
@@ -191,7 +195,7 @@ class Vault:
             return new
         target = self.path(new)
         if target.exists():
-            raise VaultError("目标已存在：" + new)
+            raise VaultError(tr("目标已存在：") + str(new))
         target.parent.mkdir(parents=True, exist_ok=True)
         os.replace(self.path(old), target)
         self.known.pop(old, None)
@@ -229,25 +233,39 @@ class Vault:
         self.write_text(rel, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records))
 
     # ---- finding changes ----------------------------------------------------------
+    def _entries(self, base, prefix):
+        """Each file under a folder as its path in the vault and its directory entry. This runs every two seconds on the
+        GUI thread, so it keeps to strings, and to the stat the listing already did."""
+        try:
+            with os.scandir(base) as listing:
+                entries = sorted(listing, key=lambda e: e.name)
+        except OSError:
+            return
+        folders = []
+        for entry in entries:
+            name = entry.name
+            if entry.is_dir():
+                if not name.startswith(".") and name not in SKIP_DIRS and not entry.is_symlink():
+                    folders.append(entry)
+            elif not name.startswith(".") and not name.endswith(".tmp") and not entry.is_symlink():
+                yield prefix + name, entry
+        for entry in folders:
+            yield from self._entries(entry.path, prefix + entry.name + "/")
+
     def files(self, folder=""):
-        base = self.path(folder) if folder else self.root
-        for current, dirs, names in os.walk(base):
-            dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS)
-            for name in sorted(names):
-                if not name.startswith(".") and not name.endswith(".tmp"):
-                    path = Path(current) / name
-                    if not path.is_symlink():
-                        yield self.rel(path)
+        for rel, _ in self._entries(self.path(folder) if folder else self.root, folder.rstrip("/") + "/" if folder else ""):
+            yield rel
 
     def scan(self):
         """Files changed, added or removed outside Lattice since we last looked."""
         changed, seen = [], set()
-        for rel in self.files():
+        for rel, entry in self._entries(self.root, ""):
             seen.add(rel)
             try:
-                stat = self._stat(rel)
+                found = entry.stat()
             except OSError:
                 continue
+            stat = found.st_mtime_ns, found.st_size
             if self.known.get(rel) != stat:
                 self.known[rel] = stat
                 changed.append(rel)
@@ -268,7 +286,7 @@ class Vault:
                "-c", "core.quotepath=false", "-c", "core.autocrlf=false", "-c", "core.safecrlf=false", *args]
         result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60, **host.QUIET)
         if check and result.returncode != 0:
-            raise VaultError((result.stderr or result.stdout).strip()[:400] or "git 失败")
+            raise VaultError((result.stderr or result.stdout).strip()[:400] or tr("git 失败"))
         return result.stdout
 
     def changes(self):
@@ -291,6 +309,9 @@ class Vault:
             exclude.parent.mkdir(parents=True, exist_ok=True)
             with exclude.open("a", encoding="utf-8") as f:
                 f.write("".join("/" + rel.replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?").replace("[", "\\[") + "\n" for rel in large))
+        # How the working states are arranged is never part of an edit or an agent's step (undoing one must not move the
+        # windows): it goes into the history on its own.
+        self.commit_only(STATES, "工作状态")
         self.git("add", "-A")
         if not self.git("status", "--porcelain").strip():
             self.pending.clear()
@@ -336,7 +357,7 @@ class Vault:
             target = self.path(rel)
             now_text = target.read_text(encoding="utf-8", errors="replace") if target.exists() else None
             if now_text != self.at(commit, rel):
-                raise VaultError("这一步之后这些内容又被改过，没法自动撤销；可以手动改回去")
+                raise VaultError(tr("这一步之后这些内容又被改过，没法自动撤销；可以手动改回去"))
             before[rel] = self.at(commit + "^", rel)
         for rel, content in before.items():
             if content is None:

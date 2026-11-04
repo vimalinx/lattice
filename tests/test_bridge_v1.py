@@ -92,3 +92,20 @@ def test_agent_tools_refuse_protected_files_and_typing(bridge):
     with pytest.raises(ValueError):
         tools.call(ctx, {"edit"}, "edit", {"file": rel, "edits": [{"old": "x = 1", "new": "x = 2"}], "why": "改成 2"})
     assert l.read_file(rel)["content"] == "x = 1\n"
+
+
+def test_each_working_state_has_its_own_quick_answer(bridge):
+    l = bridge.lattice
+    one, two = l.thread_for("flash", None, "chat"), l.thread_for("flash", None, "cards")
+    assert one != two and l.thread_for("flash", None, "chat") == one
+    assert l.thread_head(two)["space"] == "cards"
+    fresh = bridge.rpc_thread_new("flash", space="cards")["thread"]
+    assert l.thread_for("flash", None, "cards") == fresh and l.thread_for("flash", None, "chat") == one
+
+
+def test_the_quick_answer_from_before_goes_on_in_the_first_state_that_asks(bridge):
+    l = bridge.lattice
+    old = l.thread_for("flash")
+    l.thread_pick(old)
+    assert l.thread_for("flash", None, "chat") == old
+    assert l.thread_for("flash", None, "cards") != old

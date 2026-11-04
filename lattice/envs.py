@@ -8,6 +8,8 @@ every file below it use that environment; otherwise `default` is used.
 """
 from __future__ import annotations
 
+from .i18n import tr
+
 import json
 from pathlib import Path
 import re
@@ -69,7 +71,7 @@ class Envs:
 
     def definition_rel(self, name):
         if not NAME.match(name):
-            raise EnvError("环境名只能用字母、数字、点、下划线和连字符")
+            raise EnvError(tr("环境名只能用字母、数字、点、下划线和连字符"))
         return f"envs/{name}.txt"
 
     def wanted(self, name):
@@ -94,11 +96,11 @@ class Envs:
 
     def _run(self, args, timeout=900):
         if not self.uv:
-            raise EnvError("没有找到 uv。安装方法：curl -LsSf https://astral.sh/uv/install.sh | sh，或用系统包管理器安装 uv")
+            raise EnvError(tr("没有找到 uv。安装方法：curl -LsSf https://astral.sh/uv/install.sh | sh，或用系统包管理器安装 uv"))
         proc = subprocess.run([self.uv, *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
                               stdin=subprocess.DEVNULL, **host.GROUP)
         if proc.returncode != 0:
-            raise EnvError((proc.stderr or proc.stdout).strip()[-1500:] or "uv 失败")
+            raise EnvError((proc.stderr or proc.stdout).strip()[-1500:] or tr("uv 失败"))
         return proc.stdout + proc.stderr
 
     def ensure(self, name, progress=None):
@@ -130,7 +132,7 @@ class Envs:
     def _stream(self, args, timeout, progress):
         """uv with its output read as it comes, so a long install can say how far it is."""
         if not self.uv:
-            raise EnvError("没有找到 uv。安装方法：curl -LsSf https://astral.sh/uv/install.sh | sh，或用系统包管理器安装 uv")
+            raise EnvError(tr("没有找到 uv。安装方法：curl -LsSf https://astral.sh/uv/install.sh | sh，或用系统包管理器安装 uv"))
         proc = subprocess.Popen([self.uv, *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
                                 stdin=subprocess.DEVNULL, **host.GROUP)
         timer = threading.Timer(timeout, proc.kill)
@@ -157,7 +159,7 @@ class Envs:
             timer.cancel()
         out = "".join(lines)
         if code != 0:
-            raise EnvError(("安装超过 %d 分钟，停下了" % (timeout // 60)) if code < 0 else out.strip()[-1500:] or "uv 失败")
+            raise EnvError(("安装超过 %d 分钟，停下了" % (timeout // 60)) if code < 0 else out.strip()[-1500:] or tr("uv 失败"))
         return out
 
     def install(self, name, packages, binary_only=True, progress=None, index_url=None, extra_index_url=None):
@@ -165,7 +167,7 @@ class Envs:
         Large packages (torch with its CUDA libraries is about 3 GB) are given up to an hour; progress gets how far."""
         packages = [str(p).strip() for p in packages if str(p).strip()]
         if not packages or len(packages) > 20 or not all(REQUIREMENT.match(p) for p in packages):
-            raise EnvError("请给出 1～20 个包名（可以带版本，例如 numpy>=2）")
+            raise EnvError(tr("请给出 1～20 个包名（可以带版本，例如 numpy>=2）"))
         self.ensure(name)
         with self.lock(name):
             # Agents never run a package's own build code on this machine: wheels only.

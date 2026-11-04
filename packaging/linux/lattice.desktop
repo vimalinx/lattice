@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Lattice
+Comment=和 AI 一起学东西的本地学习工作台
+Exec=Lattice
+Icon=lattice
+Terminal=false
+Categories=Education;Development;

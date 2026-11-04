@@ -1,0 +1,59 @@
+# Lattice for Linux: the tests and the check of the interface's names, then the build (a folder with Lattice in it, packed
+# as a tar.gz) and a start of the built program that has to draw its window. A tag v* adds it to the release.
+name: Linux
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      QT_QPA_PLATFORM: offscreen
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: What Qt WebEngine needs on a bare system
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libnss3 libxkbcommon0 libdbus-1-3 libasound2t64 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libfontconfig1
+      - run: pip install -r requirements-dev.txt pyinstaller==6.22.3
+      - name: Names in the interface
+        run: npx --yes eslint@9.17.0 --no-config-lookup -c eslint.config.mjs "ui/*.js"
+      - name: Tests
+        run: python -m pytest tests/ -q
+      - name: Build
+        run: |
+          pyinstaller packaging/lattice.spec --noconfirm --distpath dist --workpath packaging/build/pyinstaller
+          cp packaging/linux/lattice.desktop ui/icon.svg dist/Lattice/
+      - name: Start the built program
+        run: |
+          export LATTICE_VAULT="$RUNNER_TEMP/vault" XDG_CONFIG_HOME="$RUNNER_TEMP/config" XDG_DATA_HOME="$RUNNER_TEMP/data"
+          # Offscreen, only software drawing reaches the picture; with the GPU it comes out one flat colour, so its size is checked.
+          QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu dist/Lattice/Lattice --screenshot "$RUNNER_TEMP/lattice.png"
+          test "$(stat -c %s "$RUNNER_TEMP/lattice.png")" -gt 50000
+          test -d "$LATTICE_VAULT/.git"
+      - name: Pack
+        run: |
+          version=$(python -c 'from lattice import __version__; print(__version__)')
+          tar -C dist -czf "Lattice-$version-linux-x64.tar.gz" Lattice
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lattice-linux
+          path: Lattice-*-linux-x64.tar.gz
+      - name: Add to the release
+        if: github.ref_type == 'tag'
+        run: gh release upload "$GITHUB_REF_NAME" Lattice-*-linux-x64.tar.gz --clobber || gh release create "$GITHUB_REF_NAME" Lattice-*-linux-x64.tar.gz --verify-tag

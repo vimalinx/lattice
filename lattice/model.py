@@ -11,6 +11,9 @@ belong to the learner. Agents can read them and never change them.
 """
 from __future__ import annotations
 
+from . import i18n
+from .i18n import tr
+
 from datetime import datetime, timedelta
 import json
 import os
@@ -32,21 +35,24 @@ MINE = "## 我的理解"
 CARD_OWNED = ("stage", "due", "reviews")
 # Journal entries the agents may write with `record`; everything else is written by Lattice itself.
 AGENT_RECORDS = {"judged", "explained", "detour", "bridged"}
-RULES = Path(__file__).with_name("rules.md")
+# The conversations each working state has of its own; the main ones from before that are the first state's, learning.
+BY_STATE = ("tutor", "flash")
+FIRST_STATE = "chat"
+RULES = i18n.shipped("rules.md")
 
 
 def text(value, maximum=50000):
     if not isinstance(value, str):
-        raise ValueError("文本字段必须是字符串")
+        raise ValueError(tr("文本字段必须是字符串"))
     if len(value) > maximum:
-        raise ValueError(f"文本超过 {maximum} 字符限制")
+        raise ValueError(tr("文本超过 {0} 字符限制", maximum))
     return value
 
 
 def title_of(value):
     value = text(value, 180).strip()
     if not value:
-        raise ValueError("标题不能为空")
+        raise ValueError(tr("标题不能为空"))
     return value
 
 
@@ -100,7 +106,7 @@ def readable_outputs(outputs, limit=1800):
             data = out.get("data", {})
             plain = data.get("text/plain")
             readable.append(("".join(plain) if isinstance(plain, list) else str(plain))[:limit] if plain else
-                            "[图像输出]" if any(k.startswith("image/") for k in data) else "[输出]")
+                            tr("[图像输出]") if any(k.startswith("image/") for k in data) else tr("[输出]"))
     return readable
 
 
@@ -161,8 +167,8 @@ class Lattice:
     def doc(self, ident, kind=None):
         row = self.index.one("SELECT * FROM docs WHERE id=?" + (" AND kind=?" if kind else ""), (ident, kind) if kind else (ident,))
         if not row:
-            raise ValueError(("找不到这个" + {"topic": "主题", "card": "知识卡", "lesson": "课程", "note": "笔记",
-                                               "insight": "薄弱点记录", "notebook": "实验笔记"}.get(kind, "内容")) + "：" + str(ident))
+            raise ValueError(tr("找不到这个{0}：", {"topic": tr("主题"), "card": tr("知识卡"), "lesson": tr("课程"), "note": tr("笔记"),
+                                               "insight": tr("薄弱点记录"), "notebook": tr("实验笔记")}.get(kind, tr("内容"))) + str(ident))
         row["attrs"] = json.loads(row["attrs"])
         return row
 
@@ -219,12 +225,12 @@ class Lattice:
             ancestor, seen = parent, {ident}
             while ancestor:
                 if ancestor in seen:
-                    raise ValueError("主题分支不能形成循环")
+                    raise ValueError(tr("主题分支不能形成循环"))
                 seen.add(ancestor)
                 ancestor = self.doc(ancestor, "topic")["attrs"].get("parent")
         state = data.get("state", attrs.get("state", "active"))
         if state not in {"active", "parked", "completed"}:
-            raise ValueError("主题状态应为 active、parked 或 completed")
+            raise ValueError(tr("主题状态应为 active、parked 或 completed"))
         attrs.update(title=title_of(data.get("title", attrs.get("title", ""))), question=text(data.get("question", attrs.get("question", "")), 6000),
                      parent=parent, state=state)
         if "route" in data:
@@ -235,12 +241,12 @@ class Lattice:
 
     def _route(self, items):
         if not isinstance(items, list) or len(items) > 60:
-            raise ValueError("路线应是不超过 60 站的列表")
+            raise ValueError(tr("路线应是不超过 60 站的列表"))
         route = []
         for item in items:
             item = {"title": item} if isinstance(item, str) else item
             if not isinstance(item, dict) or not str(item.get("title", "")).strip():
-                raise ValueError("路线的每一站都要有 title")
+                raise ValueError(tr("路线的每一站都要有 title"))
             step = {"title": title_of(str(item["title"]))}
             if item.get("ref"):
                 step["ref"] = str(item["ref"])
@@ -255,7 +261,7 @@ class Lattice:
                     step["insight"] = str(item["insight"])
             route.append(step)
         if sum(s.get("state") == "now" for s in route) > 1:
-            raise ValueError("路线上只能有一站是 now（现在在讲的）")
+            raise ValueError(tr("路线上只能有一站是 now（现在在讲的）"))
         return route
 
     def topic_delete(self, ident):
@@ -306,7 +312,7 @@ class Lattice:
         ref = str(ref)
         row = self.index.one("SELECT id FROM docs WHERE kind='card' AND (id=? OR lower(title)=lower(?))", (ref, ref))
         if not row:
-            raise ValueError("找不到知识卡：" + ref)
+            raise ValueError(tr("找不到知识卡：") + str(ref))
         return row["id"]
 
     def card_save(self, data, by="me"):
@@ -315,19 +321,19 @@ class Lattice:
         existing = self.index.one("SELECT id FROM docs WHERE kind='card' AND lower(title)=lower(?)", (name,))
         ident = data.get("id") or (existing["id"] if existing else None)
         if existing and data.get("id") and existing["id"] != data["id"]:
-            raise ValueError("同名知识卡已存在，请编辑现有卡片或使用不同标题")
+            raise ValueError(tr("同名知识卡已存在，请编辑现有卡片或使用不同标题"))
         tags = data.get("tags", [])
         if not isinstance(tags, list) or len(tags) > 25:
-            raise ValueError("标签应为不超过 25 项的列表")
+            raise ValueError(tr("标签应为不超过 25 项的列表"))
         if data.get("type") and data["type"] not in CARD_TYPES:
-            raise ValueError("知识卡的类型只能是 " + "、".join(CARD_TYPES))
+            raise ValueError(tr("知识卡的类型只能是 ") + str("、".join(CARD_TYPES)))
         sort = {k: text(str(data[k]), 40).strip() for k in ("type", "area") if data.get(k)}
         if not ident:
             stage = data.get("stage", "suggested")
             if stage not in STAGES:
-                raise ValueError("理解阶段无效")
+                raise ValueError(tr("理解阶段无效"))
             if by != "me" and stage not in {"suggested", "seen"}:
-                raise ValueError("理解阶段由学习者本人确认")
+                raise ValueError(tr("理解阶段由学习者本人确认"))
             topic = data.get("topic") or None
             if topic:
                 self.doc(topic, "topic")
@@ -339,7 +345,7 @@ class Lattice:
             # An agent adds to a card, and sorts one that was never sorted; it does not resort the learner's.
             addition = text(data.get("body", "")).strip()
             self._edit_doc(ident, lambda a, b: ({**a, **{k: v for k, v in sort.items() if not a.get(k)}},
-                                                join_mine(split_mine(b)[0] + f"\n\n**补充（{by}）**\n\n" + addition, split_mine(b)[1]) if addition else b))
+                                                join_mine(split_mine(b)[0] + tr("\n\n**补充（{0}）**\n\n", by) + addition, split_mine(b)[1]) if addition else b))
             return self.card(ident)
 
         def change(a, b):
@@ -359,7 +365,7 @@ class Lattice:
         """The learner's own parts of a card: understanding stage and their own words."""
         card = self.card(ident)
         if stage is not None and stage not in STAGES:
-            raise ValueError("理解阶段无效")
+            raise ValueError(tr("理解阶段无效"))
 
         def change(a, b):
             body, old = split_mine(b)
@@ -377,7 +383,7 @@ class Lattice:
         """A transparent schedule driven by the learner's own rating, not an inferred mastery score."""
         card = self.card(ident)
         if rating not in {"again", "hard", "good"}:
-            raise ValueError("自评应为 again、hard 或 good")
+            raise ValueError(tr("自评应为 again、hard 或 good"))
         level = min(card["reviews"], 5)
         days = 1 if rating == "again" else ((1, 2, 4, 7, 14, 30) if rating == "hard" else (1, 3, 7, 14, 30, 60))[level]
         due = (datetime.now().astimezone() + timedelta(days=days)).isoformat(timespec="seconds")
@@ -416,7 +422,7 @@ class Lattice:
         row = self.index.one("SELECT id FROM docs WHERE lower(title)=lower(?) ORDER BY kind='card' DESC", (ref,))
         if row:
             return row["id"]
-        raise ValueError("找不到要连接的内容：" + ref)
+        raise ValueError(tr("找不到要连接的内容：") + str(ref))
 
     def links_of(self, ident):
         rows = self.index.rows("""SELECT l.*, s.title source_title, t.title target_title FROM links l
@@ -427,15 +433,15 @@ class Lattice:
                     item = annotations.get(self, r["target"])
                     r["target_title"] = item["place"]["title"] + (" · " + item["label"] if item["label"] else "")
                 except ValueError:
-                    r["target_title"] = "已删除的批注"
+                    r["target_title"] = tr("已删除的批注")
         return rows
 
     def link(self, source, target, kind="related", why="", by="me"):
         source, target = self.resolve_ref(source), self.resolve_ref(target)
         if source.startswith("file:"):
-            raise ValueError("关系要从 Markdown 文档出发（主题、卡片、课程、笔记）")
+            raise ValueError(tr("关系要从 Markdown 文档出发（主题、卡片、课程、笔记）"))
         if source == target or kind not in LINK_KINDS:
-            raise ValueError("关系类型应为 " + "/".join(sorted(LINK_KINDS)) + "，且不能指向自己")
+            raise ValueError(tr("关系类型应为 {0}，且不能指向自己", "/".join(sorted(LINK_KINDS))))
         if kind in ACYCLIC:
             adjacency = {}
             for r in self.index.rows("SELECT source, target FROM links WHERE kind=?", (kind,)):
@@ -444,7 +450,7 @@ class Lattice:
             while pending:
                 item = pending.pop()
                 if item == source:
-                    raise ValueError("这条关系会造成依赖循环")
+                    raise ValueError(tr("这条关系会造成依赖循环"))
                 if item not in visited:
                     visited.add(item)
                     pending.extend(adjacency.get(item, []))
@@ -460,7 +466,7 @@ class Lattice:
     def unlink(self, ident):
         row = self.index.one("SELECT source FROM links WHERE id=?", (ident,))
         if not row:
-            raise ValueError("找不到这条关系")
+            raise ValueError(tr("找不到这条关系"))
         self._edit_doc(row["source"], lambda a, b: ({**a, "links": [l for l in a.get("links") or [] if l.get("id") != ident]}, b))
         return True
 
@@ -470,7 +476,7 @@ class Lattice:
         attrs = dict(old["attrs"]) if old else {"id": uid(), "kind": "lesson", "by": by}
         state = data.get("state", attrs.get("state", "draft"))
         if state not in {"draft", "current", "done"}:
-            raise ValueError("课程状态无效")
+            raise ValueError(tr("课程状态无效"))
         attrs.update(title=title_of(data.get("title", attrs.get("title", ""))), topic=data.get("topic", attrs.get("topic")) or None,
                      objective=text(data.get("objective", attrs.get("objective", "")), 2000), state=state)
         body = text(data.get("body", old["body"] if old else ""))
@@ -486,7 +492,7 @@ class Lattice:
 
     def insight_add(self, topic, kind, name, detail, practice=None, by="tutor"):
         if kind not in {"weak", "strength"}:
-            raise ValueError("只能记薄弱点（weak）或做得好的地方（strength）")
+            raise ValueError(tr("只能记薄弱点（weak）或做得好的地方（strength）"))
         attrs = {"id": uid(), "kind": "insight", "insight": kind, "title": title_of(name), "topic": topic, "practice": practice,
                  "state": "active", "by": by}
         self._write_doc("insights", attrs, text(detail, 2000))
@@ -520,9 +526,9 @@ class Lattice:
     def add_project(self, name, path):
         p = Path(path).expanduser().resolve()
         if not p.is_dir():
-            raise ValueError(f"目录不存在：{p}")
+            raise ValueError(tr("目录不存在：") + str(p))
         if p == self.root or p.is_relative_to(self.root) or self.root.is_relative_to(p):
-            raise ValueError("学习库本身不用挂载")
+            raise ValueError(tr("学习库本身不用挂载"))
         projects = self.projects()
         existing = next((x for x in projects if x["path"] == str(p)), None)
         if existing:
@@ -539,7 +545,7 @@ class Lattice:
         """A vault-relative path or an absolute path inside a mounted folder -> (absolute path, vault rel or None)."""
         raw = str(path or "").strip()
         if not raw:
-            raise ValueError("请给出文件路径")
+            raise ValueError(tr("请给出文件路径"))
         candidate = Path(raw).expanduser()
         if candidate.is_absolute():
             resolved = candidate.resolve()
@@ -548,16 +554,16 @@ class Lattice:
             for p in self.projects():
                 if resolved.is_relative_to(Path(p["path"]).resolve()):
                     if any(part.startswith(".env") for part in resolved.parts):
-                        raise ValueError("为避免泄露凭据，不读写环境密钥文件")
+                        raise ValueError(tr("为避免泄露凭据，不读写环境密钥文件"))
                     return resolved, None
-            raise ValueError("只能访问学习库和挂载的目录：" + raw)
+            raise ValueError(tr("只能访问学习库和挂载的目录：") + str(raw))
         resolved = self.vault.path(raw)
         return resolved, self.vault.rel(resolved)
 
     def read_file(self, path, limit=2 * 1024 * 1024):
         absolute, rel = self.resolve(path)
         if not absolute.is_file():
-            raise ValueError("文件不存在：" + str(path))
+            raise ValueError(tr("文件不存在：") + str(path))
         size = absolute.stat().st_size
         data = absolute.read_bytes()[:limit]
         try:
@@ -569,14 +575,14 @@ class Lattice:
     def write_file(self, path, content, expected=None):
         absolute, rel = self.resolve(path)
         if len(content) > 4 * 1024 * 1024:
-            raise ValueError("文件超过 4MB")
+            raise ValueError(tr("文件超过 4MB"))
         if expected is not None and absolute.exists() and str(absolute.stat().st_mtime_ns) != str(expected):
             raise VaultError("conflict")
         if rel is None:
             absolute.write_text(content, encoding="utf-8")
             return {"path": str(absolute), "mtime": str(absolute.stat().st_mtime_ns)}
         if rel.startswith(APPEND_ONLY) or rel.startswith(".lattice/"):
-            raise ValueError("对话、轨迹和 .lattice 由 Lattice 自己维护")
+            raise ValueError(tr("对话、轨迹和 .lattice 由 Lattice 自己维护"))
         self.vault.write_text(rel, content)
         self.index.reindex(rel)
         return {"path": rel, "mtime": self.vault.mtime(rel)}
@@ -586,14 +592,14 @@ class Lattice:
         stem, ext = os.path.splitext(slug(name, 80))
         rel = self.vault.unique(folder, stem or "未命名", ext)
         if rel.endswith(".ipynb") and not content:
-            content = json.dumps(self._empty_notebook(stem or "实验笔记"), ensure_ascii=False, indent=1) + "\n"
+            content = json.dumps(self._empty_notebook(stem or tr("实验笔记")), ensure_ascii=False, indent=1) + "\n"
         self.write_file(rel, content)
         return rel
 
     def rename_file(self, path, new_name):
         _, rel = self.resolve(path)
         if rel is None or rel.startswith(APPEND_ONLY) or rel in KEPT:
-            raise ValueError("这个文件不能在这里改名")
+            raise ValueError(tr("这个文件不能在这里改名"))
         target = rel.rsplit("/", 1)[0] + "/" + slug(new_name, 120) if "/" in rel else slug(new_name, 120)
         self.vault.move(rel, target)
         self.index.unindex(rel)
@@ -606,7 +612,7 @@ class Lattice:
     def delete_file(self, path):
         absolute, rel = self.resolve(path)
         if rel is None or rel.startswith(APPEND_ONLY) or rel in {*KEPT, ""} or "/" not in rel and absolute.is_dir():
-            raise ValueError("这个文件不能删除")
+            raise ValueError(tr("这个文件不能删除"))
         inside = [self.vault.rel(p) for p in absolute.rglob("*") if p.is_file()] if absolute.is_dir() else [rel]
         self.vault.remove(rel)
         for f in inside:
@@ -617,13 +623,13 @@ class Lattice:
     def _movable(self, path):
         absolute, rel = self.resolve(path)
         if rel is None or "/" not in rel or rel.startswith(APPEND_ONLY) or rel.startswith(".lattice/") or not absolute.exists():
-            raise ValueError("这个不能移动或改名")
+            raise ValueError(tr("这个不能移动或改名"))
         return absolute, rel
 
     def _relocate(self, rel, target):
         absolute = self.vault.path(rel)
         if self.vault.path(target).exists():
-            raise ValueError("那里已经有同名的了：" + target)
+            raise ValueError(tr("那里已经有同名的了：") + str(target))
         inside = [self.vault.rel(p) for p in absolute.rglob("*") if p.is_file()] if absolute.is_dir() else [rel]
         self.vault.move(rel, target)
         for old in inside:
@@ -639,11 +645,11 @@ class Lattice:
         _, rel = self._movable(path)
         dest_abs, dest = self.resolve(folder)
         if dest is None or not dest_abs.is_dir():
-            raise ValueError("目标不是学习库里的文件夹")
+            raise ValueError(tr("目标不是学习库里的文件夹"))
         if dest.split("/", 1)[0] != rel.split("/", 1)[0]:
-            raise ValueError("只能移到同一类的文件夹里（笔记留在笔记里）")
+            raise ValueError(tr("只能移到同一类的文件夹里（笔记留在笔记里）"))
         if dest == rel or dest.startswith(rel + "/"):
-            raise ValueError("不能把文件夹移进它自己里面")
+            raise ValueError(tr("不能把文件夹移进它自己里面"))
         if rel.rsplit("/", 1)[0] == dest:
             return rel
         return self._relocate(rel, dest + "/" + rel.rsplit("/", 1)[-1])
@@ -651,17 +657,17 @@ class Lattice:
     def folder_rename(self, path, name):
         absolute, rel = self._movable(path)
         if not absolute.is_dir():
-            raise ValueError("这不是文件夹")
+            raise ValueError(tr("这不是文件夹"))
         clean = re.sub(r'[\\/:*?"<>|]', " ", str(name)).strip()[:120]
         if not clean or clean in (".", ".."):
-            raise ValueError("文件夹名不能为空")
+            raise ValueError(tr("文件夹名不能为空"))
         return self._relocate(rel, rel.rsplit("/", 1)[0] + "/" + clean)
 
     def folder_create(self, parent, name):
         absolute, rel = self.resolve(parent)
         clean = "/".join(p.strip() for p in re.sub(r'[\\:*?"<>|]', " ", str(name)).split("/") if p.strip() and p.strip() not in (".", ".."))
         if rel is None or not rel or rel.startswith(APPEND_ONLY) or rel.startswith(".lattice") or not clean:
-            raise ValueError("这里不能建文件夹")
+            raise ValueError(tr("这里不能建文件夹"))
         target = self.vault.path(rel + "/" + clean[:120])
         target.mkdir(parents=True, exist_ok=True)
         return self.vault.rel(target)
@@ -807,7 +813,7 @@ class Lattice:
     def _nb_change(self, path, change):
         _, rel = self.resolve(path)
         if rel is None:
-            raise ValueError("只能修改学习库里的实验笔记")
+            raise ValueError(tr("只能修改学习库里的实验笔记"))
         nb = self.vault.read_json(rel)
         for c in nb.setdefault("cells", []):
             # nbformat 4.5 ids; older notebooks get one the first time Lattice touches them.
@@ -824,11 +830,11 @@ class Lattice:
         for i, c in enumerate(cells):
             if c.get("id") == ident:
                 return i, c
-        raise ValueError("找不到这个单元格：" + str(ident))
+        raise ValueError(tr("找不到这个单元格：") + str(ident))
 
     def cell_save(self, path, source, kind="code", ident=None, after=None, by="me"):
         if kind not in {"code", "markdown"}:
-            raise ValueError("单元格类型应为 code 或 markdown")
+            raise ValueError(tr("单元格类型应为 code 或 markdown"))
         text(source, 400000)
 
         def change(cells):
@@ -873,8 +879,8 @@ class Lattice:
         return self._nb_change(path, change)
 
     # ---- what the agents know about the learner -------------------------------------------------------------
-    ME_HEAD = ("# 关于我\n\nLattice 的每个 AI 每一轮都会读这份记录。AI 记下的每一条都显示在当时那条回复下面，点「撤销」就去掉；"
-               "你也可以直接改这个文件。\n\n")
+    ME_HEAD = (tr("# 关于我\n\nLattice 的每个 AI 每一轮都会读这份记录。AI 记下的每一条都显示在当时那条回复下面，点「撤销」就去掉；"
+               "你也可以直接改这个文件。\n\n"))
 
     def me(self):
         """What holds about the learner whatever they are learning: one line each."""
@@ -889,14 +895,14 @@ class Lattice:
         if replace is not None:
             at = next((i for i, line in enumerate(lines) if line.startswith("- ") and line[2:].strip() == str(replace).strip()), None)
             if at is None:
-                raise ValueError("没有这一条：replace 要和记录里的某一条一字不差")
+                raise ValueError(tr("没有这一条：replace 要和记录里的某一条一字不差"))
             lines[at:at + 1] = ["- " + text] if text else []
         elif not text:
-            raise ValueError("要记的内容是空的")
+            raise ValueError(tr("要记的内容是空的"))
         elif text in self.me():
             return False
         elif len(self.me()) >= 40:
-            raise ValueError("记录已经有 40 条：先用 replace 把相近的几条合并")
+            raise ValueError(tr("记录已经有 40 条：先用 replace 把相近的几条合并"))
         else:
             while lines and not lines[-1].strip():
                 lines.pop()
@@ -913,35 +919,63 @@ class Lattice:
         self.index.reindex(rel)
         return head
 
-    def thread_for(self, agent, topic=None):
-        """The conversation an agent is having about a topic (None: the default conversation). The quick answer has one
-        conversation whatever is being learned: it is about what is on screen, and looks there when it needs to."""
+    def thread_for(self, agent, topic=None, space=None):
+        """The conversation an agent is having about a topic (None: the default conversation). The quick answer is about
+        no topic: it is about what is on screen, and looks there when it needs to. Each working state has conversations
+        of its own (space), the main one and a quick answer, so what is said while writing does not turn up while reviewing."""
         if agent == "flash":
             topic = None
-        current = self.current_thread(agent, topic)
+        current = self.current_thread(agent, topic, space)
         if current:
             return current
         name = self.doc(topic, "topic")["title"] if topic else None
-        return self.thread_new(agent, topic, ({"tutor": "主会话", "flash": "快答"}.get(agent, agent)) + (" · " + name if name else ""))["id"]
+        return self.thread_new(agent, topic, ({"tutor": tr("主会话"), "flash": tr("快答")}.get(agent, agent)) + (" · " + name if name else ""),
+                               {"space": space} if agent in BY_STATE and space else None)["id"]
 
-    def current_thread(self, agent, topic=None):
+    @staticmethod
+    def _picked_key(agent, topic=None, space=None):
+        if agent == "flash":
+            return "flash:@" + space if space else "flash:"
+        return f"{agent}:{topic or ''}" + ("@" + space if agent in BY_STATE and space else "")
+
+    def current_thread(self, agent, topic=None, space=None):
         """The one the learner last opened about this topic, while it is still there and not archived; else the newest.
-        The quick answer's is the one last opened or started, about whatever topic."""
+        In a working state (space), the one of that state's own; the quick answer's is about whatever topic."""
         # Practice conversations and skill trials are threads of their own, never the conversation itself.
         anywhere = agent == "flash"
         live = ("agent=? AND " + ("" if anywhere else "topic IS ? AND ") + "json_extract(head,'$.practice') IS NULL AND json_extract(head,'$.trial') IS NULL "
                 "AND COALESCE(json_extract(head,'$.archived'),0)=0")
         args = (agent,) if anywhere else (agent, topic)
-        picked = (self.setting("current_threads") or {}).get(f"{agent}:{'' if anywhere else topic or ''}")
-        row = (picked and self.index.one(f"SELECT id FROM threads WHERE id=? AND {live}", (picked, *args))
-               or self.index.one(f"SELECT id FROM threads WHERE {live} ORDER BY created DESC LIMIT 1", args))
+        chosen = self.setting("current_threads") or {}
+        picked = chosen.get(self._picked_key(agent, topic, space))
+        row = picked and self.index.one(f"SELECT id FROM threads WHERE id=? AND {live}", (picked, *args))
+        if not row and anywhere and space:
+            row = self.index.one(f"SELECT id FROM threads WHERE {live} AND json_extract(head,'$.space')=? ORDER BY created DESC LIMIT 1", (*args, space))
+            if not row:
+                # The one quick answer there was before states had their own goes on in the first state to ask for it.
+                legacy = chosen.get("flash:")
+                taken = {v for k, v in chosen.items() if k.startswith("flash:@")}
+                row = legacy and legacy not in taken and self.index.one(f"SELECT id FROM threads WHERE id=? AND {live}", (legacy, *args))
+                if row:
+                    self.set_setting("current_threads", {**chosen, self._picked_key(agent, topic, space): row["id"]})
+            return row["id"] if row else None
+        if not row and agent in BY_STATE and space:
+            # The main conversations from before states had their own are the learning state's.
+            legacy = space == FIRST_STATE and chosen.get(self._picked_key(agent, topic))
+            row = legacy and self.index.one(f"SELECT id FROM threads WHERE id=? AND {live} AND json_extract(head,'$.space') IS NULL", (legacy, *args))
+            if not row:
+                row = self.index.one(f"SELECT id FROM threads WHERE {live} AND COALESCE(json_extract(head,'$.space'),?)=? ORDER BY created DESC LIMIT 1",
+                                     (*args, FIRST_STATE, space))
+            return row["id"] if row else None
+        if not row:
+            row = self.index.one(f"SELECT id FROM threads WHERE {live} ORDER BY created DESC LIMIT 1", args)
         return row["id"] if row else None
 
-    def thread_pick(self, ident):
-        """Open a conversation as its agent's one about its topic (the quick answer's, about any), until another is picked."""
+    def thread_pick(self, ident, space=None):
+        """Open a conversation as its agent's one about its topic (in that working state), until another is picked."""
         head = self.thread_head(ident)
         picked = self.setting("current_threads") or {}
-        picked[f"{head['agent']}:{'' if head['agent'] == 'flash' else head.get('topic') or ''}"] = ident
+        picked[self._picked_key(head["agent"], head.get("topic"), space or head.get("space"))] = ident
         self.set_setting("current_threads", picked)
         return head
 
@@ -959,7 +993,7 @@ class Lattice:
         for r in rows:
             head = json.loads(r["head"])
             first = re.sub(r"\s+", " ", r["first"] or "").strip()
-            out.append({"id": r["id"], "topic": head.get("topic"), "summary": (head.get("summary") or {}).get("text", ""), "title": head["title"] if head.get("named") else (first[:28] or "新会话"), "named": bool(head.get("named")),
+            out.append({"id": r["id"], "topic": head.get("topic"), "summary": (head.get("summary") or {}).get("text", ""), "title": head["title"] if head.get("named") else (first[:28] or tr("新会话")), "named": bool(head.get("named")),
                         "archived": bool(head.get("archived")), "created": r["created"], "updated": r["updated"], "messages": r["n"],
                         "last": re.sub(r"\s+", " ", r["last"] or "").strip()[:120],
                         "answer": re.sub(r"\s+", " ", re.sub(r"```.*?(```|$)", "", r["answer"] or "", flags=re.S)).strip()[:160]})
@@ -1071,7 +1105,7 @@ class Lattice:
             convs.sort(key=lambda c: newest(c["files"]), reverse=True)
             files = sorted(node["files"], key=lambda f: f["at"], reverse=True)
             topic = topics.get(key)
-            out.append({"id": key, "title": topic["title"] if topic else "默认对话", "path": topic["path"] if topic else None,
+            out.append({"id": key, "title": topic["title"] if topic else tr("默认对话"), "path": topic["path"] if topic else None,
                         "state": json.loads(topic["attrs"]).get("state") if topic else None, "active": (key or None) == active,
                         "threads": convs, "files": files, "at": max(newest(files), *(newest(c["files"]) for c in convs), "")})
         out = [t for t in out if t["active"]] + sorted((t for t in out if not t["active"]), key=lambda t: t["at"], reverse=True)
@@ -1092,7 +1126,7 @@ class Lattice:
     def thread_head(self, ident):
         row = self.index.one("SELECT head FROM threads WHERE id=?", (ident,))
         if not row:
-            raise ValueError("会话不存在")
+            raise ValueError(tr("会话不存在"))
         return json.loads(row["head"])
 
     def thread_update(self, ident, **attrs):
@@ -1113,7 +1147,7 @@ class Lattice:
     def append_message(self, thread, role, content, meta=None, at=None):
         row = self.index.one("SELECT path FROM threads WHERE id=?", (thread,))
         if not row:
-            raise ValueError("会话不存在")
+            raise ValueError(tr("会话不存在"))
         ident = (self.db.execute("SELECT MAX(id) FROM messages").fetchone()[0] or 0) + 1
         message = {"id": ident, "role": role, "content": content, "meta": meta or {}, "at": at or now()}
         self.vault.append_line(row["path"], message)
@@ -1146,10 +1180,10 @@ class Lattice:
     def practice_create(self, topic, seed, goal, ext=".py", source_message=None, by="me"):
         seed, goal = text(seed, 30000).strip(), text(goal, 1000).strip()
         if not seed:
-            raise ValueError("没有可以练习的讲解内容")
+            raise ValueError(tr("没有可以练习的讲解内容"))
         short = re.split(r"[，。；：,;:（(\n]", goal)[0][:32].strip() if goal else ""
         found = re.search(r"^#+\s*(.+)$", seed, re.M) or re.search(r"\*\*(.+?)\*\*", seed)
-        name = "练习 · " + (short or (found.group(1).strip(" #*：:。.")[:32] if found else "") or (self.doc(topic)["title"] if topic else "动手"))
+        name = tr("练习 · ") + (short or (found.group(1).strip(" #*：:。.")[:32] if found else "") or (self.doc(topic)["title"] if topic else tr("动手")))
         ext = ext if re.fullmatch(r"\.[A-Za-z0-9]{1,8}", ext or "") else ".py"
         file = self.notebook_create(name, topic, "code") if ext == ".ipynb" else self.create_file("code", name + ext, "")
         head = self.thread_new("coach", topic, name, {"practice": {"topic": topic, "state": "active", "seed": seed, "goal": goal,
@@ -1159,7 +1193,7 @@ class Lattice:
     def practice(self, ident):
         head = self.thread_head(ident)
         if not head.get("practice"):
-            raise ValueError("这不是练习")
+            raise ValueError(tr("这不是练习"))
         return {"id": ident, "title": head["title"], **head["practice"], "created": head["created"],
                 "insights": [i for i in self.insights() if i["practice"] == ident]}
 
@@ -1188,7 +1222,7 @@ class Lattice:
             self._remove(self.doc(insight["id"])["path"])
         for kind, items in (("weak", weak), ("strength", strong)):
             if not isinstance(items, list):
-                raise ValueError("薄弱点和做得好的地方应为数组")
+                raise ValueError(tr("薄弱点和做得好的地方应为数组"))
             for item in items[:8]:
                 item = {"title": item} if isinstance(item, str) else item
                 if isinstance(item, dict) and str(item.get("title", "")).strip():
@@ -1239,20 +1273,20 @@ class Lattice:
         entry = self.index.one("SELECT data FROM journal WHERE id=? AND type='action'", (ident,))
         commit = entry and json.loads(entry["data"]).get("commit")
         if not commit or ident in self.undone():
-            raise ValueError("这个操作不能撤销")
+            raise ValueError(tr("这个操作不能撤销"))
         summary = json.loads(entry["data"]).get("summary", "")
         ref = str(json.loads(entry["data"]).get("ref") or "")
         if ref.startswith("ann:"):
             # One annotation among others in a file that goes on changing: taken out, not reverted.
             rel = self.index.one("SELECT path FROM annotations WHERE id=?", (ref[4:],))
             annotations.remove(self, ref)
-            self.record("undo", {"commit": commit, "summary": "撤销了「" + summary + "」", "files": [rel["path"]]}, "me", [ident])
+            self.record("undo", {"commit": commit, "summary": tr("撤销了「{0}」", summary), "files": [rel["path"]]}, "me", [ident])
             return [rel["path"]]
         touched = self.vault.revert(commit)
         # Removed paths first: a moved file keeps its id, so unindexing the old path afterwards would drop it.
         for rel in sorted(touched, key=lambda r: self.vault.path(r).exists()):
             self.index.reindex(rel)
-        self.record("undo", {"commit": commit, "summary": "撤销了「" + summary + "」", "files": touched}, "me", [ident])
+        self.record("undo", {"commit": commit, "summary": tr("撤销了「{0}」", summary), "files": touched}, "me", [ident])
         return touched
 
     # ---- ownership after a shell command -----------------------------------------------------------------------
@@ -1265,12 +1299,12 @@ class Lattice:
             # not write itself is put back, or every shell command would throw away what was said since.
             if (rel.startswith(APPEND_ONLY) or rel.startswith((".lattice/", "agents/", annotations.FOLDER + "/")) or rel in KEPT) and not self.vault.ours(rel):
                 self._put_back(rel, before)
-                fixed.append(f"{rel}：对话、轨迹、批注和规则只由 Lattice 和学习者维护，已还原")
+                fixed.append(tr("{0}：对话、轨迹、批注和规则只由 Lattice 和学习者维护，已还原", rel))
             elif status == "D":
                 self._put_back(rel, before)
-                fixed.append(f"{rel}：删除只由学习者做，已还原")
+                fixed.append(tr("{0}：删除只由学习者做，已还原", rel))
             elif kind_of(rel) == "card" and before is not None and status == "M" and self.keep_owned(rel, before):
-                fixed.append(f"{rel}：理解阶段、回顾安排和「我的理解」只归学习者，已还原这几处")
+                fixed.append(tr("{0}：理解阶段、回顾安排和「我的理解」只归学习者，已还原这几处", rel))
         return fixed
 
     def keep_owned(self, rel, before):
@@ -1362,7 +1396,7 @@ class Lattice:
     def catalog(self, kind, topic=None, stage=None, state=None, query=None, limit=500):
         """Every item of one kind, briefly, with the attributes that kind has. Filters: topic ('' for none), stage, state, query."""
         if kind not in self.KINDS:
-            raise ValueError("kind 应为 " + "、".join(self.KINDS))
+            raise ValueError(tr("kind 应为 ") + str("、".join(self.KINDS)))
         due = {c["id"] for c in self.due_cards()} if kind == "cards" else set()
         if kind == "topics":
             rows = [{k: t[k] for k in ("id", "title", "path", "question", "parent", "state", "created", "updated")} | {"route_steps": len(t["route"])}
@@ -1399,7 +1433,7 @@ class Lattice:
     def search(self, query, limit=40):
         q = "%" + text(query, 200).strip() + "%"
         if q == "%%":
-            raise ValueError("请给出搜索词")
+            raise ValueError(tr("请给出搜索词"))
         hits = []
         for r in self.index.rows("SELECT id, kind, title, path, body FROM docs WHERE title LIKE ? OR body LIKE ? ORDER BY title LIKE ? DESC, updated DESC LIMIT ?",
                                  (q, q, q, limit)):

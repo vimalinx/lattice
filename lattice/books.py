@@ -3,6 +3,8 @@ the book window, which draws it as it is (see ui/book/); what an agent reads com
 book that is not even open. Extracted text is kept under .lattice/cache/, as a long PDF takes a while to go through."""
 from __future__ import annotations
 
+from .i18n import tr
+
 from collections import OrderedDict
 import hashlib
 import io
@@ -61,7 +63,7 @@ def _pdf(data):
     try:
         reader = PdfReader(io.BytesIO(data))
         if reader.is_encrypted and not reader.decrypt(""):
-            raise BookError("这个 PDF 有密码")
+            raise BookError(tr("这个 PDF 有密码"))
         info = reader.metadata or {}
         pages = [{"title": f"第 {i + 1} 页", "text": _wide(page.extract_text() or "").strip()} for i, page in enumerate(reader.pages)]
         toc = []
@@ -79,10 +81,10 @@ def _pdf(data):
     except BookError:
         raise
     except Exception as exc:
-        raise BookError(f"读不出这个 PDF：{exc}") from exc
+        raise BookError(tr("读不出这个 PDF：") + str(exc)) from exc
     empty = sum(len(p["text"]) for p in pages) < 30 * len(pages)
     return {"title": str(info.get("/Title") or "").strip(), "author": str(info.get("/Author") or "").strip(), "unit": "页", "sections": pages, "toc": toc,
-            **({"note": "这个 PDF 基本没有文字层（多半是扫描版）：学习者能看，但这里读不出文字"} if empty else {})}
+            **({"note": tr("这个 PDF 基本没有文字层（多半是扫描版）：学习者能看，但这里读不出文字")} if empty else {})}
 
 
 # ---- EPUB ---------------------------------------------------------------------------------------------------------
@@ -95,7 +97,7 @@ def _epub(data):
         book = zipfile.ZipFile(io.BytesIO(data))
         names = set(book.namelist())
         if "META-INF/rights.xml" in names or b"ns.adobe.com/adept" in (book.read("META-INF/encryption.xml") if "META-INF/encryption.xml" in names else b""):
-            raise BookError("这本书有 DRM 保护，打不开")
+            raise BookError(tr("这本书有 DRM 保护，打不开"))
         opf_path = next(e.get("full-path") for e in ElementTree.fromstring(book.read("META-INF/container.xml")).iter() if _local(e.tag) == "rootfile")
         opf = ElementTree.fromstring(book.read(opf_path))
         base = posixpath.dirname(opf_path)
@@ -141,7 +143,7 @@ def _epub(data):
     except BookError:
         raise
     except (zipfile.BadZipFile, KeyError, StopIteration, ElementTree.ParseError) as exc:
-        raise BookError(f"读不出这个 EPUB：{exc}") from exc
+        raise BookError(tr("读不出这个 EPUB：") + str(exc)) from exc
     return {"title": meta.get("title", ""), "author": meta.get("creator", ""), "unit": "章", "sections": sections}
 
 
@@ -174,7 +176,7 @@ class _Huffman:
     def __init__(self, tables):
         huff = tables[0]
         if huff[:4] != b"HUFF":
-            raise BookError("这本书的压缩数据不对")
+            raise BookError(tr("这本书的压缩数据不对"))
         first, second = struct.unpack(">LL", huff[8:16])
         self.quick = []
         for value in struct.unpack(">256L", huff[first:first + 1024]):
@@ -242,14 +244,14 @@ def _trailing(record, flags):
 
 def _mobi(data):
     if len(data) < 80 or data[60:68] not in (b"BOOKMOBI", b"TEXtREAd"):
-        raise BookError("这不是 MOBI 文件")
+        raise BookError(tr("这不是 MOBI 文件"))
     count = struct.unpack(">H", data[76:78])[0]
     starts = [struct.unpack(">L", data[78 + 8 * i:82 + 8 * i])[0] for i in range(count)] + [len(data)]
     record = lambda i: data[starts[i]:starts[i + 1]]
     head = record(0)
     compression, _, _, texts, _, encryption = struct.unpack(">HHLHHH", head[:14])
     if encryption:
-        raise BookError("这本书有 DRM 保护，打不开")
+        raise BookError(tr("这本书有 DRM 保护，打不开"))
     encoding, flags, title, huff, author = "cp1252", 0, "", None, ""
     if head[16:20] == b"MOBI":
         length, _, code = struct.unpack(">LLL", head[20:32])
@@ -273,7 +275,7 @@ def _mobi(data):
     elif compression == 17480 and huff:
         unpack = _Huffman([record(i) for i in range(huff[0], huff[0] + huff[1])]).unpack
     else:
-        raise BookError("这本书的压缩方式不认识")
+        raise BookError(tr("这本书的压缩方式不认识"))
     html = b"".join(unpack(_trailing(record(i), flags)) for i in range(1, texts + 1)).decode(encoding, "replace")
     # KF8 keeps each part's own <html>; older books mark page breaks.
     parts = [p for p in re.split(r"(?=<html\b)|<mbp:pagebreak\s*/?>", html, flags=re.I) if p.strip()]
@@ -309,7 +311,7 @@ def _fb2(data):
     try:
         root = ElementTree.fromstring(data)
     except ElementTree.ParseError as exc:
-        raise BookError(f"读不出这个 FB2：{exc}") from exc
+        raise BookError(tr("读不出这个 FB2：") + str(exc)) from exc
     words = lambda e: " ".join(" ".join(e.itertext()).split())
     info = next((e for e in root.iter() if _local(e.tag) == "title-info"), None)
     title = next((words(e) for e in (info if info is not None else ()) if _local(e.tag) == "book-title"), "")
@@ -327,7 +329,7 @@ def _fb2(data):
 def _cbz(data):
     book = zipfile.ZipFile(io.BytesIO(data))
     pages = [n for n in book.namelist() if n.lower().endswith((".jpg", ".jpeg", ".png", ".gif", ".webp"))]
-    return {"title": "", "author": "", "unit": "页", "sections": [], "note": f"这是漫画，共 {len(pages)} 页，都是图片，这里读不出文字"}
+    return {"title": "", "author": "", "unit": "页", "sections": [], "note": tr("这是漫画，共 {0} 页，都是图片，这里读不出文字", len(pages))}
 
 
 # ---- reading ------------------------------------------------------------------------------------------------------
@@ -343,7 +345,7 @@ def _extract(path):
         return _fb2(data)
     if name.endswith(".epub"):
         return _epub(data)
-    raise BookError("这个格式还读不了")
+    raise BookError(tr("这个格式还读不了"))
 
 
 _recent = OrderedDict()

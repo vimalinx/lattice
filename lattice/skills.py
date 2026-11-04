@@ -11,6 +11,9 @@ the learner picks a skill for it.
 """
 from __future__ import annotations
 
+from . import i18n
+from .i18n import tr
+
 import re
 from pathlib import Path
 
@@ -18,7 +21,7 @@ import yaml
 
 from .vault import join_frontmatter, split_frontmatter
 
-SHIPPED = Path(__file__).with_name("skills")
+SHIPPED = i18n.shipped("skills")
 FOLDER = "skills"
 AGENTS = ("tutor", "flash", "coach", "organizer", "builder")
 # A skill that does not say which agents it is for is for the ones that teach and tidy, not the app builder.
@@ -79,7 +82,7 @@ def find(root, ref):
     for s in installed(root):
         if key in (s["slug"].lower(), s["name"].lower(), s["title"].lower()):
             return s
-    raise ValueError("学习库里没有装这个技能：" + str(ref))
+    raise ValueError(tr("学习库里没有装这个技能：") + str(ref))
 
 
 def for_agent(root, agent):
@@ -94,33 +97,32 @@ def prompt_section(root, agent, editing=True):
     lines = "\n".join(f"- {s['name']}（{s['title']}）：{s['description']}" for s in skills)
     # Making and changing skills has a skill of its own when it is installed; the tool alone is the fallback.
     maker = next((s for s in skills if s["slug"] == "skill-maker"), None)
-    editing = ("" if not editing else f"要新建、修改技能，或者理清几个技能的分工时，先用 skill 读「{maker['title']}」（{maker['name']}），照着做。" if maker else
-               "学习者让你改一个技能、或者用下来发现它的做法有问题时，用 skill_edit 提出修改（不要用 write 或 edit），由学习者审过批准；"
-               "同时用 questions 给两三个最能看出改动效果的问题，方便学习者点了就对比两版。")
-    return ("# 技能\n学习库里装了下面这些技能，每个是做某一类事的完整做法。学习者的请求正好是某个技能管的事时，先用 skill 读它的完整说明，"
-            "再照着做（说明里提到的附带文件用 skill 的 file 读）；学习者点名用某个技能时一定要用。不相干时不用，也不要为了用而用。" + editing + "\n" + lines)
+    editing = ("" if not editing else tr("要新建、修改技能，或者理清几个技能的分工时，先用 skill 读「{0}」（{1}），照着做。", maker['title'], maker['name']) if maker else
+               tr("学习者让你改一个技能、或者用下来发现它的做法有问题时，用 skill_edit 提出修改（不要用 write 或 edit），由学习者审过批准；"
+                  "同时用 questions 给两三个最能看出改动效果的问题，方便学习者点了就对比两版。"))
+    return (tr("# 技能\n学习库里装了下面这些技能，每个是做某一类事的完整做法。学习者的请求正好是某个技能管的事时，先用 skill 读它的完整说明，再照着做（说明里提到的附带文件用 skill 的 file 读）；学习者点名用某个技能时一定要用。不相干时不用，也不要为了用而用。{0}\n", editing) + str(lines))
 
 
 def instructions(skill):
-    extra = ("\n\n这个技能附带的文件（用 skill 工具的 file 参数读）：" + "、".join(skill["files"])) if skill["files"] else ""
-    return f"# 技能：{skill['title']}（{skill['name']}）\n\n{skill['body']}{extra}"
+    extra = tr("\n\n这个技能附带的文件（用 skill 工具的 file 参数读）：{0}", tr("、").join(skill["files"])) if skill["files"] else ""
+    return tr("# 技能：{0}（{1}）\n\n", skill['title'], skill['name']) + str(skill['body']) + str(extra)
 
 
 def install(vault, slug):
     source = SHIPPED / slug
     if not (source / "SKILL.md").is_file():
-        raise ValueError("商城里没有这个技能：" + str(slug))
+        raise ValueError(tr("商城里没有这个技能：") + str(slug))
     return _copy(vault, source, slug, replace=True)
 
 
 def _copy(vault, source, slug, replace=False):
     files = [p for p in source.rglob("*") if p.is_file() and not p.name.startswith(".")]
     if len(files) > LIMIT_FILES or sum(p.stat().st_size for p in files) > LIMIT_BYTES:
-        raise ValueError(f"一个技能最多 {LIMIT_FILES} 个文件、共 4MB")
+        raise ValueError(tr("一个技能最多 {0} 个文件、共 4MB", LIMIT_FILES))
     target = f"{FOLDER}/{slug}"
     if vault.path(target).exists():
         if not replace:
-            raise ValueError("已经有一个叫「" + slug + "」的技能了")
+            raise ValueError(tr("已经有一个叫「{0}」的技能了", slug))
         vault.remove(target)
     for p in files:
         vault.write_bytes(f"{target}/{p.relative_to(source).as_posix()}", p.read_bytes())
@@ -131,7 +133,7 @@ def import_folder(vault, folder):
     """A skill folder from this computer, Claude's or anyone's: it needs a SKILL.md."""
     source = Path(folder).expanduser()
     if not (source / "SKILL.md").is_file():
-        raise ValueError("这个文件夹里没有 SKILL.md，不是一个技能")
+        raise ValueError(tr("这个文件夹里没有 SKILL.md，不是一个技能"))
     skill = _parse(source, "import")
     return _copy(vault, source, slug_of(skill["name"] if skill else source.name))
 
@@ -139,7 +141,7 @@ def import_folder(vault, folder):
 def uninstall(vault, slug):
     target = f"{FOLDER}/{Path(str(slug)).name}"
     if not vault.path(target).is_dir():
-        raise ValueError("没有装这个技能")
+        raise ValueError(tr("没有装这个技能"))
     vault.remove(target)
     return True
 
@@ -174,10 +176,10 @@ def create(vault, title, description="", category="其他", agents=LEARNING, bod
     slug = slug_of(title)
     target = f"{FOLDER}/{slug}"
     if vault.path(target).exists():
-        raise ValueError("已经有一个叫「" + slug + "」的技能了")
+        raise ValueError(tr("已经有一个叫「{0}」的技能了", slug))
     attrs = {"name": slug, "title": str(title).strip()[:60], "description": str(description).strip()[:400] or "（写一句：什么时候该用它）",
              "category": category if category in CATEGORIES else "其他", "agents": [a for a in agents if a in AGENTS] or list(LEARNING), "version": 1}
-    vault.write_text(f"{target}/SKILL.md", join_frontmatter(attrs, (body or TEMPLATE).strip() + "\n"))
+    vault.write_text(f"{target}/SKILL.md", join_frontmatter(attrs, (body or tr(TEMPLATE)).strip() + "\n"))
     return f"{target}/SKILL.md"
 
 
@@ -185,7 +187,7 @@ def file_of(root, skill, name):
     folder = (Path(root) / FOLDER / skill["slug"]).resolve()
     path = (folder / str(name)).resolve()
     if not path.is_relative_to(folder) or not path.is_file():
-        raise ValueError("这个技能里没有这个文件：" + str(name))
+        raise ValueError(tr("这个技能里没有这个文件：") + str(name))
     return path.read_text(encoding="utf-8", errors="replace")[:200_000]
 
 
@@ -199,12 +201,12 @@ def change_target(root, name, file="SKILL.md", new=False):
             raise
         slug, title = slug_of(name), str(name).strip()[:60]
         if (Path(root) / FOLDER / slug).exists():
-            raise ValueError("已经有一个叫「" + slug + "」的技能了") from None
+            raise ValueError(tr("已经有一个叫「{0}」的技能了", slug)) from None
     part = Path(str(file or "SKILL.md"))
     if part.is_absolute() or ".." in part.parts or not part.parts:
-        raise ValueError("技能里的文件要写相对路径")
+        raise ValueError(tr("技能里的文件要写相对路径"))
     if new and part.as_posix() != "SKILL.md":
-        raise ValueError("新建技能先写它的 SKILL.md")
+        raise ValueError(tr("新建技能先写它的 SKILL.md"))
     return slug, title, f"{FOLDER}/{slug}/{part.as_posix()}"
 
 
@@ -213,9 +215,9 @@ def apply_edits(content, edits):
     for i, e in enumerate(edits or [], 1):
         old, new = str(e.get("old") or ""), str(e.get("new") or "")
         if not old:
-            raise ValueError(f"第 {i} 处修改没有给 old")
+            raise ValueError(tr("第 {0} 处修改没有给 old", i))
         if content.count(old) != 1:
-            raise ValueError(f"第 {i} 处修改的 old 在原文里出现了 {content.count(old)} 次，必须恰好一次")
+            raise ValueError(tr("第 {0} 处修改的 old 在原文里出现了 {1} 次，必须恰好一次", i, content.count(old)))
         content = content.replace(old, new, 1)
     return content
 
@@ -226,8 +228,11 @@ def keep_attributes(base, after):
     attributes come out unchanged, the original lines are kept as they were, so the comparison shows only real changes."""
     old, _ = split_frontmatter(base)
     new, body = split_frontmatter(after)
-    body = re.sub(r"^#\s*技能：[^\n]*\n+", "", body.lstrip("\n"))
-    body = re.sub(r"\n+这个技能附带的文件（用 skill 工具的 file 参数读）：[^\n]*\s*$", "", body).strip("\n")
+    # In either language: a skill written while Lattice spoke the other one is read back the same way.
+    heading = "|".join(re.escape(h.split("{0}")[0].strip()) for h in {"# 技能：{0}（{1}）", tr("# 技能：{0}（{1}）\n\n")})
+    files = "|".join(re.escape(f.split("{0}")[0].strip()) for f in {"这个技能附带的文件（用 skill 工具的 file 参数读）：{0}", tr("\n\n这个技能附带的文件（用 skill 工具的 file 参数读）：{0}")})
+    body = re.sub(r"^(?:" + heading + r")[^\n]*\n+", "", body.lstrip("\n"))
+    body = re.sub(r"\n+(?:" + files + r")[^\n]*\s*$", "", body).strip("\n")
     merged = {**old, **{k: v for k, v in new.items() if v not in (None, "", [], {})}}
     if "category" in merged and merged["category"] not in CATEGORIES:
         if old.get("category") in CATEGORIES:
@@ -263,7 +268,7 @@ def check_page(content):
     try:
         attrs, body = split_frontmatter(content)
     except ValueError as exc:
-        raise ValueError("SKILL.md 开头的属性写坏了：" + str(exc)) from None
+        raise ValueError(tr("SKILL.md 开头的属性写坏了：") + str(exc)) from None
     if not attrs.get("name") and not attrs.get("title"):
-        raise ValueError("SKILL.md 开头要有 name 或 title")
+        raise ValueError(tr("SKILL.md 开头要有 name 或 title"))
     return body.strip()

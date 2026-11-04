@@ -11,6 +11,8 @@ What apps may not reach is this computer and the local network: the request inte
 an app, so an app can use the internet but not the services running here."""
 from __future__ import annotations
 
+from .i18n import tr
+
 import hashlib
 import ipaddress
 import json
@@ -87,20 +89,7 @@ def catcher(request, wait, probe):
     """Loaded ahead of an app being checked: it notes every error, runs the probe after the page has settled, and
     hands back what the page shows."""
     probe = probe.replace("</script", "<\\/script")
-    return ("<script>window.__errors=[];const __err=console.error.bind(console);"
-            'console.error=(...a)=>{__errors.push("console.error："+a.map(String).join(" "));__err(...a);};'
-            # A ResizeObserver that settles over a few frames reports a harmless loop warning; it is not the app's error.
-            'addEventListener("error",e=>{if(/ResizeObserver loop/.test(e.message||""))return;__errors.push(e.message?e.message+(e.lineno?"（第 "+e.lineno+" 行）":""):"加载不了："+(e.target?.src||e.target?.href||e.target?.tagName));},true);'
-            'addEventListener("unhandledrejection",e=>__errors.push("未处理的 Promise："+String(e.reason?.message||e.reason)));'
-            'addEventListener("load",()=>setTimeout(async()=>{let probe,probeError;'
-            "if(window.__probe){try{probe=await window.__probe();}catch(e){probeError=String(e?.stack||e);}await new Promise(r=>setTimeout(r,150));}"
-            "let shown;try{shown=probe===undefined?undefined:JSON.stringify(probe)?.slice(0,4000);}catch(e){shown=String(probe);}"
-            "const d=document.documentElement;parent.postMessage({lattice_check:" + json.dumps(request) + ",errors:__errors.slice(0,30),title:document.title,"
-            'text:(document.body?.innerText||"").slice(0,2500),size:{width:d.scrollWidth,height:d.scrollHeight},canvases:document.querySelectorAll("canvas").length,'
-            'svgs:document.querySelectorAll("svg").length,buttons:document.querySelectorAll("button").length,inputs:document.querySelectorAll("input,select,textarea").length,'
-            'images:[...document.images].map(i=>({src:i.currentSrc.slice(0,160),loaded:i.complete&&i.naturalWidth>0})).slice(0,20),'
-            "probe:shown,probe_error:probeError},\"*\");}," + str(int(wait)) + "));</script>"
-            + ("<script>window.__probe=async function(){\n" + probe + "\n};</script>" if probe.strip() else ""))
+    return (tr("<script>window.__errors=[];const __err=console.error.bind(console);console.error=(...a)=>{__errors.push(\"console.error：\"+a.map(String).join(\" \"));__err(...a);};addEventListener(\"error\",e=>{if(/ResizeObserver loop/.test(e.message||\"\"))return;__errors.push(e.message?e.message+(e.lineno?\"（第 \"+e.lineno+\" 行）\":\"\"):\"加载不了：\"+(e.target?.src||e.target?.href||e.target?.tagName));},true);addEventListener(\"unhandledrejection\",e=>__errors.push(\"未处理的 Promise：\"+String(e.reason?.message||e.reason)));addEventListener(\"load\",()=>setTimeout(async()=>{let probe,probeError;if(window.__probe){try{probe=await window.__probe();}catch(e){probeError=String(e?.stack||e);}await new Promise(r=>setTimeout(r,150));}let shown;try{shown=probe===undefined?undefined:JSON.stringify(probe)?.slice(0,4000);}catch(e){shown=String(probe);}const d=document.documentElement;parent.postMessage({lattice_check:{0},errors:__errors.slice(0,30),title:document.title,text:(document.body?.innerText||\"\").slice(0,2500),size:{width:d.scrollWidth,height:d.scrollHeight},canvases:document.querySelectorAll(\"canvas\").length,svgs:document.querySelectorAll(\"svg\").length,buttons:document.querySelectorAll(\"button\").length,inputs:document.querySelectorAll(\"input,select,textarea\").length,images:[...document.images].map(i=>({src:i.currentSrc.slice(0,160),loaded:i.complete&&i.naturalWidth>0})).slice(0,20),probe:shown,probe_error:probeError},\"*\");},{1}));</script>", json.dumps(request), str(int(wait))) + str("<script>window.__probe=async function(){\n" + probe + "\n};</script>" if probe.strip() else ""))
 
 
 class AppScheme(QWebEngineUrlSchemeHandler):

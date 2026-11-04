@@ -1,15 +1,24 @@
-"use strict";
+import {$t} from "./i18n.js";
+import {Dock,panelType} from "./state.js";
+import {S,all,ask,baseName,button,closeModal,el,emptyState,esc,fmtDate,hydrateVault,iconButton,kindName,linkName,markdown,modal,modalHead,rpc,safe,shorten,svg,toast} from "./core.js";
+import {activate,closePanel,detach,eachStack,findPanel,openPanel,renderDock,saveLayout,splitBeside,stackNode,stackOf,targetStack,tidy} from "./dock.js";
+import {refreshEditors} from "./editor.js";
+import {Files,fileIcon,flushAll,gotoIn,loadFile,openFile,renderFile} from "./files.js";
+import {openAnnotation} from "./marks.js";
+import {Side,renderSide,sideGroup,sideList,sideOpen,treeEntries} from "./side.js";
+import {writeClipboard} from "./popups.js";
+import {popMenu,refreshState,saveUi} from "./app.js";
 /* Notes, kept the way Obsidian keeps them: a folder tree to file them in (new, rename, move by dragging, bookmarks,
    daily notes, templates), [[links]] that follow renames, and beside the note its outline, backlinks, outgoing links
    and tags. The editor itself is editor.js; this is everything around it. */
-const Notes={current:null,renaming:null,query:"",drag:null,links:null,tags:null,cursorLine:0,timer:null};
-const NOTE_SORT=[["name","名称 A → Z"],["name-desc","名称 Z → A"],["updated","最近修改的在前"],["updated-asc","最早修改的在前"]];
-const TEMPLATE_DIR="notes/模板",DAILY_DIR="日记";
+export const Notes={current:null,renaming:null,query:"",drag:null,links:null,tags:null,cursorLine:0,timer:null};
+const NOTE_SORT=[["name",$t("名称 A → Z")],["name-desc",$t("名称 Z → A")],["updated",$t("最近修改的在前")],["updated-asc",$t("最早修改的在前")]];
+const TEMPLATE_DIR="notes/模板",DAILY_DIR=$t("日记");
 
 /* ---- links between notes ---------------------------------------------------------------------------------------- */
 function docByTitle(name){const n=String(name||"").trim().toLowerCase();return (S.data.docs||[]).find(d=>d.title.toLowerCase()===n)||null;}
 // A [[link]] names a document by its title, or a file by its path (with or without .md).
-function resolveWiki(name){
+export function resolveWiki(name){
  const n=String(name||"").trim();if(!n)return null;
  const d=docByTitle(n);if(d)return d.path;
  const byPath=(S.data.docs||[]).find(x=>x.path===n||x.path===n+".md"||x.path.endsWith("/"+n)||x.path.endsWith("/"+n+".md"));
@@ -17,7 +26,7 @@ function resolveWiki(name){
  return /\.[a-z0-9]{1,6}$/i.test(n)?n:null;
 }
 function folderOf(path){return String(path||"").startsWith("notes/")?path.split("/").slice(1,-1).join("/"):"";}
-async function openWiki(raw,pid){
+export async function openWiki(raw,pid){
  // A link can name a place too: [[书.pdf#p120]] a page, [[笔记#一节]] a section, [[…#ann:id]] an annotation.
  const hash=String(raw).indexOf("#"),name=hash<0?raw:String(raw).slice(0,hash),place=hash<0?"":String(raw).slice(hash+1).trim();
  if(place.startsWith("ann:"))return openAnnotation(place.slice(4));
@@ -25,9 +34,9 @@ async function openWiki(raw,pid){
  if(path)return openFile(path,page?{page:Number(page[1])}:place?{heading:place}:null);
  // As in Obsidian, a link to a note that does not exist yet creates it, next to the note the link is in.
  const r=await rpc("doc_create",{kind:"note",title:String(name).trim(),folder:folderOf(Dock.panels[pid]?.path)});
- await refreshState();toast("新建了笔记「"+String(name).trim()+"」");return openFile(r.path);
+ await refreshState();toast($t("新建了笔记「{0}」",String(name).trim()));return openFile(r.path);
 }
-function openHref(href,pid){
+export function openHref(href,pid){
  if(/^https?:/i.test(href))return rpc("open_url",{url:href});
  const p=decodeURI(href.replace(/^\.\//,"")),base=String(Dock.panels[pid]?.path||"").split("/").slice(0,-1).join("/");
  return openFile(/^(notes|cards|topics|lessons|insights|notebooks|code|data)\//.test(p)||!base?p:base+"/"+p);
@@ -43,7 +52,7 @@ function pathMoved(old,now){
 }
 
 /* ---- ![[note]] and ![[note#section]]: another note's text shown in this one ------------------------------------ */
-const Embeds={cache:new Map(),version:0};
+export const Embeds={cache:new Map(),version:0};
 function noteContent(path){
  if(!Embeds.cache.has(path))Embeds.cache.set(path,rpc("file_read",{path}).then(d=>({title:d.doc?.title||d.card?.title||d.topic?.title||baseName(path),
   body:d.doc?.body??d.card?.body??d.topic?.notes??d.content??""})).catch(()=>null));
@@ -59,20 +68,20 @@ function sectionOf(body,heading){
  }
  return start<0?null:lines.slice(start).join("\n");
 }
-async function fillEmbed(box,base,depth=0){
+export async function fillEmbed(box,base,depth=0){
  const raw=box.dataset.embed,hash=raw.indexOf("#"),name=(hash<0?raw:raw.slice(0,hash)).trim(),section=hash<0?"":raw.slice(hash+1).trim();
  const path=resolveWiki(name),label=esc(name)+(section?" › "+esc(section):"");
- if(!path){box.innerHTML='<div class="embed-head">'+svg("document",12)+' <a data-wiki="'+esc(name)+'">'+label+'</a><small>还没有这篇，点一下新建</small></div>';return;}
- if(path===base||depth>=3){box.innerHTML='<div class="embed-head">'+svg(fileIcon(path),12)+' <a data-action="open-file" data-path="'+esc(path)+'">'+label+'</a><small>'+(path===base?"不能嵌入它自己":"嵌得太深了，点开看")+'</small></div>';return;}
+ if(!path){box.innerHTML="<div class=\"embed-head\">"+svg("document",12)+" <a data-wiki=\""+esc(name)+"\">"+label+"</a><small>"+$t("还没有这篇，点一下新建")+"</small></div>";return;}
+ if(path===base||depth>=3){box.innerHTML='<div class="embed-head">'+svg(fileIcon(path),12)+' <a data-action="open-file" data-path="'+esc(path)+'">'+label+'</a><small>'+(path===base?$t("不能嵌入它自己"):$t("嵌得太深了，点开看"))+'</small></div>';return;}
  const note=await noteContent(path);
- if(!note){box.innerHTML='<div class="embed-head">'+label+'<small>读不到</small></div>';return;}
+ if(!note){box.innerHTML="<div class=\"embed-head\">"+label+"<small>"+$t("读不到")+"</small></div>";return;}
  const text=section?sectionOf(note.body,section):note.body;
  box.innerHTML='<div class="embed-head">'+svg(fileIcon(path),12)+' <a data-action="open-file" data-path="'+esc(path)+'">'+esc(note.title)+(section?" › "+esc(section):"")+'</a></div>'+
-  '<div class="embed-body markdown">'+(text==null?'<p class="muted">这篇里没有「'+esc(section)+'」这一节。</p>':text.trim()?markdown(text):'<p class="muted">（还是空的）</p>')+'</div>';
+  '<div class="embed-body markdown">'+(text==null?"<p class=\"muted\">"+$t("这篇里没有「{0}」这一节。",esc(section))+"</p>":text.trim()?markdown(text):"<p class=\"muted\">"+$t("（还是空的）")+"</p>")+'</div>';
  hydrateVault(box.querySelector(".embed-body"),path,depth+1);
 }
 // A note that changed is shown anew wherever it is embedded.
-function embedsChanged(paths){
+export function embedsChanged(paths){
  let hit=false;for(const p of paths||[])if(Embeds.cache.delete(p))hit=true;
  if(!hit)return;
  Embeds.version++;
@@ -82,7 +91,7 @@ function embedsChanged(paths){
 
 /* ---- which note the side panels follow --------------------------------------------------------------------------- */
 function isNotePanel(pid){const st=Files[pid];return !!(st?.data&&(st.data.doc||st.data.card||st.data.topic||(st.data.ext||"").toLowerCase()===".md"));}
-function noteFollow(){
+export function noteFollow(){
  const here=[];eachStack(s=>here.push(...s.tabs));
  const shown=[];eachStack(s=>{if(s.active)shown.push(s.active);});
  let pid=isNotePanel(Dock.focus)&&here.includes(Dock.focus)?Dock.focus:null;
@@ -97,7 +106,7 @@ function noteFollow(){
   else all("#side .note-row").forEach(r=>r.classList.toggle("on",r.dataset.path===path));
  }
 }
-function noteCursor(pid){
+export function noteCursor(pid){
  if(Dock.panels[pid]?.path!==Notes.current)return;
  clearTimeout(Notes.timer);
  Notes.timer=setTimeout(()=>{
@@ -123,12 +132,12 @@ function headingsOf(text){
 }
 
 /* ---- the panel beside a note: outline, backlinks, outgoing links, tags ------------------------------------------- */
-panelType("noteinfo",{side:"mine",host:false,icon:"list",title:()=>"大纲与链接",
+panelType("noteinfo",{side:"mine",host:false,icon:"list",title:()=>$t("大纲与链接"),
  mount(p,node,pid){node.innerHTML='<div class="noteinfo"><div class="ni-tabs"></div><div class="ni-body" data-keep-scroll></div></div>';renderNoteInfo(pid);},
  shown(p,node){renderNoteInfo(node.dataset.pid);},
- screen(p){return {view:"笔记旁边的"+({outline:"大纲",links:"反向链接",out:"出链",tags:"标签"}[p.tab||"outline"]),note:Notes.current};}});
-const NI_TABS=[["outline","大纲"],["links","反向链接"],["out","出链"],["tags","标签"]];
-function noteInfoChanged(){all(".panel-noteinfo").forEach(n=>{if(n.isConnected)safe(()=>renderNoteInfo(n.dataset.pid));});}
+ screen(p){return {view:$t("笔记旁边的")+{outline:$t("大纲"),links:$t("反向链接"),out:$t("出链"),tags:$t("标签")}[p.tab||"outline"],note:Notes.current};}});
+const NI_TABS=[["outline",$t("大纲")],["links",$t("反向链接")],["out",$t("出链")],["tags",$t("标签")]];
+export function noteInfoChanged(){all(".panel-noteinfo").forEach(n=>{if(n.isConnected)safe(()=>renderNoteInfo(n.dataset.pid));});}
 async function renderNoteInfo(pid){
  const p=Dock.panels[pid],node=Dock.els[pid]?.querySelector(".noteinfo");if(!p||!node)return;
  const tab=p.tab||"outline",cur=Notes.current;
@@ -136,20 +145,19 @@ async function renderNoteInfo(pid){
   (cur&&tab!=="tags"?'<div class="ni-note">'+svg(fileIcon(cur),12)+' '+esc((S.data.docs||[]).find(d=>d.path===cur)?.title||baseName(cur))+'</div>':"");
  const body=node.querySelector(".ni-body");
  if(tab==="tags")return renderTags(pid);
- if(!cur){body.innerHTML=emptyState("document","没有打开笔记","打开一篇笔记，这里会显示它的大纲、谁链接到它、它链接到谁。");return;}
+ if(!cur){body.innerHTML=emptyState("document",$t("没有打开笔记"),$t("打开一篇笔记，这里会显示它的大纲、谁链接到它、它链接到谁。"));return;}
  if(tab==="outline")return renderOutline(pid);
  if(!Notes.links||Notes.links.path!==cur)Notes.links={path:cur,data:await rpc("note_links",{path:cur}).catch(()=>null)};
- const data=Notes.links.data;if(!data){body.innerHTML='<p class="muted pad">读不到这篇的链接。</p>';return;}
+ const data=Notes.links.data;if(!data){body.innerHTML="<p class=\"muted pad\">"+$t("读不到这篇的链接。")+"</p>";return;}
  if(Dock.panels[pid]?.tab!==tab||Notes.current!==cur)return;
  const snippet=(d,l)=>'<a class="ni-line" data-action="open-file" data-path="'+esc(d.path)+'" data-line="'+l.line+'">'+esc(shorten(l.text,140))+'</a>';
  const docRow=(d,extra="")=>'<div class="ni-doc"><div class="ni-doc-head"><a data-action="open-file" data-path="'+esc(d.path)+'">'+svg(fileIcon(d.path),12)+' '+esc(d.title)+'</a>'+(d.link?'<small>'+esc(linkName[d.link]||d.link)+'</small>':"")+extra+'</div>'+(d.lines||[]).map(l=>snippet(d,l)).join("")+'</div>';
  if(tab==="links"){
-  body.innerHTML='<h5>链接到这里的 · '+data.backlinks.length+'</h5>'+(data.backlinks.map(d=>docRow(d)).join("")||'<p class="muted">还没有。在别的笔记里写 [[' +esc(data.title)+']] 就连过来了。</p>')+
-   '<h5>提到了「'+esc(data.title)+'」但没有链接的 · '+data.unlinked.length+'</h5>'+(data.unlinked.map(d=>docRow(d,button("链上","ni-linkup",'data-path="'+esc(d.path)+'"',"ghost xs"))).join("")||'<p class="muted">没有。</p>');
+  body.innerHTML="<h5>"+$t("链接到这里的 ·")+" "+data.backlinks.length+"</h5>"+(data.backlinks.map(d=>docRow(d)).join("")||"<p class=\"muted\">"+$t("还没有。在别的笔记里写 [[{0}]] 就连过来了。",esc(data.title))+"</p>")+"<h5>"+$t("提到了「{0}」但没有链接的 ·",esc(data.title))+" "+data.unlinked.length+"</h5>"+(data.unlinked.map(d=>docRow(d,button($t("链上"),"ni-linkup",'data-path="'+esc(d.path)+'"',"ghost xs"))).join("")||"<p class=\"muted\">"+$t("没有。")+"</p>");
  }else{
-  body.innerHTML='<h5>这篇链接到的 · '+data.outgoing.length+'</h5>'+(data.outgoing.map(o=>'<div class="ni-doc"><div class="ni-doc-head">'+
-   (o.path?'<a data-action="open-file" data-path="'+esc(o.path)+'">'+svg(fileIcon(o.path),12)+' '+esc(o.name)+'</a><small>'+esc(kindName[o.kind]||"文件")+'</small>':
-    '<span class="ni-missing">'+svg("document",12)+' '+esc(o.name)+'</span><small>还没有</small>'+button("新建","ni-create",'data-name="'+esc(o.name)+'"',"ghost xs"))+'</div></div>').join("")||'<p class="muted">这篇还没有链接。写 [[ 就能挑一篇连过去。</p>');
+  body.innerHTML="<h5>"+$t("这篇链接到的 ·")+" "+data.outgoing.length+"</h5>"+(data.outgoing.map(o=>'<div class="ni-doc"><div class="ni-doc-head">'+
+   (o.path?'<a data-action="open-file" data-path="'+esc(o.path)+'">'+svg(fileIcon(o.path),12)+' '+esc(o.name)+'</a><small>'+esc(kindName[o.kind]||$t("文件"))+'</small>':
+    "<span class=\"ni-missing\">"+svg("document",12)+" "+esc(o.name)+"</span><small>"+$t("还没有")+"</small>"+button($t("新建"),"ni-create",'data-name="'+esc(o.name)+'"',"ghost xs"))+'</div></div>').join("")||"<p class=\"muted\">"+$t("这篇还没有链接。写 [[ 就能挑一篇连过去。")+"</p>");
  }
 }
 function renderOutline(pid){
@@ -157,38 +165,35 @@ function renderOutline(pid){
  const heads=headingsOf(noteText(Notes.current)),top=Math.min(...heads.map(h=>h.level),6);
  const at=heads.filter(h=>h.line<=Notes.cursorLine).pop();
  node.innerHTML=heads.map(h=>'<a class="ni-head'+(h===at?" on":"")+'" style="--d:'+(h.level-top)+'" data-action="ni-goto" data-line="'+h.line+'">'+esc(h.title)+'</a>').join("")||
-  '<p class="muted pad">这篇没有标题。用 # 开头写一行就是一个标题，这里会列出来，点一下跳过去。</p>';
+  "<p class=\"muted pad\">"+$t("这篇没有标题。用 # 开头写一行就是一个标题，这里会列出来，点一下跳过去。")+"</p>";
 }
-async function renderTags(pid){
+export async function renderTags(pid){
  const p=Dock.panels[pid],node=Dock.els[pid]?.querySelector(".ni-body");if(!node)return;
  if(!Notes.tags)Notes.tags=await rpc("tags").catch(()=>[]);
  const q=(p.tagQuery||"").trim().toLowerCase(),cur=Notes.current,doc=cur&&(S.data.docs||[]).find(d=>d.path===cur);
  const mine=doc?Notes.tags.filter(t=>t.docs.some(d=>d.path===cur)).map(t=>t.tag):[];
  const list=Notes.tags.filter(t=>!q||t.tag.toLowerCase().includes(q));
- node.innerHTML='<input class="side-input" data-ni-tag-query="'+pid+'" placeholder="筛选标签…" value="'+esc(p.tagQuery||"")+'"/>'+
-  (mine.length?'<h5>这篇的标签</h5><div class="ni-chips">'+mine.map(t=>'<button class="chip" data-action="ni-tag" data-pid="'+pid+'" data-tag="'+esc(t)+'">#'+esc(t)+'</button>').join("")+'</div>':"")+
-  '<h5>全部标签 · '+Notes.tags.length+'</h5>'+(list.map(t=>'<div class="ni-tag'+(p.tag===t.tag?" open":"")+'"><a data-action="ni-tag" data-pid="'+pid+'" data-tag="'+esc(t.tag)+'">#'+esc(t.tag)+'<small>'+t.count+'</small></a>'+
+ node.innerHTML="<input class=\"side-input\" data-ni-tag-query=\""+pid+"\" placeholder=\""+$t("筛选标签…")+"\" value=\""+esc(p.tagQuery||"")+"\"/>"+(mine.length?"<h5>"+$t("这篇的标签")+"</h5><div class=\"ni-chips\">"+mine.map(t=>'<button class="chip" data-action="ni-tag" data-pid="'+pid+'" data-tag="'+esc(t)+'">#'+esc(t)+'</button>').join("")+"</div>":"")+"<h5>"+$t("全部标签 ·")+" "+Notes.tags.length+"</h5>"+(list.map(t=>'<div class="ni-tag'+(p.tag===t.tag?" open":"")+'"><a data-action="ni-tag" data-pid="'+pid+'" data-tag="'+esc(t.tag)+'">#'+esc(t.tag)+'<small>'+t.count+'</small></a>'+
    (p.tag===t.tag?t.docs.map(d=>'<a class="ni-line" data-action="open-file" data-path="'+esc(d.path)+'">'+svg(fileIcon(d.path),12)+' '+esc(d.title)+'</a>').join(""):"")+'</div>').join("")||
-   '<p class="muted">还没有标签。在笔记的标签栏里写，或者正文里写 #标签。</p>');
+   "<p class=\"muted\">"+$t("还没有标签。在笔记的标签栏里写，或者正文里写 #标签。")+"</p>");
 }
 // A tag clicked anywhere opens the tag list beside the note, with that tag's notes.
-function showTag(tag){
+export function showTag(tag){
  let pid=null;eachStack(s=>{if(!pid)pid=s.tabs.find(x=>Dock.panels[x]?.type==="noteinfo")||null;});
  if(!pid)pid=openPanel({type:"noteinfo"});else activate(pid);
  Object.assign(Dock.panels[pid],{tab:"tags",tag,tagQuery:""});saveLayout();Notes.tags=null;renderNoteInfo(pid);
 }
 
 /* ---- the folder tree ------------------------------------------------------------------------------------------------ */
-async function notesSection(){
- const tools=iconButton("notenew","note-new","新笔记",'data-folder=""')+iconButton("folderplus","folder-new","新文件夹",'data-folder=""')+iconButton("calendar","note-daily","今天的日记")+
-  iconButton("more","note-more","排序、折叠和更多");
+export async function notesSection(){
+ const tools=iconButton("notenew","note-new",$t("新笔记"),'data-folder=""')+iconButton("folderplus","folder-new",$t("新文件夹"),'data-folder=""')+iconButton("calendar","note-daily",$t("今天的日记"))+
+  iconButton("more","note-more",$t("排序、折叠和更多"));
  const starred=(S.data.starred||[]).map(id=>(S.data.docs||[]).find(d=>d.id===id)).filter(Boolean);
  const q=Notes.query.trim().toLowerCase();
  let body;
- if(q)body=(S.data.docs||[]).filter(d=>d.path.startsWith("notes/")&&(d.title.toLowerCase().includes(q)||d.path.toLowerCase().includes(q))).map(d=>noteRow(d,0,true)).join("")||'<p class="side-empty">没有符合的笔记。</p>';
- else body=await noteTree("notes",0)||'<p class="side-empty">还没有笔记。点上面的「新笔记」，或者 Ctrl+N 随手写一篇。</p>';
- return {tools,body:'<input class="side-input" data-side-input="notes" placeholder="筛选笔记…  Ctrl+O 快速打开" value="'+esc(Notes.query)+'"/>'+
-  (starred.length?sideGroup("收藏",starred.map(d=>noteRow(d,0,true))):"")+'<div class="note-tree" data-drop-folder="notes" data-note-root>'+body+'</div>'};
+ if(q)body=(S.data.docs||[]).filter(d=>d.path.startsWith("notes/")&&(d.title.toLowerCase().includes(q)||d.path.toLowerCase().includes(q))).map(d=>noteRow(d,0,true)).join("")||"<p class=\"side-empty\">"+$t("没有符合的笔记。")+"</p>";
+ else body=await noteTree("notes",0)||"<p class=\"side-empty\">"+$t("还没有笔记。点上面的「新笔记」，或者 Ctrl+N 随手写一篇。")+"</p>";
+ return {tools,body:"<input class=\"side-input\" data-side-input=\"notes\" placeholder=\""+$t("筛选笔记…  Ctrl+O 快速打开")+"\" value=\""+esc(Notes.query)+"\"/>"+(starred.length?sideGroup($t("收藏"),starred.map(d=>noteRow(d,0,true))):"")+"<div class=\"note-tree\" data-drop-folder=\"notes\" data-note-root>"+body+"</div>"};
 }
 async function noteTree(path,depth){
  const entries=await treeEntries(path),docs=new Map((S.data.docs||[]).map(d=>[d.path,d])),sort=S.ui.note_sort||"name";
@@ -237,7 +242,7 @@ async function finishRename(box,keep=true){
  try{
   await flushAll();
   let now;
-  if(kind==="note"){const r=await rpc("doc_save",{path,title:value});now=r.path;if(r.relinked)toast("改了名，"+r.relinked+" 篇里链到它的 [[链接]] 也跟着改了");}
+  if(kind==="note"){const r=await rpc("doc_save",{path,title:value});now=r.path;if(r.relinked)toast($t("改了名，{0} 篇里链到它的 [[链接]] 也跟着改了",r.relinked));}
   else if(kind==="folder")now=(await rpc("folder_rename",{path,name:value})).path;
   else now=(await rpc("file_rename",{path,name:value})).path;
   pathMoved(path,now);
@@ -252,7 +257,7 @@ function uniqueTitle(base){
 // The folder new things go into: the one asked for, else the open note's.
 function targetFolder(a){return a?.dataset.folder!=null&&a.dataset.folder!==""?a.dataset.folder.replace(/^notes\/?/,""):folderOf(Notes.current);}
 async function newNote(folder,body="",title=null){
- const r=await rpc("doc_create",{kind:"note",title:title||uniqueTitle("未命名"),folder,body});
+ const r=await rpc("doc_create",{kind:"note",title:title||uniqueTitle($t("未命名")),folder,body});
  if(folder)Side.open.add("notes/"+folder);
  await refreshState();Side.entries={};
  openFile(r.path);
@@ -281,21 +286,21 @@ function noteMenu(path,kind,at){
  const folder=kind==="folder"?path:kind==="root"?"notes":"";
  const tpl=templates();
  let html="";
- if(kind==="note"||kind==="file")html=item("open-file","document","打开")+item("note-open-side","split","在旁边打开")+'<hr/>'+item("note-rename","edit","重命名")+item("note-move","folder","移动到…")+
-  (d?item("note-dup","copy","复制一份")+item("note-star","star",(S.data.starred||[]).includes(d.id)?"取消收藏":"收藏",'data-id="'+esc(d.id)+'"')+item("note-copylink","link","复制链接 [[…]]",'data-title="'+esc(d.title)+'"'):"")+
-  '<hr/>'+item("note-delete","trash","删除");
- else html=item("note-new","notenew","新笔记",'data-folder="'+esc(folder)+'"')+item("folder-new","folderplus","新文件夹",'data-folder="'+esc(folder)+'"')+
-  (tpl.length?'<div class="menu-label">从模板新建</div>'+tpl.map(t=>'<button data-action="note-template" data-folder="'+esc(folder)+'" data-template="'+esc(t.path)+'">'+svg("document",14)+'<span>'+esc(t.title)+'</span></button>').join(""):
-   '<div class="menu-empty">在 notes/模板/ 里放笔记就能当模板用（{{title}} {{date}} {{time}} 会被替换）</div>')+
-  (kind==="folder"?'<hr/>'+item("note-rename","edit","重命名")+item("note-move","folder","移动到…")+item("note-delete","trash","删除这个文件夹"):"");
+ if(kind==="note"||kind==="file")html=item("open-file","document",$t("打开"))+item("note-open-side","split",$t("在旁边打开"))+'<hr/>'+item("note-rename","edit",$t("重命名"))+item("note-move","folder",$t("移动到…"))+
+  (d?item("note-dup","copy",$t("复制一份"))+item("note-star","star",(S.data.starred||[]).includes(d.id)?$t("取消收藏"):$t("收藏"),'data-id="'+esc(d.id)+'"')+item("note-copylink","link",$t("复制链接 [[…]]"),'data-title="'+esc(d.title)+'"'):"")+
+  '<hr/>'+item("note-delete","trash",$t("删除"));
+ else html=item("note-new","notenew",$t("新笔记"),'data-folder="'+esc(folder)+'"')+item("folder-new","folderplus",$t("新文件夹"),'data-folder="'+esc(folder)+'"')+
+  (tpl.length?"<div class=\"menu-label\">"+$t("从模板新建")+"</div>"+tpl.map(t=>'<button data-action="note-template" data-folder="'+esc(folder)+'" data-template="'+esc(t.path)+'">'+svg("document",14)+'<span>'+esc(t.title)+'</span></button>').join(""):
+   "<div class=\"menu-empty\">"+$t("在 notes/模板/ 里放笔记就能当模板用（{{title}} {{date}} {{time}} 会被替换）")+"</div>")+
+  (kind==="folder"?'<hr/>'+item("note-rename","edit",$t("重命名"))+item("note-move","folder",$t("移动到…"))+item("note-delete","trash",$t("删除这个文件夹")):"");
  popMenu(at,html,{cls:"menu-wide"});
 }
 async function moveDialog(path){
  const folders=["notes"];
  const walk=async p=>{for(const e of await treeEntries(p))if(e.type==="dir"&&e.path!==path){folders.push(e.path);await walk(e.path);}};
  await walk("notes");
- modal(modalHead("把「"+baseName(path)+"」移到…")+'<div class="move-list">'+folders.filter(f=>f!==path.split("/").slice(0,-1).join("/")).map(f=>
-  '<button class="pal-item" data-action="note-move-to" data-path="'+esc(path)+'" data-folder="'+esc(f)+'">'+svg("folder",14)+'<span>'+esc(f==="notes"?"笔记（最外层）":f.slice(6))+'</span></button>').join("")+'</div>');
+ modal(modalHead($t("把「{0}」移到…",baseName(path)))+'<div class="move-list">'+folders.filter(f=>f!==path.split("/").slice(0,-1).join("/")).map(f=>
+  '<button class="pal-item" data-action="note-move-to" data-path="'+esc(path)+'" data-folder="'+esc(f)+'">'+svg("folder",14)+'<span>'+esc(f==="notes"?$t("笔记（最外层）"):f.slice(6))+'</span></button>').join("")+'</div>');
 }
 async function moveNote(path,folder){
  if(!path||!folder||path===folder)return;
@@ -303,20 +308,18 @@ async function moveNote(path,folder){
  catch(e){toast(e.message,"error");}
  await refreshState();Side.entries={};renderSide();
 }
-async function notesAction(kind,a){
+export async function notesAction(kind,a){
  const path=a.dataset.path;
  switch(kind){
   case "note-new":return newNote(targetFolder(a));
-  case "note-template":{const title=uniqueTitle("未命名");return newNote(targetFolder(a),fillTemplate(await templateBody(a.dataset.template),title),title);}
+  case "note-template":{const title=uniqueTitle($t("未命名"));return newNote(targetFolder(a),fillTemplate(await templateBody(a.dataset.template),title),title);}
   case "folder-new":{
-   const parent=a.dataset.folder?"notes/"+targetFolder(a):"notes",base="新文件夹",names=new Set((await treeEntries(parent)).map(e=>e.name));
+   const parent=a.dataset.folder?"notes/"+targetFolder(a):"notes",base=$t("新文件夹"),names=new Set((await treeEntries(parent)).map(e=>e.name));
    let name=base;for(let i=2;names.has(name);i++)name=base+" "+i;
    const r=await rpc("folder_create",{parent,name});Side.open.add(parent);Side.entries={};return startRename(r.path);
   }
   case "note-daily":return dailyNote();
-  case "note-more":return popMenu(a,'<div class="menu-label">排序</div>'+NOTE_SORT.map(([v,t])=>'<button data-action="note-sort-set" data-sort="'+v+'">'+svg((S.ui.note_sort||"name")===v?"check":"sort",14)+'<span>'+t+'</span></button>').join("")+'<hr/>'+
-   '<button data-action="note-fold">'+svg("fold",14)+'<span>全部折叠</span></button><button data-action="note-switcher">'+svg("search",14)+'<span>快速打开 · Ctrl O</span></button>'+
-   '<button data-action="noteinfo-open">'+svg("list",14)+'<span>大纲与链接</span></button>');
+  case "note-more":return popMenu(a,"<div class=\"menu-label\">"+$t("排序")+"</div>"+NOTE_SORT.map(([v,t])=>'<button data-action="note-sort-set" data-sort="'+v+'">'+svg((S.ui.note_sort||"name")===v?"check":"sort",14)+'<span>'+t+'</span></button>').join("")+"<hr/><button data-action=\"note-fold\">"+svg("fold",14)+"<span>"+$t("全部折叠")+"</span></button><button data-action=\"note-switcher\">"+svg("search",14)+"<span>"+$t("快速打开 · Ctrl O")+"</span></button><button data-action=\"noteinfo-open\">"+svg("list",14)+"<span>"+$t("大纲与链接")+"</span></button>");
   case "noteinfo-open":return openPanel({type:"noteinfo"});
   case "note-sort-set":S.ui.note_sort=a.dataset.sort;saveUi();return renderSide();
   case "note-fold":Side.open=new Set([...Side.open].filter(p=>!p.startsWith("notes/")));return renderSide();
@@ -327,13 +330,13 @@ async function notesAction(kind,a){
    const anchor=stackOf(Dock.focus)||targetStack("mine"),pid=findPanel({type:"file",path})||openPanel({type:"file",path});
    detach(pid);splitBeside(anchor,"right",stackNode([pid]));tidy();renderDock();saveLayout();return;
   }
-  case "note-dup":{const d=(await rpc("file_read",{path})).doc;if(!d)return;return newNote(folderOf(path),d.body,uniqueTitle(d.title+" 副本"));}
-  case "note-star":{const on=!(S.data.starred||[]).includes(a.dataset.id);S.data.starred=await rpc("star",{id:a.dataset.id,on});toast(on?"已收藏，在笔记列表最上面":"已取消收藏");return renderSide();}
-  case "note-copylink":{const text="[["+a.dataset.title+"]]";await writeClipboard(text);return toast("已复制 "+text);}
+  case "note-dup":{const d=(await rpc("file_read",{path})).doc;if(!d)return;return newNote(folderOf(path),d.body,uniqueTitle(d.title+" "+$t("副本")));}
+  case "note-star":{const on=!(S.data.starred||[]).includes(a.dataset.id);S.data.starred=await rpc("star",{id:a.dataset.id,on});toast(on?$t("已收藏，在笔记列表最上面"):$t("已取消收藏"));return renderSide();}
+  case "note-copylink":{const text="[["+a.dataset.title+"]]";await writeClipboard(text);return toast($t("已复制")+" "+text);}
   case "note-delete":{
    const folder=a.dataset.kind==="folder";
    const inside=folder?(S.data.docs||[]).filter(d=>d.path.startsWith(path+"/")).length:0;
-   if(!await ask(folder?"它们会留在学习库的历史里，可以恢复。":"它会留在学习库的历史里，可以恢复。",{title:folder?"删除文件夹「"+baseName(path)+"」"+(inside?"和里面的 "+inside+" 篇笔记":"")+"？":"删除「"+baseName(path)+"」？",...{danger:true,ok:"删除"}}))return;
+   if(!await ask(folder?$t("它们会留在学习库的历史里，可以恢复。"):$t("它会留在学习库的历史里，可以恢复。"),{title:folder?$t("删除文件夹「{0}」{1}？",baseName(path),(inside?$t("和里面的 {0} 篇笔记",inside):"")):$t("删除「{0}」？",baseName(path)),...{danger:true,ok:$t("删除")}}))return;
    await flushAll();await rpc("file_delete",{path});
    for(const pid of Object.keys(Dock.panels)){const p=Dock.panels[pid];if(p.path===path||p.path?.startsWith(path+"/")){if(Files[pid]){Files[pid].dirty=false;Files[pid].cellDrafts.clear();}await closePanel(pid);}}
    Side.entries={};await refreshState();return renderSide();
@@ -344,7 +347,7 @@ async function notesAction(kind,a){
    activate(pid);if(Files[pid].mode==="preview"){Files[pid].mode="live";renderFile(pid);}return gotoIn(pid,{line:Number(a.dataset.line),select:false});
   }
   case "ni-tag":{const p=Dock.panels[a.dataset.pid];p.tag=p.tag===a.dataset.tag?null:a.dataset.tag;saveLayout();return renderTags(a.dataset.pid);}
-  case "ni-linkup":{await rpc("link_mention",{path:a.dataset.path,title:Notes.links?.data?.title});Notes.links=null;toast("链上了");return noteInfoChanged();}
+  case "ni-linkup":{await rpc("link_mention",{path:a.dataset.path,title:Notes.links?.data?.title});Notes.links=null;toast($t("链上了"));return noteInfoChanged();}
   case "ni-create":return openWiki(a.dataset.name,Object.keys(Files).find(x=>Dock.panels[x]?.path===Notes.current));
   case "note-switcher":return switcher();
   case "switcher-create":return newNote(folderOf(Notes.current),"",a.dataset.title);
@@ -353,8 +356,8 @@ async function notesAction(kind,a){
 }
 
 /* ---- quick switcher: Ctrl + O --------------------------------------------------------------------------------------- */
-function switcher(){
- modal('<div class="palette"><div class="palette-input">'+svg("document",18)+'<input id="palette-q" data-switcher placeholder="输入标题打开一篇；没有就新建" autocomplete="off"/></div><div class="palette-list" id="palette-list"></div><div class="palette-hint">↑↓ 选择 · Enter 打开 · 找不到时最后一项是新建 · Esc 关闭</div></div>',"palette-modal");
+export function switcher(){
+ modal("<div class=\"palette\"><div class=\"palette-input\">"+svg("document",18)+"<input id=\"palette-q\" data-switcher placeholder=\""+$t("输入标题打开一篇；没有就新建")+"\" autocomplete=\"off\"/></div><div class=\"palette-list\" id=\"palette-list\"></div><div class=\"palette-hint\">"+$t("↑↓ 选择 · Enter 打开 · 找不到时最后一项是新建 · Esc 关闭")+"</div></div>","palette-modal");
  switcherFilter("");setTimeout(()=>el("#palette-q")?.focus(),20);
 }
 // Letters in order, closer together and earlier scoring higher; recent notes first when nothing is typed.
@@ -364,13 +367,13 @@ function fuzzy(q,s){
  let i=0,score=0,last=-1;for(const ch of q){const j=s.indexOf(ch,i);if(j<0)return 0;score+=j===last+1?3:1;last=j;i=j+1;}
  return score;
 }
-function switcherFilter(q){
+export function switcherFilter(q){
  const box=el("#palette-list");if(!box)return;
  const term=q.trim(),docs=(S.data.docs||[]).map(d=>({d,s:fuzzy(term,d.title)*2+fuzzy(term,d.path)/2})).filter(x=>x.s>0);
  docs.sort((a,b)=>term?b.s-a.s:String(b.d.updated).localeCompare(String(a.d.updated)));
  const rows=docs.slice(0,40).map(({d})=>'<button class="pal-item" data-action="open-file" data-path="'+esc(d.path)+'">'+svg(fileIcon(d.path),14)+'<span>'+esc(d.title)+'<small>'+esc(d.path)+'</small></span><em>'+esc(kindName[d.kind]||d.kind)+'</em></button>');
- if(term&&!docByTitle(term))rows.push('<button class="pal-item" data-action="switcher-create" data-title="'+esc(term)+'">'+svg("notenew",14)+'<span>新建笔记「'+esc(term)+'」<small>放在 notes/'+esc(folderOf(Notes.current)||"")+'</small></span><em>新建</em></button>');
- box.innerHTML=rows.join("")||'<p class="muted pad">还没有笔记</p>';
+ if(term&&!docByTitle(term))rows.push("<button class=\"pal-item\" data-action=\"switcher-create\" data-title=\""+esc(term)+"\">"+svg("notenew",14)+"<span>"+$t("新建笔记「{0}」",esc(term))+"<small>"+$t("放在 notes/")+esc(folderOf(Notes.current)||"")+"</small></span><em>"+$t("新建")+"</em></button>");
+ box.innerHTML=rows.join("")||"<p class=\"muted pad\">"+$t("还没有笔记")+"</p>";
 }
 
 /* ---- dragging in the tree: onto a folder moves it; into a note's text links to it --------------------------------- */

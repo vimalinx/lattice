@@ -1,4 +1,10 @@
-"use strict";
+import {$t} from "./i18n.js";
+import {Modal,S,all,ask,baseName,closeModal,el,esc,h,modal,modalHead,rpc,safe,shorten,svg,toast} from "./core.js";
+import {CV} from "./editor.js";
+import {fileIcon} from "./files.js";
+import {openWeb} from "./reader.js";
+import {markAtPoint,selectionAnchor} from "./marks.js";
+import {Menus,Sel,closeMenus,popMenu} from "./app.js";
 /* Every small window the program shows is its own and looks the same as its menus and dialogs: hover hints, dropdown
    lists, suggestions while typing, the right-click menu, the colour picker and the file picker. The system's versions
    (Qt's tooltips, the select and datalist popups, the colour and file dialogs, the browser's right-click menu with
@@ -71,7 +77,7 @@ function selectMenu(sel){
  const opts=[...sel.options];
  const html=opts.map((o,i)=>(o.parentElement.tagName==="OPTGROUP"&&o===o.parentElement.firstElementChild?'<div class="menu-label">'+esc(o.parentElement.label)+'</div>':"")+
   '<button type="button" role="option" data-pick="'+i+'"'+(o.selected?' class="on" aria-selected="true"':"")+(o.disabled?" disabled":"")+'>'+svg("check",13)+'<span>'+esc(o.textContent)+'</span></button>').join("");
- const menu=popMenu(sel,html||'<p class="menu-empty">没有可选的</p>',{cls:"menu-select",width:sel.offsetWidth});
+ const menu=popMenu(sel,html||"<p class=\"menu-empty\">"+$t("没有可选的")+"</p>",{cls:"menu-select",width:sel.offsetWidth});
  menu.setAttribute("role","listbox");Menus.owner=sel;
  menu.addEventListener("click",e=>{
   const b=e.target.closest("[data-pick]");if(!b||b.disabled)return;
@@ -105,7 +111,7 @@ function suggest(input){
  const hits=!q?(values.length<=60?values:[]):values.some(v=>v.toLowerCase()===q)?values:values.filter(v=>v.toLowerCase().includes(q));
  if(!hits.length){if(Menus.owner===input)closeMenus();return;}
  const html=hits.slice(0,80).map(v=>'<button type="button" data-pick="'+esc(v)+'"'+(v===input.value?' class="on"':"")+'>'+svg("check",13)+'<span>'+esc(v)+'</span></button>').join("")+
-  (hits.length>80?'<p class="menu-empty">还有 '+(hits.length-80)+' 个，接着输入缩小范围</p>':"");
+  (hits.length>80?"<p class=\"menu-empty\">"+$t("还有 {0} 个，接着输入缩小范围",hits.length-80)+"</p>":"");
  let menu=Menus.owner===input&&el(".menu-suggest");
  if(menu){menu.innerHTML=html;return;}
  menu=popMenu(input,html,{cls:"menu-select menu-suggest",width:input.offsetWidth});Menus.owner=input;
@@ -146,7 +152,7 @@ function fieldInsert(f,text){
  f.focus();document.execCommand(text?"insertText":"delete",false,text);
 }
 // Through the program: the page is not allowed to write the clipboard itself.
-async function writeClipboard(text){
+export async function writeClipboard(text){
  try{await rpc("clipboard_set",{text:String(text??"")});}
  catch(_){const t=document.createElement("textarea");t.value=text;document.body.appendChild(t);t.select();document.execCommand("copy");t.remove();}
 }
@@ -172,16 +178,16 @@ addEventListener("contextmenu",e=>{
  const t=e.target,field=fieldOf(t),text=fieldSelection(field),link=t.closest?.("a[href^='http'],a[data-wiki],a[data-action='open-web']");
  const row=(kind,icon,label,keys="",off=false)=>'<button type="button" data-ctx="'+kind+'"'+(off?" disabled":"")+'>'+svg(icon,14)+'<span>'+label+'</span>'+(keys?'<kbd>'+keys+'</kbd>':"")+'</button>';
  const parts=[],marked=markAtPoint(e);
- if(marked)parts.push('<button type="button" data-action="mark-more" data-id="'+esc(marked)+'">'+svg("marker",14)+'<span>这条批注…</span></button>');
- if(link)parts.push(link.dataset.wiki?row("open","document","打开「"+esc(shorten(link.dataset.wiki,24))+"」"):
-  row("open","document","在 Lattice 里读")+row("browser","external","在浏览器里打开","Ctrl 点击")+row("link","link","复制链接地址"));
+ if(marked)parts.push("<button type=\"button\" data-action=\"mark-more\" data-id=\""+esc(marked)+"\">"+svg("marker",14)+"<span>"+$t("这条批注…")+"</span></button>");
+ if(link)parts.push(link.dataset.wiki?row("open","document",$t("打开「{0}」",esc(shorten(link.dataset.wiki,24)))):
+  row("open","document",$t("在 Lattice 里读"))+row("browser","external",$t("在浏览器里打开"),$t("Ctrl 点击"))+row("link","link",$t("复制链接地址")));
  if(field){
   const locked=fieldLocked(field);
-  parts.push(row("cut","cut","剪切","Ctrl X",!text||locked)+row("copy","copy","复制","Ctrl C",!text)+row("paste","paste","粘贴","Ctrl V",locked)+row("all","selectall","全选","Ctrl A"));
- }else if(text.trim())parts.push(row("copy","copy","复制","Ctrl C"));
+  parts.push(row("cut","cut",$t("剪切"),"Ctrl X",!text||locked)+row("copy","copy",$t("复制"),"Ctrl C",!text)+row("paste","paste",$t("粘贴"),"Ctrl V",locked)+row("all","selectall",$t("全选"),"Ctrl A"));
+ }else if(text.trim())parts.push(row("copy","copy",$t("复制"),"Ctrl C"));
  if(text.trim()&&!t.closest?.(".composer")){
   Sel.text=text.slice(0,5000);Sel.el=plainField(field)?field:null;Sel.anchor=Sel.el?null:selectionAnchor(t,Sel.text);
-  parts.push((Sel.anchor?'<button type="button" data-action="mark-add">'+svg("marker",14)+'<span>高亮</span></button><button type="button" data-action="mark-note">'+svg("edit",14)+'<span>批注</span></button>':"")+'<button type="button" data-action="ask-flash">'+svg("spark",14)+'<span>问快答</span></button><button type="button" data-action="ask-tutor">'+svg("bot",14)+'<span>问主会话</span></button>');
+  parts.push((Sel.anchor?"<button type=\"button\" data-action=\"mark-add\">"+svg("marker",14)+"<span>"+$t("高亮")+"</span></button><button type=\"button\" data-action=\"mark-note\">"+svg("edit",14)+"<span>"+$t("批注")+"</span></button>":"")+"<button type=\"button\" data-action=\"ask-flash\">"+svg("spark",14)+"<span>"+$t("问快答")+"</span></button><button type=\"button\" data-action=\"ask-tutor\">"+svg("bot",14)+"<span>"+$t("问主会话")+"</span></button>");
  }
  if(!parts.length)return closeMenus();
  const ctx={field,text,link},menu=popMenu({x:e.clientX,y:e.clientY},parts.join("<hr/>"),{cls:"menu-context"});
@@ -202,13 +208,11 @@ function hsvToHex(hue,s,v){
 }
 /* A colour next to `anchor`: a saturation/brightness square, a hue bar, the hex value, and the colours of the theme
    in use. onInput gets each colour as it changes; onDone runs when the picker closes. */
-function colorPicker(anchor,value,onInput,onDone){
+export function colorPicker(anchor,value,onInput,onDone){
  let [hue,sat,val]=hexToHsv(/^#[0-9a-f]{6}$/i.test(value||"")?value:"#888888"),frame=0,sent=value;
  const cs=getComputedStyle(document.documentElement);
  const tones=[...new Set(["bg","panel","surface","line","text","muted","accent","ai","amber","red","green"].map(k=>cs.getPropertyValue("--"+k).trim().toLowerCase()).filter(c=>/^#[0-9a-f]{6}$/.test(c)))];
- const menu=popMenu(anchor,'<div class="cp-sv"><i></i></div><div class="cp-hue"><i></i></div>'+
-  '<div class="cp-row"><span class="cp-now"></span><input class="cp-hex" maxlength="7" spellcheck="false" aria-label="颜色值"/></div>'+
-  (tones.length?'<div class="menu-label">现在主题里的颜色</div><div class="cp-tones">'+tones.map(c=>'<button type="button" data-tone="'+c+'" style="background:'+c+'" title="'+c+'"></button>').join("")+'</div>':""),
+ const menu=popMenu(anchor,"<div class=\"cp-sv\"><i></i></div><div class=\"cp-hue\"><i></i></div><div class=\"cp-row\"><span class=\"cp-now\"></span><input class=\"cp-hex\" maxlength=\"7\" spellcheck=\"false\" aria-label=\""+$t("颜色值")+"\"/></div>"+(tones.length?"<div class=\"menu-label\">"+$t("现在主题里的颜色")+"</div><div class=\"cp-tones\">"+tones.map(c=>'<button type="button" data-tone="'+c+'" style="background:'+c+'" title="'+c+'"></button>').join("")+"</div>":""),
   {cls:"color-pop"});
  Menus.owner=anchor;
  const sv=menu.querySelector(".cp-sv"),bar=menu.querySelector(".cp-hue"),hex=menu.querySelector(".cp-hex"),now=menu.querySelector(".cp-now");
@@ -237,32 +241,26 @@ const joinPath=(dir,name)=>dir.endsWith("/")?dir+name:dir+"/"+name;
 function sizeText(n){return n<1024?n+" B":n<1048576?(n/1024).toFixed(n<10240?1:0)+" KB":(n/1048576).toFixed(1)+" MB";}
 /* mode "dir" chooses a folder, "files" one or more files, "save" a folder and a file name (ext is added if left out).
    Resolves with the full path (an array for "files"), or null when cancelled. */
-function pickPath({mode="dir",title="选择",ok="确定",hint="",name="",ext="",start=null}={}){
+export function pickPath({mode="dir",title=$t("选择"),ok=$t("确定"),hint="",name="",ext="",start=null}={}){
  return new Promise(done=>{
   const st={data:null,chosen:new Set(),hidden:false,result:null};
-  const box=modal(modalHead(title)+(hint?'<p class="pk-hint">'+esc(hint)+'</p>':"")+
-   '<div class="pk-bar"><button class="icon" type="button" data-pk="up" title="上一级">'+svg("arrowup",15)+'</button>'+
-   '<input class="pk-path" spellcheck="false" aria-label="位置" placeholder="输入路径，回车打开"/>'+
-   '<button class="chip toggle pk-hidden" type="button" data-pk="hidden">显示隐藏的</button></div>'+
-   '<div class="pk-body"><nav class="pk-places"></nav><div class="pk-list"></div></div>'+
-   '<div class="pk-foot">'+(mode==="save"?'<label class="pk-name">文件名<input class="pk-file" spellcheck="false" value="'+esc(name)+'"/></label>':'<span class="pk-info"></span>')+
-   '<span class="grow"></span><button class="btn ghost" type="button" data-pk="cancel">取消</button><button class="btn primary" type="button" data-pk="ok">'+esc(ok)+'</button></div>',
+  const box=modal(modalHead(title)+(hint?'<p class="pk-hint">'+esc(hint)+'</p>':"")+"<div class=\"pk-bar\"><button class=\"icon\" type=\"button\" data-pk=\"up\" title=\""+$t("上一级")+"\">"+svg("arrowup",15)+"</button><input class=\"pk-path\" spellcheck=\"false\" aria-label=\""+$t("位置")+"\" placeholder=\""+$t("输入路径，回车打开")+"\"/><button class=\"chip toggle pk-hidden\" type=\"button\" data-pk=\"hidden\">"+$t("显示隐藏的")+"</button></div><div class=\"pk-body\"><nav class=\"pk-places\"></nav><div class=\"pk-list\"></div></div><div class=\"pk-foot\">"+(mode==="save"?"<label class=\"pk-name\">"+$t("文件名")+"<input class=\"pk-file\" spellcheck=\"false\" value=\""+esc(name)+"\"/></label>":'<span class="pk-info"></span>')+"<span class=\"grow\"></span><button class=\"btn ghost\" type=\"button\" data-pk=\"cancel\">"+$t("取消")+"</button><button class=\"btn primary\" type=\"button\" data-pk=\"ok\">"+esc(ok)+"</button></div>",
    "large picker-modal");
   Modal.onClose=()=>done(st.result);
   const q=s=>box.querySelector(s),list=q(".pk-list"),okBtn=q('[data-pk="ok"]');
   const info=()=>{
    const n=st.chosen.size,line=q(".pk-info");
-   if(mode==="files"){okBtn.disabled=!n;if(line)line.textContent=n?"选了 "+n+" 个文件":"点文件选中，可以多选；双击直接附上";}
-   else if(mode==="dir"&&line)line.textContent=st.data?"选的是：「"+(baseName(st.data.path)||st.data.path)+"」":"";
+   if(mode==="files"){okBtn.disabled=!n;if(line)line.textContent=n?$t("选了 {0} 个文件",n):$t("点文件选中，可以多选；双击直接附上");}
+   else if(mode==="dir"&&line)line.textContent=st.data?$t("选的是：「{0}」",(baseName(st.data.path)||st.data.path)):"";
   };
   const render=()=>{
    const d=st.data,vault=S.data?.vault;
    q(".pk-path").value=d.path;q('[data-pk="up"]').disabled=!d.parent;q(".pk-hidden").classList.toggle("on",st.hidden);
-   q(".pk-places").innerHTML=[...d.places,...(vault?[{name:"学习库",path:vault}]:[])].map(p=>'<button type="button" data-place="'+esc(p.path)+'"'+(p.path===d.path?' class="on"':"")+'>'+
+   q(".pk-places").innerHTML=[...d.places,...(vault?[{name:$t("学习库"),path:vault}]:[])].map(p=>'<button type="button" data-place="'+esc(p.path)+'"'+(p.path===d.path?' class="on"':"")+'>'+
     svg(p.name==="学习库"?"book":p.name==="家目录"?"home":"folder",14)+'<span>'+esc(p.name)+'</span></button>').join("");
    list.innerHTML=d.entries.length?d.entries.map((e,i)=>'<button type="button" class="pk-item'+(e.dir?" dir":"")+(st.chosen.has(e.name)?" on":"")+'" data-entry="'+i+'"'+(mode==="dir"&&!e.dir?" disabled":"")+'>'+
-    svg(e.dir?"folder":fileIcon(e.name),15)+'<span class="pk-n">'+esc(e.name)+'</span><small>'+(e.dir?"":sizeText(e.size))+'</small></button>').join("")+(d.more?'<p class="pk-empty">还有 '+d.more+' 项没列出来</p>':""):
-    '<p class="pk-empty">这个文件夹是空的'+(st.hidden?"":"（隐藏的没显示）")+'</p>';
+    svg(e.dir?"folder":fileIcon(e.name),15)+'<span class="pk-n">'+esc(e.name)+'</span><small>'+(e.dir?"":sizeText(e.size))+'</small></button>').join("")+(d.more?"<p class=\"pk-empty\">"+$t("还有 {0} 项没列出来",d.more)+"</p>":""):
+    "<p class=\"pk-empty\">"+$t("这个文件夹是空的")+(st.hidden?"":$t("（隐藏的没显示）"))+"</p>";
    list.scrollTop=0;info();
   };
   const go=async path=>{
@@ -278,11 +276,11 @@ function pickPath({mode="dir",title="选择",ok="确定",hint="",name="",ext="",
    else if(mode==="files"){if(!st.chosen.size)return;st.result=[...st.chosen].map(n=>joinPath(d.path,n));}
    else{
     let n=q(".pk-file").value.trim();
-    if(!n)return toast("写一个文件名","error");
-    if(n.includes("/"))return toast("文件名里不能有 /；换文件夹请在左边或上面选","error");
+    if(!n)return toast($t("写一个文件名"),"error");
+    if(n.includes("/"))return toast($t("文件名里不能有 /；换文件夹请在左边或上面选"),"error");
     if(ext&&!n.toLowerCase().endsWith(ext))n+=ext;
-    if(d.entries.some(e=>e.name===n&&e.dir))return toast("「"+n+"」是个文件夹","error");
-    if(d.entries.some(e=>e.name===n)&&!await ask("这里已经有「"+n+"」了，要覆盖它吗？",{title:"覆盖文件",ok:"覆盖",danger:true}))return;
+    if(d.entries.some(e=>e.name===n&&e.dir))return toast($t("「{0}」是个文件夹",n),"error");
+    if(d.entries.some(e=>e.name===n)&&!await ask($t("这里已经有「{0}」了，要覆盖它吗？",n),{title:$t("覆盖文件"),ok:$t("覆盖"),danger:true}))return;
     st.result=joinPath(d.path,n);
    }
    closeModal();

@@ -8,6 +8,8 @@ reach local services.
 """
 from __future__ import annotations
 
+from .i18n import tr
+
 from html import unescape
 from html.parser import HTMLParser
 import io
@@ -38,37 +40,37 @@ def local_address(address):
 def _public(url):
     parts = urlsplit(url)
     if parts.scheme not in ("http", "https") or not parts.hostname:
-        raise WebError("只能读取 http(s) 网页")
+        raise WebError(tr("只能读取 http(s) 网页"))
     try:
         infos = socket.getaddrinfo(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80), proto=socket.IPPROTO_TCP)
     except socket.gaierror as exc:
-        raise WebError(f"找不到这个网站：{parts.hostname}") from exc
+        raise WebError(tr("找不到这个网站：") + str(parts.hostname)) from exc
     for info in infos:
         if local_address(info[4][0]):
-            raise WebError("不读取本机或局域网里的地址")
+            raise WebError(tr("不读取本机或局域网里的地址"))
 
 
 def search(config, query, count=8):
     query = str(query).strip()[:300]
     if not query:
-        raise WebError("请给出搜索词")
+        raise WebError(tr("请给出搜索词"))
     backend = config.get("search") or "duckduckgo"
     with httpx.Client(timeout=20, headers={"User-Agent": AGENT}, follow_redirects=True) as client:
         if backend == "searxng":
             if not config.get("searxng_url"):
-                raise WebError("设置里还没有填 SearXNG 地址")
+                raise WebError(tr("设置里还没有填 SearXNG 地址"))
             data = client.get(config["searxng_url"].rstrip("/") + "/search", params={"q": query, "format": "json"}).raise_for_status().json()
             items = [{"title": r.get("title", ""), "url": r.get("url", ""), "snippet": r.get("content", "")} for r in data.get("results", [])]
         elif backend == "brave":
             if not config.get("brave_key"):
-                raise WebError("设置里还没有填 Brave Search 的 Key")
+                raise WebError(tr("设置里还没有填 Brave Search 的 Key"))
             data = client.get("https://api.search.brave.com/res/v1/web/search", params={"q": query, "count": count},
                               headers={"X-Subscription-Token": config["brave_key"], "Accept": "application/json"}).raise_for_status().json()
             items = [{"title": r.get("title", ""), "url": r.get("url", ""), "snippet": re.sub("<[^>]+>", "", r.get("description", ""))}
                      for r in (data.get("web") or {}).get("results", [])]
         elif backend == "tavily":
             if not config.get("tavily_key"):
-                raise WebError("设置里还没有填 Tavily 的 Key")
+                raise WebError(tr("设置里还没有填 Tavily 的 Key"))
             data = client.post("https://api.tavily.com/search", json={"api_key": config["tavily_key"], "query": query, "max_results": count}).raise_for_status().json()
             items = [{"title": r.get("title", ""), "url": r.get("url", ""), "snippet": r.get("content", "")} for r in data.get("results", [])]
         else:
@@ -253,7 +255,7 @@ def _download(url, cap=None):
                     url = urljoin(url, response.headers["location"])
                     continue
                 if response.status_code >= 400:
-                    raise WebError(f"网页返回 HTTP {response.status_code}")
+                    raise WebError(tr("网页返回 HTTP ") + str(response.status_code))
                 kind = response.headers.get("content-type", "")
                 limit = cap or (40_000_000 if "pdf" in kind else 3_000_000)
                 data = b""
@@ -261,10 +263,10 @@ def _download(url, cap=None):
                     data += chunk
                     if len(data) > limit:
                         if cap:
-                            raise WebError(f"文件超过 {cap // 1_000_000}MB")
+                            raise WebError(tr("文件超过 {0}MB", cap // 1_000_000))
                         break
                 return url, kind, data
-    raise WebError("重定向次数太多")
+    raise WebError(tr("重定向次数太多"))
 
 
 def page_bytes(url, cap=30_000_000):
@@ -282,13 +284,13 @@ def _pdf(data):
     try:
         from pypdf import PdfReader
     except ImportError:
-        raise WebError("这是 PDF；装上 pypdf 才能在 Lattice 里读") from None
+        raise WebError(tr("这是 PDF；装上 pypdf 才能在 Lattice 里读")) from None
     try:
         reader = PdfReader(io.BytesIO(data))
         title = str((reader.metadata or {}).get("/Title") or "").strip()
         pages = [f"## 第 {i + 1} 页\n\n" + (page.extract_text() or "").strip() for i, page in enumerate(reader.pages[:400])]
     except Exception as exc:
-        raise WebError(f"读不出这个 PDF：{exc}") from exc
+        raise WebError(tr("读不出这个 PDF：") + str(exc)) from exc
     return title, "\n\n".join(pages)
 
 

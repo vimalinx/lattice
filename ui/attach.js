@@ -1,4 +1,9 @@
-"use strict";
+import {$t} from "./i18n.js";
+import {Modal,all,baseName,button,closeModal,esc,hydrateVault,modal,modalHead,rpc,safe,svg,toast} from "./core.js";
+import {destroyEditors,editorHost,editorIn,mountEditors} from "./editor.js";
+import {Chat,updateComposer} from "./chat.js";
+import {fileIcon,openFile} from "./files.js";
+import {refreshState} from "./app.js";
 /* What comes with a message, as tiles above the input (and in the message once sent): pictures as thumbnails, a long
    piece of pasted text as a card of its first lines, any other file by its name. Pasting a picture or a file, or a
    lot of text, or dropping files on the input, makes a tile instead of filling the box; every tile opens to be seen,
@@ -11,22 +16,22 @@ function attachTile(a,attrs,removable){
  const path=a.path,kind=attachKind(path),name=baseName(path);
  const body=kind==="image"?'<img data-vault-src="'+esc(path)+'" alt="'+esc(name)+'"/>':
   kind==="text"&&a.preview!=null?'<div class="att-text">'+esc(a.preview)+'</div>':
-  '<div class="att-icon">'+svg(fileIcon(path),22)+'<small>'+esc((name.match(/\.([^.]+)$/)||[,"文件"])[1].toUpperCase())+'</small></div>';
- const label=pastedName(path)?"粘贴的文字"+(a.chars?" · "+a.chars.toLocaleString()+" 字":""):name;
- return '<div class="att-tile kind-'+kind+'" data-action="att-open" data-path="'+esc(path)+'" '+attrs+' data-tip="'+esc(path+"（点开看"+(kind==="text"?"、改":"")+"）")+'">'+body+
-  '<span class="att-name">'+esc(label)+'</span>'+(removable?'<button class="att-x" '+removable+' title="不附上">'+svg("close",11)+'</button>':"")+'</div>';
+  '<div class="att-icon">'+svg(fileIcon(path),22)+'<small>'+esc((name.match(/\.([^.]+)$/)||[,$t("文件")])[1].toUpperCase())+'</small></div>';
+ const label=pastedName(path)?$t("粘贴的文字")+(a.chars?" · "+a.chars.toLocaleString()+" "+$t("字"):""):name;
+ return '<div class="att-tile kind-'+kind+'" data-action="att-open" data-path="'+esc(path)+'" '+attrs+' data-tip="'+esc(path+$t("（点开看")+(kind==="text"?$t("、改"):"")+"）")+'">'+body+
+  '<span class="att-name">'+esc(label)+'</span>'+(removable?"<button class=\"att-x\" "+removable+" title=\""+$t("不附上")+"\">"+svg("close",11)+"</button>":"")+'</div>';
 }
-function composerTiles(pid){
+export function composerTiles(pid){
  const st=Chat[pid];if(!st?.attach.length)return "";
  return '<div class="att-row">'+st.attach.map((a,i)=>attachTile(a,'data-pid="'+pid+'"','data-action="chat-attach-remove" data-pid="'+pid+'" data-index="'+i+'"')).join("")+'</div>';
 }
-function messageTiles(paths){return paths?.length?'<div class="att-row in-msg">'+paths.map(p=>attachTile({path:p},"",null)).join("")+'</div>':"";}
+export function messageTiles(paths){return paths?.length?'<div class="att-row in-msg">'+paths.map(p=>attachTile({path:p},"",null)).join("")+'</div>':"";}
 function addAttachment(pid,item){const st=Chat[pid];if(!st||st.attach.some(x=>x.path===item.path))return;st.attach.push(item);updateComposer(pid);}
 async function attachFiles(pid,files){
  for(const f of files){
-  if(f.size>50*1024*1024){toast(f.name+" 超过 50MB","error");continue;}
+  if(f.size>50*1024*1024){toast(f.name+" "+$t("超过 50MB"),"error");continue;}
   const data=await new Promise((ok,bad)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=()=>bad(r.error);r.readAsDataURL(f);});
-  const name=f.name||("粘贴的图片."+((f.type.split("/")[1]||"png").replace("jpeg","jpg")));
+  const name=f.name||($t("粘贴的图片.")+(f.type.split("/")[1]||"png").replace("jpeg","jpg"));
   const r=await safe(()=>rpc("attach_data",{name,data}));if(r)addAttachment(pid,{path:r.path});
  }
  refreshState();
@@ -51,29 +56,29 @@ document.addEventListener("drop",e=>{
 },true);
 /* A tile opened: a picture large, text in an editor (saving writes the file; closing with changes saves them), any
    other file in a window of its own. */
-async function openAttachment(path){
+export async function openAttachment(path){
  const kind=attachKind(path);
  if(kind==="file")return openFile(path);
  if(kind==="image"){
   const box=modal(modalHead(baseName(path))+'<div class="att-view"><img data-vault-src="'+esc(path)+'" alt=""/></div>'+
-   '<div class="modal-actions"><code class="att-path">'+esc(path)+'</code><span class="grow"></span>'+button(svg("float",13)+" 在窗口里打开","open-file",'data-path="'+esc(path)+'"',"ghost sm")+'</div>',"large att-pop");
+   '<div class="modal-actions"><code class="att-path">'+esc(path)+'</code><span class="grow"></span>'+button(svg("float",13)+" "+$t("在窗口里打开"),"open-file",'data-path="'+esc(path)+'"',"ghost sm")+'</div>',"large att-pop");
   return hydrateVault(box);
  }
  const f=await safe(()=>rpc("file_read",{path}));if(!f)return;
- const box=modal(modalHead(pastedName(path)?"粘贴的文字":baseName(path))+'<div class="att-edit">'+editorHost(f.content||"",'class="editor prose"',{markdown:/\.md$/i.test(path)})+'</div>'+
+ const box=modal(modalHead(pastedName(path)?$t("粘贴的文字"):baseName(path))+'<div class="att-edit">'+editorHost(f.content||"",'class="editor prose"',{markdown:/\.md$/i.test(path)})+'</div>'+
   '<div class="modal-actions"><code class="att-path">'+esc(path)+'</code><span class="att-state"></span><span class="grow"></span>'+
-  button(svg("float",13)+" 在窗口里打开","att-window","","ghost sm")+button(svg("check",13)+" 保存","att-save","disabled","primary sm")+'</div>',"large att-pop");
+  button(svg("float",13)+" "+$t("在窗口里打开"),"att-window","","ghost sm")+button(svg("check",13)+" "+$t("保存"),"att-save","disabled","primary sm")+'</div>',"large att-pop");
  mountEditors(box);
  const view=editorIn(box),now=()=>view.state.doc.toString();let saved=f.content||"",leaving=false;
- const mark=()=>{const dirty=now()!==saved;box.querySelector('[data-action="att-save"]').disabled=!dirty;box.querySelector(".att-state").textContent=dirty?"有没保存的修改，关掉时会自动保存":"";};
- const save=async()=>{const text=now();if(text===saved)return true;if(!await safe(()=>rpc("file_write",{path,content:text})))return false;saved=text;mark();tilesChanged(path,text);toast("已保存");return true;};
+ const mark=()=>{const dirty=now()!==saved;box.querySelector('[data-action="att-save"]').disabled=!dirty;box.querySelector(".att-state").textContent=dirty?$t("有没保存的修改，关掉时会自动保存"):"";};
+ const save=async()=>{const text=now();if(text===saved)return true;if(!await safe(()=>rpc("file_write",{path,content:text})))return false;saved=text;mark();tilesChanged(path,text);toast($t("已保存"));return true;};
  view.dom.addEventListener("input",mark);view.dom.addEventListener("keyup",mark);
  box.addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){e.preventDefault();e.stopPropagation();safe(save);}});
  box.addEventListener("click",e=>{const b=e.target.closest("[data-action^='att-']");if(!b||b.disabled)return;e.stopPropagation();
   if(b.dataset.action==="att-save")return safe(save);
   safe(async()=>{if(!await save())return;leaving=true;closeModal();openFile(path);});});
  Modal.onClose=()=>{let text=saved;try{text=now();}catch(_){}
-  if(!leaving&&text!==saved)safe(()=>rpc("file_write",{path,content:text}).then(()=>{tilesChanged(path,text);toast("关掉前的修改已保存");}));destroyEditors(box);};
+  if(!leaving&&text!==saved)safe(()=>rpc("file_write",{path,content:text}).then(()=>{tilesChanged(path,text);toast($t("关掉前的修改已保存"));}));destroyEditors(box);};
  setTimeout(()=>view.focus(),50);
 }
 // A pasted text changed in its editor: the tile above the input shows its new first lines.
@@ -83,7 +88,7 @@ function tilesChanged(path,text){
 }
 // Text tiles in sent messages show their first lines too, read once per file.
 const tilePreviews=new Map();
-function fillTextTiles(root){
+export function fillTextTiles(root){
  for(const t of all(".att-tile.kind-text",root)){
   if(t.querySelector(".att-text"))continue;const path=t.dataset.path;
   const show=text=>{const icon=t.querySelector(".att-icon");if(icon&&text!=null)icon.outerHTML='<div class="att-text">'+esc(text)+'</div>';};

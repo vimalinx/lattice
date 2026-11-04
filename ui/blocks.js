@@ -1,36 +1,38 @@
-"use strict";
+import {$t} from "./i18n.js";
+import {Dock} from "./state.js";
+import {S,all,baseName,button,el,esc,fmtDate,iconButton,journalName,linkName,markdown,modal,modalHead,rpc,rulesJournalName,safe,shorten,stageColor,stageName,svg,toast,who} from "./core.js";
+import {Chat,updateComposer} from "./chat.js";
+import {openFile} from "./files.js";
+import {resolveWiki} from "./notes.js";
+import {appUrl} from "./apps.js";
 /* What an agent shows: Markdown plus fenced ```lattice:<type> JSON blocks that the UI renders.
    The model never sends HTML or scripts; a block only names data that the UI fetches itself. */
-const BLOCK_RE=/```lattice:([\w-]+)[^\n]*\n([\s\S]*?)(?:\n```|$)/g;
-const CODE_EXT={python:".py",py:".py",c:".c",cpp:".cpp","c++":".cpp",rust:".rs",rs:".rs",go:".go",javascript:".js",js:".js",typescript:".ts",ts:".ts",bash:".sh",sh:".sh",shell:".sh",ruby:".rb",lua:".lua",julia:".jl",r:".r",java:".java"};
+export const BLOCK_RE=/```lattice:([\w-]+)[^\n]*\n([\s\S]*?)(?:\n```|$)/g;
+export const CODE_EXT={python:".py",py:".py",c:".c",cpp:".cpp","c++":".cpp",rust:".rs",rs:".rs",go:".go",javascript:".js",js:".js",typescript:".ts",ts:".ts",bash:".sh",sh:".sh",shell:".sh",ruby:".rb",lua:".lua",julia:".jl",r:".r",java:".java"};
 let snippetSeq=0;
-const snippetRuns={};
+export const snippetRuns={};
 /* Reply text -> {html, blocks}; blocks are mounted after the HTML is in the page. */
-function replyHtml(text,live=false){
+export function replyHtml(text,live=false){
  const blocks=[];
  const src=String(text||"").replace(BLOCK_RE,(m,type,body)=>{
   let data=null,error=null;
-  try{data=JSON.parse(body);}catch(e){error=live&&!/\n```\s*$/.test(m)?"pending":"展示块的格式不对";}
+  try{data=JSON.parse(body);}catch(e){error=live&&!/\n```\s*$/.test(m)?"pending":$t("展示块的格式不对");}
   blocks.push({type,data,error,raw:body});
   return "\n\nLATTICEBLOCK"+(blocks.length-1)+"X\n\n";
  });
  let html=markdown(src).replace(/<p>LATTICEBLOCK(\d+)X<\/p>/g,(_,i)=>'<div class="lblock" data-block="'+i+'"></div>');
  html=html.replace(/<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g,(m,attrs,code)=>{
   const lang=(attrs.match(/language-([\w+#-]+)/)||[])[1]||"",id="snip"+(++snippetSeq),runnable=!!CODE_EXT[lang.toLowerCase()];
-  return '<div class="code-block"><div class="code-bar"><span>'+esc(lang||"text")+'</span>'+
-   '<button data-action="code-copy" data-target="'+id+'" title="复制">'+svg("copy",11)+'</button>'+
-   (runnable?'<button data-action="code-run" data-target="'+id+'" data-lang="'+esc(lang)+'" title="运行看结果（以你的权限，在学习库的环境里）">'+svg("play",11)+' 运行</button>':"")+
-   '<button data-action="code-take" data-target="'+id+'" data-lang="'+esc(lang)+'" title="存成我这边的一个文件">'+svg("arrow",11)+' 拿到我这边</button></div>'+
-   '<pre><code id="'+id+'"'+attrs+'>'+code+'</code></pre><div class="snippet-out" data-snippet="'+id+'"></div></div>';
+  return "<div class=\"code-block\"><div class=\"code-bar\"><span>"+esc(lang||"text")+"</span><button data-action=\"code-copy\" data-target=\""+id+"\" title=\""+$t("复制")+"\">"+svg("copy",11)+"</button>"+(runnable?"<button data-action=\"code-run\" data-target=\""+id+"\" data-lang=\""+esc(lang)+"\" title=\""+$t("运行看结果（以你的权限，在学习库的环境里）")+"\">"+svg("play",11)+" "+$t("运行")+"</button>":"")+"<button data-action=\"code-take\" data-target=\""+id+"\" data-lang=\""+esc(lang)+"\" title=\""+$t("存成我这边的一个文件")+"\">"+svg("arrow",11)+" "+$t("拿到我这边")+"</button></div><pre><code id=\""+id+"\""+attrs+">"+code+"</code></pre><div class=\"snippet-out\" data-snippet=\""+id+"\"></div></div>";
  });
  return {html,blocks};
 }
-function mountBlocks(root,blocks,ctx){
+export function mountBlocks(root,blocks,ctx){
  all(".lblock",root).forEach(node=>{
   const b=blocks[+node.dataset.block];if(!b)return;
   // drawn already and kept as it is (a reply still being written puts its finished blocks back)
   if(node.dataset.drawn===b.type+"\u0000"+b.raw)return;
-  if(b.error==="pending"){node.innerHTML='<div class="block-pending">正在生成 '+esc(b.type)+' …</div>';return;}
+  if(b.error==="pending"){node.innerHTML="<div class=\"block-pending\">"+$t("正在生成 {0} …",esc(b.type))+"</div>";return;}
   const render=BLOCKS[b.type];
   if(b.error||!render){node.innerHTML='<pre class="block-raw">'+esc(b.raw)+'</pre>';return;}
   node.classList.add("block-"+b.type);
@@ -38,15 +40,15 @@ function mountBlocks(root,blocks,ctx){
   if(ctx.live)node.dataset.drawn=b.type+"\u0000"+b.raw;
  });
 }
-const BLOCKS={
+export const BLOCKS={
  quiz(d,node,ctx){
   const key=ctx.message+":"+ctx.index,answered=ctx.answers?.[key];
   const opts=Array.isArray(d.options)?d.options:[];
   node.innerHTML='<div class="quiz-q">'+svg("bulb",15)+'<div class="markdown">'+markdown(d.question||"")+'</div></div>'+
-   (answered?'<div class="quiz-answered">你的回答：'+esc(answered)+'</div>':
+   (answered?"<div class=\"quiz-answered\">"+$t("你的回答：")+esc(answered)+"</div>":
     (opts.length?'<div class="quiz-options">'+opts.map((o,i)=>'<label><input type="radio" name="q'+esc(key)+'" value="'+esc(o)+'"/> '+esc(o)+'</label>').join("")+'</div>':
-     '<textarea class="quiz-free" rows="3" placeholder="先自己想一想，再写下你的预测或解释"></textarea>')+
-    (ctx.live?'':'<div class="quiz-actions">'+button("交给 AI","quiz-answer",'data-key="'+esc(key)+'"',"primary sm")+'</div>'));
+     "<textarea class=\"quiz-free\" rows=\"3\" placeholder=\""+$t("先自己想一想，再写下你的预测或解释")+"\"></textarea>")+
+    (ctx.live?'':'<div class="quiz-actions">'+button($t("交给 AI"),"quiz-answer",'data-key="'+esc(key)+'"',"primary sm")+'</div>'));
   node.dataset.question=d.question||"";
  },
  // A placement survey: a few questions answered together and sent back, as one message, to the agent that asked.
@@ -54,34 +56,31 @@ const BLOCKS={
   const key=ctx.message+":"+ctx.index,answered=ctx.answers?.[key];
   const qs=(Array.isArray(d.questions)?d.questions:[]).slice(0,12),words=q=>String(q?.q||q?.question||"");
   node.dataset.survey=JSON.stringify({title:d.title||"",questions:qs.map(words)});
-  node.innerHTML='<div class="survey-head">'+svg("list",15)+'<b>'+esc(d.title||"摸底问卷")+'</b>'+(d.intro?'<span>'+esc(d.intro)+'</span>':"")+'</div>'+
-   (answered?'<div class="quiz-answered">'+(/^先不填/.test(answered)?"跳过了问卷":"已经填好交回去了")+'</div>':
+  node.innerHTML='<div class="survey-head">'+svg("list",15)+'<b>'+esc(d.title||$t("摸底问卷"))+'</b>'+(d.intro?'<span>'+esc(d.intro)+'</span>':"")+'</div>'+
+   (answered?'<div class="quiz-answered">'+(/^先不填/.test(answered)?$t("跳过了问卷"):$t("已经填好交回去了"))+'</div>':
     '<ol class="survey-qs">'+qs.map((q,i)=>{
      const opts=Array.isArray(q.options)?q.options:[],name="sv"+key+"-"+i;
      return '<li><div class="markdown">'+markdown(words(q))+'</div>'+
       (opts.length?'<div class="quiz-options">'+opts.map(o=>'<label><input type="'+(q.multi?"checkbox":"radio")+'" name="'+esc(name)+'" value="'+esc(o)+'"/> '+esc(o)+'</label>').join("")+'</div>':
-       '<textarea class="survey-free" rows="2" placeholder="写几个字就行，也可以不填"></textarea>')+'</li>';
+       "<textarea class=\"survey-free\" rows=\"2\" placeholder=\""+$t("写几个字就行，也可以不填")+"\"></textarea>")+'</li>';
     }).join("")+'</ol>'+
-    (ctx.live?'':'<div class="quiz-actions">'+button("跳过，直接讲","survey-skip",'data-key="'+esc(key)+'"',"ghost sm")+button("交给 AI","survey-send",'data-key="'+esc(key)+'"',"primary sm")+'</div>'));
+    (ctx.live?'':'<div class="quiz-actions">'+button($t("跳过，直接讲"),"survey-skip",'data-key="'+esc(key)+'"',"ghost sm")+button($t("交给 AI"),"survey-send",'data-key="'+esc(key)+'"',"primary sm")+'</div>'));
  },
  // A widget from an imported ChatGPT answer, run in a sandboxed frame of its own (ui/widget/runtime.js).
  widget(d,node){
   const frame=document.createElement("iframe");
-  frame.className="widget-frame";frame.setAttribute("sandbox","allow-scripts allow-same-origin");frame.setAttribute("scrolling","no");frame.title="ChatGPT 的交互小部件";
+  frame.className="widget-frame";frame.setAttribute("sandbox","allow-scripts allow-same-origin");frame.setAttribute("scrolling","no");frame.title=$t("ChatGPT 的交互小部件");
   frame.dataset.source=String(d.source||"");frame.src=appUrl("lattice-app://widget/_lattice/widget/index.html");
   node.replaceChildren(frame);
  },
  async cards(d,node,ctx){
   const refs=(d.cards||[]).slice(0,30);
-  node.innerHTML='<div class="block-pending">读取知识卡…</div>';
+  node.innerHTML="<div class=\"block-pending\">"+$t("读取知识卡…")+"</div>";
   const cards=await rpc("cards",{refs});
-  node.innerHTML='<div class="cards-head">'+svg("card",14)+' '+(d.review?"回顾 "+cards.length+" 张卡 · 先自己回想，再看答案并自评":cards.length+" 张知识卡")+'</div>'+
-   cards.map(c=>c.missing?'<div class="mini-card missing">找不到「'+esc(c.missing)+'」</div>':
+  node.innerHTML='<div class="cards-head">'+svg("card",14)+' '+(d.review?$t("回顾 {0} 张卡 · 先自己回想，再看答案并自评",cards.length):cards.length+" "+$t("张知识卡"))+'</div>'+
+   cards.map(c=>c.missing?"<div class=\"mini-card missing\">"+$t("找不到「{0}」",esc(c.missing))+"</div>":
    '<div class="mini-card" data-card="'+esc(c.id)+'"><div class="mini-card-top"><a data-action="open-file" data-path="'+esc(c.path)+'">'+esc(c.title)+'</a><span class="stage stage-'+esc(c.stage)+'">'+esc(stageName[c.stage]||c.stage)+'</span></div>'+
-   (d.review?'<div class="mini-q">'+esc(c.question||"用自己的话说说它是什么、为什么。")+'</div><div class="mini-reveal">'+button("想好了，看答案","card-reveal","","sm")+'</div>'+
-    '<div class="mini-answer" hidden><div class="markdown">'+markdown(c.body)+'</div>'+(c.mine?'<div class="mini-mine"><b>我的理解</b><div class="markdown">'+markdown(c.mine)+'</div></div>':"")+
-    ((c.links||[]).filter(l=>l.target.startsWith("ann:")).slice(0,3).map(l=>'<a class="mini-source" data-action="open-ref" data-ref="'+esc(l.target)+'">'+svg("marker",12)+' 回到出处：'+esc(l.target_title||"")+'</a>').join(""))+
-    '<div class="mini-rate">记得多少：'+button("忘了","card-rate",'data-rating="again" data-id="'+esc(c.id)+'"',"sm")+button("模糊","card-rate",'data-rating="hard" data-id="'+esc(c.id)+'"',"sm")+button("记得","card-rate",'data-rating="good" data-id="'+esc(c.id)+'"',"sm primary")+'</div></div>':
+   (d.review?"<div class=\"mini-q\">"+esc(c.question||$t("用自己的话说说它是什么、为什么。"))+"</div><div class=\"mini-reveal\">"+button($t("想好了，看答案"),"card-reveal","","sm")+"</div><div class=\"mini-answer\" hidden><div class=\"markdown\">"+markdown(c.body)+"</div>"+(c.mine?"<div class=\"mini-mine\"><b>"+$t("我的理解")+"</b><div class=\"markdown\">"+markdown(c.mine)+"</div></div>":"")+(c.links||[]).filter(l=>l.target.startsWith("ann:")).slice(0,3).map(l=>"<a class=\"mini-source\" data-action=\"open-ref\" data-ref=\""+esc(l.target)+"\">"+svg("marker",12)+" "+$t("回到出处：")+esc(l.target_title||"")+"</a>").join("")+"<div class=\"mini-rate\">"+$t("记得多少：")+button($t("忘了"),"card-rate",'data-rating="again" data-id="'+esc(c.id)+'"',"sm")+button($t("模糊"),"card-rate",'data-rating="hard" data-id="'+esc(c.id)+'"',"sm")+button($t("记得"),"card-rate",'data-rating="good" data-id="'+esc(c.id)+'"',"sm primary")+"</div></div>":
     '<div class="mini-q">'+esc(shorten(c.question||c.body,140))+'</div>')+'</div>').join("");
  },
  async graph(d,node){
@@ -89,12 +88,12 @@ const BLOCKS={
   const g=await rpc("graph",{topic:d.topic||null});
   mountGraph(node.firstElementChild,g,{topic:d.topic,focus:d.focus||[],here:d.here,compact:true});
   const route=d.topic&&g.routes[d.topic];
-  node.lastElementChild.textContent=route?.length?"主干路线 "+route.length+" 站"+(d.here||route.some(s=>s.state==="now")?" · 高亮的是你现在的位置":""):"";
+  node.lastElementChild.textContent=route?.length?$t("主干路线 {0} 站",route.length)+(d.here||route.some(s=>s.state==="now")?" "+$t("· 高亮的是你现在的位置"):""):"";
  },
  chart(d,node){node.innerHTML=chartSvg(d);},
  relations(d,node){
   const count=(d.nodes||[]).length;
-  if(!count){node.innerHTML='<p class="muted">关系图没有节点</p>';return;}
+  if(!count){node.innerHTML="<p class=\"muted\">"+$t("关系图没有节点")+"</p>";return;}
   node.innerHTML=relationsHtml(d,Math.max(240,Math.min(520,200+count*20)));
   const note=node.querySelector(".rel-note"),say=html=>{note.hidden=!html;note.innerHTML=html;};
   const draw=()=>relationsGraph(node.querySelector(".rel-canvas"),d,{say});
@@ -102,60 +101,60 @@ const BLOCKS={
   requestAnimationFrame(draw);
   node.querySelector('[data-action="rel-relayout"]').onclick=e=>{e.stopPropagation();draw();};
   node.querySelector('[data-action="rel-zoom"]').onclick=e=>{e.stopPropagation();
-   modal(modalHead(d.title||"关系图")+relationsHtml(d,Math.round(innerHeight*.62)),"large");
+   modal(modalHead(d.title||$t("关系图"))+relationsHtml(d,Math.round(innerHeight*.62)),"large");
    const box=el(".modal .rel"),n2=box.querySelector(".rel-note");box.querySelector(".rel-head").remove();
    requestAnimationFrame(()=>relationsGraph(box.querySelector(".rel-canvas"),d,{say:h=>{n2.hidden=!h;n2.innerHTML=h;}}));};
  },
  explore(d,node,ctx){
   const params=(d.params||[]).slice(0,8),values={};
   params.forEach(p=>{values[p.name]=Number(p.value??p.min??0);});
-  node.innerHTML='<div class="explore"><div class="explore-head">'+svg("sliders",14)+'<b>'+esc(d.title||"动手试试")+'</b></div>'+(d.note?'<div class="explore-note markdown">'+markdown(d.note)+'</div>':"")+
+  node.innerHTML='<div class="explore"><div class="explore-head">'+svg("sliders",14)+'<b>'+esc(d.title||$t("动手试试"))+'</b></div>'+(d.note?'<div class="explore-note markdown">'+markdown(d.note)+'</div>':"")+
    '<div class="explore-params">'+params.map(p=>'<label class="explore-param"><span>'+esc(p.label||p.name)+'</span>'+
     '<input type="range" data-param="'+esc(p.name)+'" min="'+esc(p.min??0)+'" max="'+esc(p.max??1)+'" step="'+esc(p.step??((Number(p.max??1)-Number(p.min??0))/100))+'" value="'+esc(values[p.name])+'"/>'+
     '<b data-param-out="'+esc(p.name)+'">'+esc(values[p.name])+'</b></label>').join("")+'</div>'+
    '<div class="explore-chart"></div><div class="explore-reads"></div>'+
-   (ctx?.pid&&!ctx.live?'<div class="explore-actions">'+button(svg("quote",12)+" 带着现在的设置问 AI","explore-ask","","ghost xs")+'</div>':"")+'</div>';
+   (ctx?.pid&&!ctx.live?'<div class="explore-actions">'+button(svg("quote",12)+" "+$t("带着现在的设置问 AI"),"explore-ask","","ghost xs")+'</div>':"")+'</div>';
   const chart=node.querySelector(".explore-chart"),reads=node.querySelector(".explore-reads");
   const draw=()=>{
    try{const st=exploreState(d,values);
     chart.innerHTML=chartSvg({kind:d.kind||"line",x:st.xs,series:st.series,xlabel:d.x?.label,ylabel:d.ylabel,ymin:d.ymin,ymax:d.ymax,title:""});
     reads.innerHTML=st.reads.map(r=>'<span><small>'+esc(r.label)+'</small><b>'+esc(r.v)+'</b></span>').join("");
-   }catch(e){chart.innerHTML='<p class="muted">这个式子算不了：'+esc(e.message)+'</p>';}
+   }catch(e){chart.innerHTML="<p class=\"muted\">"+$t("这个式子算不了：")+esc(e.message)+"</p>";}
   };
   node.addEventListener("input",e=>{const t=e.target.closest("[data-param]");if(!t)return;values[t.dataset.param]=Number(t.value);
    node.querySelector('[data-param-out="'+CSS.escape(t.dataset.param)+'"]').textContent=t.value;draw();});
   const ask=node.querySelector('[data-action="explore-ask"]');
   if(ask)ask.onclick=e=>{e.stopPropagation();const st=Chat[ctx.pid];if(!st)return;
-   st.quote="「"+(d.title||"动手试试")+"」里我把 "+params.map(p=>(p.label||p.name)+" = "+values[p.name]).join("，")+(reads.textContent?"；这时 "+[...reads.children].map(x=>x.innerText.replace(/\n/," = ")).join("，"):"");
+   st.quote=$t("「{0}」里我把",d.title||$t("动手试试"))+" "+params.map(p=>(p.label||p.name)+" = "+values[p.name]).join("，")+(reads.textContent?$t("；这时")+" "+[...reads.children].map(x=>x.innerText.replace(/\n/," = ")).join("，"):"");
    updateComposer(ctx.pid);Dock.els[ctx.pid]?.querySelector(".composer textarea")?.focus();};
   draw();
  },
  async timeline(d,node){
-  node.innerHTML='<div class="block-pending">读取轨迹…</div>';
+  node.innerHTML="<div class=\"block-pending\">"+$t("读取轨迹…")+"</div>";
   const since=d.days?new Date(Date.now()-d.days*864e5).toISOString():null;
   let rows=[];
   for(const ref of (d.refs&&d.refs.length?d.refs:[null]))rows=rows.concat(await rpc("journal",{types:d.types||null,ref,since,limit:60}));
   rows=[...new Map(rows.map(r=>[r.id,r])).values()].sort((a,b)=>b.at.localeCompare(a.at)).slice(0,40);
-  node.innerHTML='<div class="cards-head">'+svg("history",14)+' 学习轨迹</div>'+(rows.map(journalRow).join("")||'<p class="muted">没有找到记录。</p>');
+  node.innerHTML="<div class=\"cards-head\">"+svg("history",14)+" "+$t("学习轨迹")+"</div>"+(rows.map(journalRow).join("")||"<p class=\"muted\">"+$t("没有找到记录。")+"</p>");
  },
  async excerpt(d,node){
   const f=await rpc("file_read",{path:d.file});
   const lines=String(f.content||"").split("\n"),from=Math.max(1,d.from||1),to=Math.min(lines.length,d.to||Math.min(lines.length,from+30));
   const body=lines.slice(from-1,to).map((l,i)=>'<span class="ln">'+(from+i)+'</span>'+(d.highlight&&l.includes(d.highlight)?esc(l).split(esc(d.highlight)).join('<mark>'+esc(d.highlight)+'</mark>'):esc(l))).join("\n");
-  node.innerHTML='<div class="excerpt-head">'+svg("file",13)+' '+esc(f.path)+' · 第 '+from+'–'+to+' 行'+button("在我这边打开到这里","open-file",'data-path="'+esc(f.path)+'" data-line="'+from+'"'+(d.highlight?' data-highlight="'+esc(d.highlight)+'"':""),"ghost sm")+'</div><pre class="excerpt">'+body+'</pre>';
+  node.innerHTML="<div class=\"excerpt-head\">"+svg("file",13)+" "+esc(f.path)+" "+$t("· 第 {0}–{1} 行",from,to)+button($t("在我这边打开到这里"),"open-file",'data-path="'+esc(f.path)+'" data-line="'+from+'"'+(d.highlight?' data-highlight="'+esc(d.highlight)+'"':""),"ghost sm")+"</div><pre class=\"excerpt\">"+body+"</pre>";
  },
 };
-function journalRow(e){
+export function journalRow(e){
  const d=e.data||{},refs=(e.refs||[]).filter(r=>!r.startsWith("ann:")&&(r.includes("/")||r.includes("."))),mark=(e.refs||[]).find(r=>r.startsWith("ann:"));
  const what=d.summary||d.text||d.title||d.query||d.url||(d.files?d.files.map(f=>f.file).join("、"):"")||d.file||d.excerpt||"";
  return '<div class="jrow"><time>'+esc(fmtDate(e.at,true))+'</time><span class="jtype j-'+esc(e.type)+'">'+esc((String(e.data?.skill||"").startsWith("agent:")&&rulesJournalName[e.type])||journalName[e.type]||e.type)+'</span><span class="jwho">'+esc(who(e.actor))+'</span>'+
   '<span class="jwhat">'+esc(shorten(what,160))+(d.state?' <small>'+esc(d.state)+'</small>':"")+'</span>'+
-  refs.filter(r=>!String(what).includes(r)).slice(0,2).map(r=>'<a class="jref" data-action="open-file" data-path="'+esc(r)+'">'+esc(baseName(r))+'</a>').join("")+(mark?'<a class="jref" data-action="open-ref" data-ref="'+esc(mark)+'">回到原处</a>':"")+'</div>';
+  refs.filter(r=>!String(what).includes(r)).slice(0,2).map(r=>'<a class="jref" data-action="open-file" data-path="'+esc(r)+'">'+esc(baseName(r))+'</a>').join("")+(mark?"<a class=\"jref\" data-action=\"open-ref\" data-ref=\""+esc(mark)+"\">"+$t("回到原处")+"</a>":"")+'</div>';
 }
 /* A small dependency-free chart: line, bar or scatter, as SVG. */
 function chartSvg(d){
  const W=520,H=260,P=38,series=(d.series||[]).filter(s=>Array.isArray(s.y)).slice(0,6);
- if(!series.length)return '<p class="muted">图表没有数据</p>';
+ if(!series.length)return "<p class=\"muted\">"+$t("图表没有数据")+"</p>";
  const n=Math.max(...series.map(s=>s.y.length)),xs=Array.isArray(d.x)&&d.x.length?d.x:[...Array(n).keys()];
  const numericX=xs.every(v=>typeof v==="number"),ys=series.flatMap(s=>s.y.filter(v=>typeof v==="number"&&isFinite(v)));
  let lo=Math.min(0,...ys),hi=Math.max(...ys);
@@ -178,18 +177,18 @@ function chartSvg(d){
  });
  const ticks=[lo,(lo+hi)/2,hi].map(v=>'<text x="'+(P-6)+'" y="'+(Y(v)+4)+'" text-anchor="end">'+esc(+v.toPrecision(3))+'</text><line x1="'+P+'" x2="'+(W-P)+'" y1="'+Y(v)+'" y2="'+Y(v)+'" class="grid"/>').join("");
  const xt=[0,Math.floor((xs.length-1)/2),xs.length-1].filter((v,i,a)=>a.indexOf(v)===i).map(i=>'<text x="'+X(xs[i],i)+'" y="'+(H-P+16)+'" text-anchor="middle">'+esc(shorten(xs[i],10))+'</text>').join("");
- const legend=series.map((s,k)=>'<span><i style="background:'+colors[k%colors.length]+'"></i>'+esc(s.name||"系列 "+(k+1))+'</span>').join("");
+ const legend=series.map((s,k)=>'<span><i style="background:'+colors[k%colors.length]+'"></i>'+esc(s.name||$t("系列")+" "+k+1)+'</span>').join("");
  return '<div class="chart">'+(d.title?'<div class="chart-title">'+esc(d.title)+'</div>':"")+'<svg viewBox="0 0 '+W+' '+H+'" class="chart-svg">'+ticks+xt+body+
   (d.xlabel?'<text x="'+W/2+'" y="'+(H-4)+'" text-anchor="middle" class="axis">'+esc(d.xlabel)+'</text>':"")+(d.ylabel?'<text x="12" y="'+H/2+'" transform="rotate(-90 12 '+H/2+')" text-anchor="middle" class="axis">'+esc(d.ylabel)+'</text>':"")+
   '</svg><div class="chart-legend">'+legend+'</div></div>';
 }
 /* One station of a topic's route, wherever the route is listed: where the learner is, and the weak point a station
    was put in to fill. */
-function routeStep(s,docs){
- return (s.ref&&docs.get(s.ref)?'<a data-action="open-doc" data-id="'+esc(s.ref)+'">'+esc(s.title)+'</a>':esc(s.title))+(s.state==="now"?'<span class="route-now">现在</span>':"")+
-  (s.gap?'<span class="route-gap" data-tip="'+esc("发现「"+s.gap+"」还不熟时补上的")+'">补 '+esc(s.gap)+'</span>':"");
+export function routeStep(s,docs){
+ return (s.ref&&docs.get(s.ref)?'<a data-action="open-doc" data-id="'+esc(s.ref)+'">'+esc(s.title)+'</a>':esc(s.title))+(s.state==="now"?"<span class=\"route-now\">"+$t("现在")+"</span>":"")+
+  (s.gap?"<span class=\"route-gap\" data-tip=\""+esc($t("发现「{0}」还不熟时补上的",s.gap))+"\">"+$t("补")+" "+esc(s.gap)+"</span>":"");
 }
-const routeClass=s=>s.state?' class="'+s.state+'"':"";
+export const routeClass=s=>s.state?' class="'+s.state+'"':"";
 /* The knowledge graph, shared by the map panel and graph blocks. A topic's route is drawn as a numbered chain. */
 const GRAPH_STYLE=[
  {selector:"node",style:{"label":"data(label)","color":"#c9d6e4","font-size":11,"font-family":"inherit","text-valign":"bottom","text-margin-y":6,"width":18,"height":18,"background-color":"#5b6675","text-wrap":"ellipsis","text-max-width":"120px"}},
@@ -210,7 +209,7 @@ const GRAPH_STYLE=[
  {selector:"edge.fills",style:{"line-color":"#f3a09b","target-arrow-color":"#f3a09b","line-style":"dashed","width":1.2}},
  {selector:"edge.explains",style:{"line-color":"#ecc994","target-arrow-color":"#ecc994","line-style":"dashed"}},
  {selector:".faded",style:{"opacity":.15}}];
-function mountGraph(container,g,opt={}){
+export function mountGraph(container,g,opt={}){
  if(typeof cytoscape==="undefined"||!container)return null;
  if(container.__cy){try{container.__cy.destroy();}catch(_){ }}
  const docs=new Map((S.data?.docs||[]).map(d=>[d.id,d])),els=[];
@@ -224,7 +223,7 @@ function mountGraph(container,g,opt={}){
   if(id.startsWith("route:"))els.push({data:{id,label:(i+1)+". "+s.title,kind:"route"},classes:"route"+marks+(here===id?" here":"")});
   else{const n=els.find(x=>x.data.id===id);if(n){n.data.label=(i+1)+". "+n.data.label;n.classes+=marks+(here===id?" here":"");}}
   // a station put in for a weak point hangs off it on the map
-  if(s.insight&&g.nodes.some(n=>n.id===s.insight))els.push({data:{id:"fills:"+i,source:s.insight,target:id,label:opt.compact?"":"补"},classes:"fills"});
+  if(s.insight&&g.nodes.some(n=>n.id===s.insight))els.push({data:{id:"fills:"+i,source:s.insight,target:id,label:opt.compact?"":$t("补")},classes:"fills"});
   if(i){const prev=route[i-1].ref&&g.nodes.some(n=>n.id===route[i-1].ref)?route[i-1].ref:"route:"+(i-1);els.push({data:{id:"trunk:"+i,source:prev,target:id,label:""},classes:"trunk"});}
  });
  const cy=cytoscape({container,elements:els,style:GRAPH_STYLE,wheelSensitivity:.25,minZoom:.2,maxZoom:3,
@@ -243,7 +242,7 @@ function themeColor(name,fallback){const v=getComputedStyle(document.documentEle
 function vizPalette(){return ["accent","ai","amber","tk-fn","red","green","tk-type","tk-str"].map((k,i)=>themeColor(k,["#8bdcc5","#b5a8fa","#ecc994","#84c9f2","#f3a09b","#86dbc0","#ecc994","#a8d8a0"][i]));}
 
 /* ---- relation diagrams the AI draws for one explanation: its own nodes and edges, not the vault's graph ------------- */
-const REL_KINDS={prerequisite:"是…的前提",causes:"导致",part_of:"是…的一部分",contrasts:"对比",example:"例子",related:"相关",uses:"用到",becomes:"变成"};
+const REL_KINDS={prerequisite:$t("是…的前提"),causes:$t("导致"),part_of:$t("是…的一部分"),contrasts:$t("对比"),example:$t("例子"),related:$t("相关"),uses:$t("用到"),becomes:$t("变成")};
 function relationsGraph(container,d,opts={}){
  if(typeof cytoscape==="undefined"||!container)return null;
  if(container.__cy){try{container.__cy.destroy();}catch(_){}}
@@ -252,7 +251,7 @@ function relationsGraph(container,d,opts={}){
  const ids=new Set(),els=[];
  for(const n of (d.nodes||[]).slice(0,80)){
   const id=String(n.id??n.label);if(!id||ids.has(id))continue;ids.add(id);
-  const path=n.ref&&typeof resolveWiki==="function"?resolveWiki(n.ref):null;
+  const path=n.ref?resolveWiki(n.ref):null;
   els.push({data:{id,label:String(n.label??id),c:color(n.group),note:n.note||"",path:path||"",group:n.group||""},classes:(path?"linked ":"")+(n.main?"main":"")});
  }
  (d.edges||[]).slice(0,200).forEach((e,i)=>{
@@ -299,7 +298,7 @@ function relationsGraph(container,d,opts={}){
   const links=e.target.connectedEdges().map(x=>{const s=x.source().data("label"),t=x.target().data("label");return s+" —"+(x.data("full")||"")+"→ "+t;});
   say('<b>'+esc(n.label)+'</b>'+(n.group?' <small>'+esc(n.group)+'</small>':"")+(n.note?'<div class="markdown">'+markdown(n.note)+'</div>':"")+
    (links.length?'<div class="rel-links">'+links.map(l=>'<span>'+esc(l)+'</span>').join("")+'</div>':"")+
-   (n.path?button(svg("document",12)+" 打开「"+esc(baseName(n.path).replace(/\.md$/,""))+"」","open-file",'data-path="'+esc(n.path)+'"',"ghost xs"):""));
+   (n.path?button(svg("document",12)+" "+$t("打开「{0}」",esc(baseName(n.path).replace(/\.md$/,""))),"open-file",'data-path="'+esc(n.path)+'"',"ghost xs"):""));
  });
  cy.on("tap","edge",e=>{const x=e.target;say('<b>'+esc(x.source().data("label"))+'</b> —'+esc(x.data("full")||"")+'→ <b>'+esc(x.target().data("label"))+'</b>'+(x.data("note")?'<div class="markdown">'+markdown(x.data("note"))+'</div>':""));});
  cy.on("tap",e=>{if(e.target===cy){cy.nodes().removeClass("picked");say("");}});
@@ -310,8 +309,8 @@ function relationsGraph(container,d,opts={}){
 function relationsHtml(d,height){
  const groups=[...new Set((d.nodes||[]).map(n=>n.group||""))].filter(Boolean),pal=vizPalette();
  const kinds=[...new Set((d.edges||[]).map(e=>e.kind).filter(k=>REL_KINDS[k]))];
- return '<div class="rel"><div class="rel-head">'+svg("network",14)+'<b>'+esc(d.title||"关系图")+'</b><span class="grow"></span>'+
-  iconButton("refresh","rel-relayout","重新排布")+iconButton("float","rel-zoom","放大看")+'</div>'+
+ return '<div class="rel"><div class="rel-head">'+svg("network",14)+'<b>'+esc(d.title||$t("关系图"))+'</b><span class="grow"></span>'+
+  iconButton("refresh","rel-relayout",$t("重新排布"))+iconButton("float","rel-zoom",$t("放大看"))+'</div>'+
   '<div class="rel-canvas" style="height:'+height+'px"></div>'+
   ((groups.length||kinds.length)?'<div class="rel-legend">'+groups.map((g,i)=>'<span><i style="background:'+pal[i%pal.length]+'"></i>'+esc(g)+'</span>').join("")+
    kinds.map(k=>'<span class="rel-kind k-'+k+'">'+esc(REL_KINDS[k])+'</span>').join("")+'</div>':"")+
@@ -331,26 +330,26 @@ function compileExpr(src){
   const c=s[i];
   if(/\s/.test(c)){i++;continue;}
   // Words in quotes, for a readout that names what is happening: eta < 1 ? '单调靠近' : '震荡'.
-  if(c==="'"||c==='"'||c==="「"){const end=s.indexOf(c==="「"?"」":c,i+1);if(end<0)throw new Error("引号没有配对");toks.push({t:"s",v:s.slice(i+1,end)});i=end+1;continue;}
+  if(c==="'"||c==='"'||c==="「"){const end=s.indexOf(c==="「"?"」":c,i+1);if(end<0)throw new Error($t("引号没有配对"));toks.push({t:"s",v:s.slice(i+1,end)});i=end+1;continue;}
   const num=/^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?/i.exec(s.slice(i));if(num){toks.push({t:"n",v:Number(num[0])});i+=num[0].length;continue;}
   const id=/^[A-Za-z_Ͱ-Ͽ][\wͰ-Ͽ]*/.exec(s.slice(i));if(id){toks.push({t:"id",v:id[0]});i+=id[0].length;continue;}
   const op=/^(<=|>=|==|!=|&&|\|\||\*\*|[-+*/%^()<>,?:!])/.exec(s.slice(i));if(op){toks.push({t:"op",v:op[0]==="**"?"^":op[0]});i+=op[0].length;continue;}
-  throw new Error("看不懂的符号「"+c+"」");
+  throw new Error($t("看不懂的符号「{0}」",c));
  }
- let k=0;const peek=()=>toks[k],take=v=>{const t=toks[k];if(v&&(!t||t.v!==v))throw new Error("这里少了「"+v+"」");k++;return t;};
+ let k=0;const peek=()=>toks[k],take=v=>{const t=toks[k];if(v&&(!t||t.v!==v))throw new Error($t("这里少了「{0}」",v));k++;return t;};
  const BIN={"||":[1,(a,b)=>a||b],"&&":[2,(a,b)=>a&&b],"==":[3,(a,b)=>+(a===b)],"!=":[3,(a,b)=>+(a!==b)],"<":[4,(a,b)=>+(a<b)],">":[4,(a,b)=>+(a>b)],"<=":[4,(a,b)=>+(a<=b)],">=":[4,(a,b)=>+(a>=b)],
   "+":[5,(a,b)=>a+b],"-":[5,(a,b)=>a-b],"*":[6,(a,b)=>a*b],"/":[6,(a,b)=>a/b],"%":[6,(a,b)=>a%b],"^":[8,(a,b)=>Math.pow(a,b)]};
  const atom=()=>{
-  const t=take();if(!t)throw new Error("式子没写完");
+  const t=take();if(!t)throw new Error($t("式子没写完"));
   if(t.t==="n"||t.t==="s")return()=>t.v;
   if(t.t==="op"&&t.v==="("){const e=expr(0);take(")");return e;}
   if(t.t==="op"&&(t.v==="-"||t.v==="+"||t.v==="!")){const e=unary();return t.v==="-"?v=>-e(v):t.v==="!"?v=>+!e(v):e;}
   if(t.t==="id"){
-   if(peek()?.v==="("){const f=EXPR_FN[t.v];if(!f)throw new Error("没有这个函数："+t.v);take("(");const args=[];if(peek()?.v!==")")do{args.push(expr(0));}while(peek()?.v===","&&take(","));take(")");return v=>f(...args.map(a=>a(v)));}
+   if(peek()?.v==="("){const f=EXPR_FN[t.v];if(!f)throw new Error($t("没有这个函数：")+t.v);take("(");const args=[];if(peek()?.v!==")")do{args.push(expr(0));}while(peek()?.v===","&&take(","));take(")");return v=>f(...args.map(a=>a(v)));}
    if(t.v in EXPR_CONST)return()=>EXPR_CONST[t.v];
-   return v=>{if(!(t.v in v))throw new Error("不认识的变量："+t.v);return v[t.v];};
+   return v=>{if(!(t.v in v))throw new Error($t("不认识的变量：")+t.v);return v[t.v];};
   }
-  throw new Error("这里不该出现「"+t.v+"」");
+  throw new Error($t("这里不该出现「{0}」",t.v));
  };
  const unary=()=>{const a=atom();if(peek()?.v==="^"){take();const b=unary();return v=>Math.pow(a(v),b(v));}return a;};
  const expr=min=>{
@@ -362,7 +361,7 @@ function compileExpr(src){
   }
   return left;
  };
- const out=expr(0);if(k<toks.length)throw new Error("多出来的「"+toks[k].v+"」");
+ const out=expr(0);if(k<toks.length)throw new Error($t("多出来的「{0}」",toks[k].v));
  return out;
 }
 function exploreState(d,values){

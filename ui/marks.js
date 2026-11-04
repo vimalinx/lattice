@@ -1,10 +1,20 @@
-"use strict";
+import {$t} from "./i18n.js";
+import {Dock,panelType} from "./state.js";
+import {all,ask,askText,button,dialog,el,emptyState,esc,fmtDate,hydrateVault,iconButton,markdown,rpc,safe,shorten,svg,toast,who} from "./core.js";
+import {activate,findPanel,onePanel,openPanel,panelTitle,saveLayout,sideOf,splitBeside,stackNode,stackOf} from "./dock.js";
+import {CV,setEditorMarks} from "./editor.js";
+import {Chat} from "./chat.js";
+import {Files,openFile} from "./files.js";
+import {Reader,openWeb} from "./reader.js";
+import {bookMarks} from "./books.js";
+import {writeClipboard} from "./popups.js";
+import {Sel,askAbout,clearSelection,closeMenus,hidePop,popMenu,refreshState} from "./app.js";
 /* Highlights and notes, the same on everything that is read: a selection anywhere becomes an anchor (annotations.py keeps
    them), and each kind of window draws its own: editors with decorations, rendered text with the browser's text
    highlights, a book in its own frame. The 批注 window lists them and goes back to where they stand. */
 const Marks={items:{},ranges:new Map(),here:null,hereTitle:"",color:"yellow"};
-const MARK_COLORS={yellow:"黄",green:"绿",blue:"蓝",pink:"粉"};
-const markStyle=m=>m.ask?"ask":m.by==="me"?m.color:"ai";
+const MARK_COLORS={yellow:$t("黄"),green:$t("绿"),blue:$t("蓝"),pink:$t("粉")};
+export const markStyle=m=>m.ask?"ask":m.by==="me"?m.color:"ai";
 // What a window's content is, as annotations know it.
 function markWhere(pid){
  const p=Dock.panels[pid];if(!p)return null;
@@ -59,14 +69,14 @@ function sectionOfLine(doc,line){
  for(let n=line,low=Math.max(1,line-400);n>=low;n--){const m=/^#{1,6}\s+(.+?)\s*#*\s*$/.exec(doc.line(n).text);if(m)return m[1].slice(0,60);}
  return "";
 }
-function selectionAnchor(t,text){
+export function selectionAnchor(t,text){
  const pid=t.closest?.(".panel")?.dataset.pid,where=pid&&markWhere(pid);if(!where)return null;
  const p=Dock.panels[pid],cm=t.closest?.(".cm-editor"),view=cm&&CV.EditorView.findFromDOM(cm);
  if(view){
   const s=view.state.selection.main;if(s.empty||p.type!=="file")return null;
   const doc=view.state.doc,line=doc.lineAt(s.from).number,host=view.dom.closest(".cm-host"),at={line};
   if(host?.dataset.cellEditor)at.cell=host.dataset.cellEditor;else if(host?.dataset.field&&host.dataset.field!=="text")at.field=host.dataset.field;
-  return {source:where,at,label:sectionOfLine(doc,line)||"第 "+line+" 行",text:view.state.sliceDoc(s.from,s.to),before:view.state.sliceDoc(Math.max(0,s.from-50),s.from),after:view.state.sliceDoc(s.to,s.to+50)};
+  return {source:where,at,label:sectionOfLine(doc,line)||$t("第 {0} 行",line),text:view.state.sliceDoc(s.from,s.to),before:view.state.sliceDoc(Math.max(0,s.from-50),s.from),after:view.state.sliceDoc(s.to,s.to+50)};
  }
  const sel=getSelection();if(!sel?.rangeCount||sel.isCollapsed)return null;
  const range=sel.getRangeAt(0),box=range.commonAncestorContainer,start=box.nodeType===1?box:box.parentElement;
@@ -87,14 +97,14 @@ async function marksOf(where){
  const held=Marks.items,items=await rpc("annotations",{source:where}).catch(()=>[]);
  held[where]=items;return items;
 }
-async function marksRefresh(pid){
+export async function marksRefresh(pid){
  const where=markWhere(pid);if(!where)return;
  const items=await marksOf(where);
  if(Dock.els[pid]&&markWhere(pid)===where)marksPaint(pid,items);
 }
 // Taking a window out of the page empties the ranges drawn in it: they are found again when it is back.
-function marksShown(pid){if(Marks.ranges.get(pid)?.length)marksRefresh(pid);}
-function marksChanged(){
+export function marksShown(pid){if(Marks.ranges.get(pid)?.length)marksRefresh(pid);}
+export function marksChanged(){
  Marks.items={};
  Object.keys(Dock.panels).forEach(marksRefresh);
  Object.keys(Dock.panels).filter(pid=>Dock.panels[pid].type==="marks").forEach(renderMarks);
@@ -137,7 +147,7 @@ function markFlash(range){
  (range.startContainer.nodeType===1?range.startContainer:range.startContainer.parentElement)?.scrollIntoView({block:"center"});
  if(!window.Highlight)return;CSS.highlights.set("lmark-flash",new Highlight(range));setTimeout(()=>CSS.highlights.delete("lmark-flash"),1800);
 }
-function markAtPoint(e){
+export function markAtPoint(e){
  const cm=e.target.closest?.("[data-mark]");if(cm)return cm.dataset.mark;
  const hits=Marks.ranges.get(e.target.closest?.(".panel")?.dataset.pid);if(!hits?.length)return null;
  const c=document.caretRangeFromPoint(e.clientX,e.clientY);
@@ -152,73 +162,65 @@ document.addEventListener("click",e=>{
 });
 
 /* ---- one annotation ----------------------------------------------------------------------------------------------- */
-function noteDialog(title,value=""){return dialog({title,input:{value,multiline:true,allowEmpty:true,placeholder:"写下你的想法（可以空着）",hint:"Ctrl Enter 存下"},ok:"存下"});}
+function noteDialog(title,value=""){return dialog({title,input:{value,multiline:true,allowEmpty:true,placeholder:$t("写下你的想法（可以空着）"),hint:$t("Ctrl Enter 存下")},ok:$t("存下")});}
 async function markCreate(withNote){
  const anchor=Sel.anchor;if(!anchor)return;
  hidePop();
- const note=withNote?await noteDialog("批注这段话"):"";
+ const note=withNote?await noteDialog($t("批注这段话")):"";
  if(note==null)return;
  await rpc("annotation_add",{source:anchor.source,anchor,note,color:Marks.color});
  clearSelection();
 }
 function markWho(m){return (m.by==="me"?"":who(m.by)+" · ")+fmtDate(m.created,true);}
-async function markOpen(id,at){
+export async function markOpen(id,at){
  const m=await rpc("annotation_get",{id}),mine=m.by==="me";
  if(m.ask)return askedOpen(id,at);
- popMenu(at,'<div class="mark-pop"><small>'+esc((m.label?m.label+" · ":"")+markWho(m))+(m.lost==="changed"?" · 原文已改":"")+'</small>'+
-  '<blockquote>'+esc(shorten(m.text,160))+'</blockquote>'+(m.note?'<div class="mark-note">'+esc(m.note)+'</div>':"")+
-  (mine?'<div class="mark-colors">'+Object.entries(MARK_COLORS).map(([c,t])=>'<button class="dot lmark-c-'+c+(m.color===c?" on":"")+'" data-action="mark-color" data-id="'+esc(id)+'" data-color="'+c+'" title="'+t+'"></button>').join("")+'</div>':"")+'</div>'+
-  '<hr/><button data-action="mark-edit" data-id="'+esc(id)+'">'+svg("edit",14)+'<span>'+(m.note?"改批注":"写批注")+'</span></button>'+
-  '<button data-action="mark-ask" data-id="'+esc(id)+'" data-agent="flash">'+svg("spark",14)+'<span>问快答</span></button>'+
-  '<button data-action="mark-ask" data-id="'+esc(id)+'" data-agent="tutor">'+svg("bot",14)+'<span>问主会话</span></button>'+
-  '<button data-action="mark-card" data-id="'+esc(id)+'">'+svg("card",14)+'<span>做成知识卡</span></button>'+
-  '<button data-action="mark-link" data-id="'+esc(id)+'">'+svg("link",14)+'<span>复制链接，贴进笔记</span></button>'+
-  '<hr/><button data-action="mark-delete" data-id="'+esc(id)+'">'+svg("trash",14)+'<span>删除</span></button>',{cls:"menu-mark",width:260});
+ popMenu(at,"<div class=\"mark-pop\"><small>"+esc((m.label?m.label+" · ":"")+markWho(m))+(m.lost==="changed"?" "+$t("· 原文已改"):"")+"</small><blockquote>"+esc(shorten(m.text,160))+"</blockquote>"+(m.note?'<div class="mark-note">'+esc(m.note)+'</div>':"")+(mine?'<div class="mark-colors">'+Object.entries(MARK_COLORS).map(([c,t])=>'<button class="dot lmark-c-'+c+(m.color===c?" on":"")+'" data-action="mark-color" data-id="'+esc(id)+'" data-color="'+c+'" title="'+t+'"></button>').join("")+'</div>':"")+"</div><hr/><button data-action=\"mark-edit\" data-id=\""+esc(id)+"\">"+svg("edit",14)+"<span>"+(m.note?$t("改批注"):$t("写批注"))+"</span></button><button data-action=\"mark-ask\" data-id=\""+esc(id)+"\" data-agent=\"flash\">"+svg("spark",14)+"<span>"+$t("问快答")+"</span></button><button data-action=\"mark-ask\" data-id=\""+esc(id)+"\" data-agent=\"tutor\">"+svg("bot",14)+"<span>"+$t("问主会话")+"</span></button><button data-action=\"mark-card\" data-id=\""+esc(id)+"\">"+svg("card",14)+"<span>"+$t("做成知识卡")+"</span></button><button data-action=\"mark-link\" data-id=\""+esc(id)+"\">"+svg("link",14)+"<span>"+$t("复制链接，贴进笔记")+"</span></button><hr/><button data-action=\"mark-delete\" data-id=\""+esc(id)+"\">"+svg("trash",14)+"<span>"+$t("删除")+"</span></button>",{cls:"menu-mark",width:260});
 }
 /* ---- a question left where it was asked: a small window on the spot, or the 问答 window at the side once that is open ---- */
 function askedBody(a){
  const said=x=>'<div class="asked-q">'+esc(x.question)+'</div>'+
-  (x.gone?'<p class="muted">这段对话已经删除了。</p>':x.answer?'<div class="markdown asked-a">'+markdown(x.answer)+'</div>':'<p class="muted">'+(a.answering&&x===a?"快答正在回答…":"还没有回答。")+'</p>');
+  (x.gone?"<p class=\"muted\">"+$t("这段对话已经删除了。")+"</p>":x.answer?'<div class="markdown asked-a">'+markdown(x.answer)+'</div>':'<p class="muted">'+(a.answering&&x===a?$t("快答正在回答…"):$t("还没有回答。"))+'</p>');
  return '<blockquote>'+esc(shorten(a.quote,200))+'</blockquote>'+said(a)+(a.also||[]).map(x=>'<div class="asked-more">'+said(x)+'</div>').join("");
 }
 async function askedOpen(id,at){
  const side=findPanel({type:"asked"});
  if(side){Dock.panels[side].ann=id;saveLayout();activate(side);return renderAsked(side);}
  const a=await rpc("annotation_asked",{id}),row=(action,icon,text)=>'<button data-action="'+action+'" data-id="'+esc(id)+'">'+svg(icon,14)+'<span>'+text+'</span></button>';
- const menu=popMenu(at,'<div class="mark-pop asked-pop">'+askedBody(a)+'</div><hr/>'+row("mark-side","layout","放到右侧")+(a.gone?"":row("mark-thread","spark","接着问"))+row("mark-deeper","bot","交给主会话深入讲")+row("mark-card","card","做成知识卡")+row("mark-go","marker","回到原处")+row("mark-delete","trash","去掉挂载点"),{cls:"menu-mark menu-asked",width:340});
+ const menu=popMenu(at,'<div class="mark-pop asked-pop">'+askedBody(a)+'</div><hr/>'+row("mark-side","layout",$t("放到右侧"))+(a.gone?"":row("mark-thread","spark",$t("接着问")))+row("mark-deeper","bot",$t("交给主会话深入讲"))+row("mark-card","card",$t("做成知识卡"))+row("mark-go","marker",$t("回到原处"))+row("mark-delete","trash",$t("去掉挂载点")),{cls:"menu-mark menu-asked",width:340});
  hydrateVault(menu,null);
 }
-function openAsked(id){
+export function openAsked(id){
  const had=findPanel({type:"asked"});
  if(had){Dock.panels[had].ann=id;saveLayout();activate(had);renderAsked(had);return had;}
  const stack=stackOf(Dock.focus);
- if(WINDOW||!stack||Dock.layout.floats.some(f=>f.stack===stack))return openPanel({type:"asked",ann:id});
+ if(onePanel()||!stack||Dock.layout.floats.some(f=>f.stack===stack))return openPanel({type:"asked",ann:id});
  const beside=stackNode([]);splitBeside(stack,"right",beside);
  return openPanel({type:"asked",ann:id},{stack:beside.id});
 }
-panelType("asked",{side:"mine",icon:"spark",title:()=>"问答",
+panelType("asked",{side:"mine",icon:"spark",title:()=>$t("问答"),
  mount(p,node,pid){node.innerHTML='<div class="asked" data-keep-scroll></div>';renderAsked(pid);},
- screen(p){return {view:"问答",annotation:p.ann||null};}});
+ screen(p){return {view:$t("问答"),annotation:p.ann||null};}});
 async function renderAsked(pid){
  const p=Dock.panels[pid],box=Dock.els[pid]?.querySelector(".asked");if(!box)return;
- if(!p.ann){box.innerHTML=emptyState("spark","点一处问过的话","带下划线的文字是你问过快答的地方，内容会显示在这里。");return;}
+ if(!p.ann){box.innerHTML=emptyState("spark",$t("点一处问过的话"),$t("带下划线的文字是你问过快答的地方，内容会显示在这里。"));return;}
  const a=await rpc("annotation_asked",{id:p.ann}).catch(()=>null);
  if(!Dock.els[pid])return;
- if(!a){box.innerHTML=emptyState("spark","这条问答的挂载点已经去掉了","点别处带下划线的文字，内容会显示在这里。");return;}
+ if(!a){box.innerHTML=emptyState("spark",$t("这条问答的挂载点已经去掉了"),$t("点别处带下划线的文字，内容会显示在这里。"));return;}
  box.innerHTML='<small>'+esc(a.place.title+(a.label?" · "+a.label:"")+" · "+fmtDate(a.created,true))+'</small>'+askedBody(a)+'<div class="asked-tools">'+
-  (a.gone?"":button(svg("spark",12)+" 接着问","mark-thread",'data-id="'+esc(p.ann)+'"',"ghost xs"))+button(svg("bot",12)+" 交给主会话深入讲","mark-deeper",'data-id="'+esc(p.ann)+'"',"ghost xs")+button(svg("marker",12)+" 回到原处","mark-go",'data-id="'+esc(p.ann)+'"',"ghost xs")+button(svg("card",12)+" 做成知识卡","mark-card",'data-id="'+esc(p.ann)+'"',"ghost xs")+'</div>';
+  (a.gone?"":button(svg("spark",12)+" "+$t("接着问"),"mark-thread",'data-id="'+esc(p.ann)+'"',"ghost xs"))+button(svg("bot",12)+" "+$t("交给主会话深入讲"),"mark-deeper",'data-id="'+esc(p.ann)+'"',"ghost xs")+button(svg("marker",12)+" "+$t("回到原处"),"mark-go",'data-id="'+esc(p.ann)+'"',"ghost xs")+button(svg("card",12)+" "+$t("做成知识卡"),"mark-card",'data-id="'+esc(p.ann)+'"',"ghost xs")+'</div>';
  hydrateVault(box,null);
 }
 // An answer that was still on its way when the window opened.
-function askedFinished(thread){
+export function askedFinished(thread){
  Object.keys(Dock.panels).filter(pid=>Dock.panels[pid].type==="asked").forEach(renderAsked);
  const pop=el(".asked-pop");if(pop)closeMenus();
 }
-async function openAnnotation(id){const m=await rpc("annotation_get",{id});return anchorGo(m.source,m.anchor);}
+export async function openAnnotation(id){const m=await rpc("annotation_get",{id});return anchorGo(m.source,m.anchor);}
 /* Back to where something was marked or quoted, wherever that is now. */
-async function anchorGo(source,a){
+export async function anchorGo(source,a){
  const pl=await rpc("anchor_place",{source,message:a.at?.message||null});
- if(pl.gone)return toast("它已经不在了","error");
+ if(pl.gone)return toast($t("它已经不在了"),"error");
  if(pl.kind==="thread"){
   const pid=openPanel({type:"chat",agent:pl.agent,thread:pl.thread});
   const go=(n=0)=>{
@@ -234,14 +236,14 @@ async function anchorGo(source,a){
   const go=(n=0)=>{
    const root=Dock.els[pid]?.querySelector(".reader-page");
    if(!root)return n<80&&setTimeout(()=>go(n+1),100);
-   const r=domLocate(root,a);if(r)markFlash(r);else toast("这一页上找不到那段话了");
+   const r=domLocate(root,a);if(r)markFlash(r);else toast($t("这一页上找不到那段话了"));
   };
   return go();
  }
  return openFile(pl.path,{anchor:a});
 }
 /* In a file's window: the rendered text when that is what shows, else the editor that has the words. */
-function gotoAnchor(pid,a){
+export function gotoAnchor(pid,a){
  const node=Dock.els[pid],st=Files[pid],cell=a.at?.cell;
  if(cell)node.querySelector('[data-cell="'+cell+'"]')?.scrollIntoView({block:"center"});
  if(st.mode==="preview"){const root=node.querySelector(".md-preview"),r=root&&domLocate(root,a);if(r){markFlash(r);return true;}}
@@ -250,10 +252,10 @@ function gotoAnchor(pid,a){
   const hit=locateText(looseMap(view.state.doc.toString()),a);
   if(hit){view.focus();view.dispatch({selection:{anchor:hit.from,head:hit.to},effects:CV.EditorView.scrollIntoView(hit.from,{y:"center"})});return true;}
  }
- toast("原文已经改过，找不到这一段了");
+ toast($t("原文已经改过，找不到这一段了"));
  return false;
 }
-async function markAction(kind,a){
+export async function markAction(kind,a){
  const id=a.dataset.id;
  switch(kind){
  case "mark-side":return openAsked(id);
@@ -269,23 +271,23 @@ async function markAction(kind,a){
  case "mark-deeper":{
   // The question comes along with what the quick answer said, for the main conversation to take further.
   const q=await rpc("annotation_asked",{id});
-  return askAbout("tutor",q.quote+"\n\n我在快答里问过：\n"+[q,...(q.also||[])].map(x=>"问："+x.question+"\n答："+x.answer).join("\n\n"),{source:q.source,...q.anchor});
+  return askAbout("tutor",q.quote+"\n\n"+$t("我在快答里问过：")+"\n"+[q,...(q.also||[])].map(x=>$t("问：{0}\n答：",x.question)+x.answer).join("\n\n"),{source:q.source,...q.anchor});
  }
  case "mark-add":return markCreate(false);
  case "mark-note":return markCreate(true);
  case "mark-go":return openAnnotation(id);
  case "mark-more":return markOpen(id,a);
  case "mark-color":Marks.color=a.dataset.color;return rpc("annotation_update",{id,color:a.dataset.color});
- case "mark-edit":{const m=await rpc("annotation_get",{id}),note=await noteDialog(m.note?"改批注":"写批注",m.note);if(note!=null)await rpc("annotation_update",{id,note});return;}
- case "mark-delete":{const m=await rpc("annotation_get",{id});if(m.ask)return rpc("annotation_unmount",{id});if(m.note&&!await ask(shorten(m.note,120),{title:"删除这条批注？",danger:true,ok:"删除"}))return;return rpc("annotation_delete",{id});}
+ case "mark-edit":{const m=await rpc("annotation_get",{id}),note=await noteDialog(m.note?$t("改批注"):$t("写批注"),m.note);if(note!=null)await rpc("annotation_update",{id,note});return;}
+ case "mark-delete":{const m=await rpc("annotation_get",{id});if(m.ask)return rpc("annotation_unmount",{id});if(m.note&&!await ask(shorten(m.note,120),{title:$t("删除这条批注？"),danger:true,ok:$t("删除")}))return;return rpc("annotation_delete",{id});}
  case "mark-ask":{const m=await rpc("annotation_get",{id});return askAbout(a.dataset.agent,m.text,{source:m.source,...m.anchor});}
  case "mark-card":{
-  const m=await rpc("annotation_get",{id}),title=await askText("知识卡的标题",shorten(m.text.replace(/\s+/g," "),30),{ok:"做成卡片",hint:"出处会记在卡上，复习时能回到这里"});if(!title)return;
+  const m=await rpc("annotation_get",{id}),title=await askText($t("知识卡的标题"),shorten(m.text.replace(/\s+/g," "),30),{ok:$t("做成卡片"),hint:$t("出处会记在卡上，复习时能回到这里")});if(!title)return;
   const r=await rpc("annotation_card",{id,title});await refreshState();return openFile(r.path);
  }
  case "mark-link":{
   const m=await rpc("annotation_get",{id}),target=["thread","web"].includes(m.place.kind)?"":m.place.kind==="file"?m.place.path:m.place.title;
-  await writeClipboard("[["+target+"#ann:"+id+"|"+(m.label||shorten(m.text,20)).replace(/[|\]]/g," ")+"]]");return toast("已复制，贴进笔记就是一条指回这里的链接");
+  await writeClipboard("[["+target+"#ann:"+id+"|"+(m.label||shorten(m.text,20)).replace(/[|\]]/g," ")+"]]");return toast($t("已复制，贴进笔记就是一条指回这里的链接"));
  }
  case "marks-scope":{const p=Dock.panels[a.dataset.pid];if(p){p.scope=a.dataset.scope;saveLayout();renderMarks(a.dataset.pid);}return;}
  }
@@ -293,24 +295,24 @@ async function markAction(kind,a){
 }
 
 /* ---- the 批注 window ------------------------------------------------------------------------------------------------ */
-panelType("marks",{side:"mine",icon:"marker",title:()=>"批注",
+panelType("marks",{side:"mine",icon:"marker",title:()=>$t("批注"),
  mount(p,node,pid){
   node.innerHTML='<div class="marks"><div class="marks-bar"></div><div class="marks-list" data-keep-scroll></div></div>';
   renderMarks(pid);
  },
- screen(p){return {view:"批注",scope:p.scope||"here",showing:Marks.hereTitle};}});
+ screen(p){return {view:$t("批注"),scope:p.scope||"here",showing:Marks.hereTitle};}});
 // Beside what is being read, as a row in it takes the reader back there.
-function openMarks(from=Dock.focus){
+export function openMarks(from=Dock.focus){
  const mine=from&&Dock.panels[from]&&sideOf(from)==="mine",where=mine&&markWhere(from);
  if(where){Marks.here=where;Marks.hereTitle=panelTitle(from);}
  const had=findPanel({type:"marks"}),stack=mine&&stackOf(from);
  if(had){activate(had);renderMarks(had);return had;}
- if(WINDOW||!stack||Dock.layout.floats.some(f=>f.stack===stack))return openPanel({type:"marks"});
+ if(onePanel()||!stack||Dock.layout.floats.some(f=>f.stack===stack))return openPanel({type:"marks"});
  const beside=stackNode([]);splitBeside(stack,"right",beside);
  return openPanel({type:"marks"},{stack:beside.id});
 }
 // The window follows what the learner is reading.
-function marksFollow(){
+export function marksFollow(){
  const pid=Dock.focus;if(!pid||Dock.panels[pid]?.type==="marks"||sideOf(pid)!=="mine")return;
  const where=markWhere(pid);if(!where||where===Marks.here)return;
  Marks.here=where;Marks.hereTitle=panelTitle(pid);
@@ -320,21 +322,21 @@ function markRow(m,place){
  const said=m.ask?m.ask.question:m.note;
  return '<div class="mark-row'+(m.lost?" lost":"")+'" data-action="'+(m.ask?"mark-more":"mark-go")+'" data-id="'+esc(m.id)+'"><i class="mark-bar lmark-c-'+markStyle(m)+'"></i><div class="mark-main">'+
   '<blockquote>'+esc(shorten(m.text,200))+'</blockquote>'+(said?'<div class="mark-note">'+esc(said)+'</div>':"")+
-  '<small>'+esc((place?m.place.title+" · ":"")+(m.label?m.label+" · ":"")+markWho(m))+(m.lost==="changed"?' · <b>原文已改</b>':m.lost==="gone"?' · <b>来源已删除</b>':"")+'</small></div>'+
-  iconButton("dots","mark-more","这条批注",'data-id="'+esc(m.id)+'"')+'</div>';
+  '<small>'+esc((place?m.place.title+" · ":"")+(m.label?m.label+" · ":"")+markWho(m))+(m.lost==="changed"?" · <b>"+$t("原文已改")+"</b>":m.lost==="gone"?" · <b>"+$t("来源已删除")+"</b>":"")+'</small></div>'+
+  iconButton("dots","mark-more",$t("这条批注"),'data-id="'+esc(m.id)+'"')+'</div>';
 }
 async function renderMarks(pid){
  const p=Dock.panels[pid],node=Dock.els[pid];if(!p||!node)return;
  const every=p.scope==="all"||p.scope==="asked"||!Marks.here,bar=node.querySelector(".marks-bar");
  if(!bar.firstChild){
-  bar.innerHTML='<div class="marks-scope"></div><input placeholder="搜原文和批注" autocomplete="off"/>';
+  bar.innerHTML="<div class=\"marks-scope\"></div><input placeholder=\""+$t("搜原文和批注")+"\" autocomplete=\"off\"/>";
   bar.lastChild.value=p.query||"";bar.lastChild.addEventListener("input",e=>{p.query=e.target.value;clearTimeout(p.queryTimer);p.queryTimer=setTimeout(()=>renderMarks(pid),200);});
  }
- bar.firstChild.innerHTML=[["here",Marks.hereTitle?shorten(Marks.hereTitle,24):"这里"],["all","全部"],["asked","问过的"]].map(([k,t])=>'<button class="'+(k===(every?(p.scope==="asked"?"asked":"all"):"here")?"on":"")+'" data-action="marks-scope" data-pid="'+pid+'" data-scope="'+k+'">'+esc(t)+'</button>').join("");
+ bar.firstChild.innerHTML=[["here",Marks.hereTitle?shorten(Marks.hereTitle,24):$t("这里")],["all",$t("全部")],["asked",$t("问过的")]].map(([k,t])=>'<button class="'+(k===(every?(p.scope==="asked"?"asked":"all"):"here")?"on":"")+'" data-action="marks-scope" data-pid="'+pid+'" data-scope="'+k+'">'+esc(t)+'</button>').join("");
  const query=(p.query||"").trim(),[found,mentions]=await Promise.all([rpc("annotations",{source:every?null:Marks.here,query:query||null}),
   every||/^(thread|web):/.test(Marks.here)?[]:rpc("file_mentions",{path:Marks.here}).catch(()=>[])]);
  if(!Dock.els[pid])return;
  const list=node.querySelector(".marks-list"),items=p.scope==="asked"?found.filter(m=>m.ask):found;
- list.innerHTML=(items.map(m=>markRow(m,every)).join("")||emptyState("marker",query?"没有找到":"这里还没有批注","选中一段文字，点「高亮」或「批注」。"))+
-  (mentions.length?'<div class="marks-mentions"><h5>提到它的笔记</h5>'+mentions.map(d=>'<a data-action="open-file" data-path="'+esc(d.path)+'">'+svg("document",12)+' '+esc(d.title)+'</a>').join("")+'</div>':"");
+ list.innerHTML=(items.map(m=>markRow(m,every)).join("")||emptyState("marker",query?$t("没有找到"):$t("这里还没有批注"),$t("选中一段文字，点「高亮」或「批注」。")))+
+  (mentions.length?"<div class=\"marks-mentions\"><h5>"+$t("提到它的笔记")+"</h5>"+mentions.map(d=>'<a data-action="open-file" data-path="'+esc(d.path)+'">'+svg("document",12)+' '+esc(d.title)+'</a>').join("")+"</div>":"");
 }

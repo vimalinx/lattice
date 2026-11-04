@@ -1,20 +1,23 @@
-"use strict";
+import {$t,LOCALE} from "./i18n.js";
+import {highlightBlocks,propsHtml,vaultImage} from "./editor.js";
+import {fillEmbed} from "./notes.js";
 /* Lattice UI core: no remote services; all data passes through QWebChannel. */
 // In a separate window (one panel taken out of the main window), its id; empty in the main window.
-const WINDOW=new URLSearchParams(location.search).get("window")||"";
-const S={bridge:null,ui:{theme:"dark",side:{width:270},spaces:[]},data:null,config:null,toastTimer:null};
-const el=s=>document.querySelector(s);
-const all=(s,root=document)=>Array.from(root.querySelectorAll(s));
-function esc(v){return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
-function h(html){const t=document.createElement("template");t.innerHTML=html.trim();return t.content.firstElementChild;}
-function fmtDate(iso,full=false){
+export const WINDOW=new URLSearchParams(location.search).get("window")||"";
+// states: the working states on the status bar, from their files in the vault.
+export const S={bridge:null,ui:{theme:"dark",side:{width:270}},states:[],data:null,config:null,toastTimer:null};
+export const el=s=>document.querySelector(s);
+export const all=(s,root=document)=>Array.from(root.querySelectorAll(s));
+export function esc(v){return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
+export function h(html){const t=document.createElement("template");t.innerHTML=html.trim();return t.content.firstElementChild;}
+export function fmtDate(iso,full=false){
  if(!iso)return "—";
  const d=new Date(iso);if(Number.isNaN(d.getTime()))return String(iso);
- return full?d.toLocaleString("zh-CN",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):d.toLocaleDateString("zh-CN",{month:"short",day:"numeric"});
+ return full?d.toLocaleString(LOCALE,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):d.toLocaleDateString(LOCALE,{month:"short",day:"numeric"});
 }
-function shorten(t,n=70){t=String(t||"").replace(/\s+/g," ");return t.length>n?t.slice(0,n)+"…":t;}
-function baseName(p){return String(p||"").split(/[\\/]/).pop();}
-function svg(name,size=18){
+export function shorten(t,n=70){t=String(t||"").replace(/\s+/g," ");return t.length>n?t.slice(0,n)+"…":t;}
+export function baseName(p){return String(p||"").split(/[\\/]/).pop();}
+export function svg(name,size=18){
  const paths={
   home:'<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-6v-7H10v7H4a1 1 0 0 1-1-1z"/>',
   bars:'<path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/>',
@@ -92,7 +95,7 @@ function svg(name,size=18){
  };
  return '<svg viewBox="0 0 24 24" width="'+esc(size)+'" height="'+esc(size)+'" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(paths[name]||paths.spark)+'</svg>';
 }
-function logo(){
+export function logo(){
  return '<svg viewBox="0 0 128 128" fill="none" aria-hidden="true"><path d="M26 90 55 31 91 85M55 31l43 25M26 90l72-34" stroke="#83e2c7" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/><circle cx="55" cy="31" r="9" fill="#eef9f4"/><circle cx="26" cy="90" r="9" fill="#eef9f4"/><circle cx="91" cy="85" r="9" fill="#eef9f4"/><circle cx="98" cy="56" r="8" fill="#eef9f4"/></svg>';
 }
 /* ```mermaid fenced blocks render as diagrams instead of code. */
@@ -110,7 +113,7 @@ marked.use({renderer:{code(t){if((t.lang||"").trim().toLowerCase()==="mermaid"){
  return i!=null?'<div class="mermaid" data-processed="true">\uE002'+i+'\uE003</div>':'<div class="mermaid">'+esc(t.text)+'</div>';}return false;}}});
 function keepMermaid(src,svg){if(mermaidSvgs.length>200){mermaidDrawn.clear();mermaidSvgs.length=0;}mermaidDrawn.set(src,mermaidSvgs.push(svg)-1);}
 let _mmTimer=null,_mmSeq=0,_mmInited=false,_mmTries=0;
-function scheduleMermaid(){clearTimeout(_mmTimer);_mmTries=0;_mmTimer=setTimeout(runMermaid,60);}
+export function scheduleMermaid(){clearTimeout(_mmTimer);_mmTries=0;_mmTimer=setTimeout(runMermaid,60);}
 async function runMermaid(){
  if(typeof mermaid==="undefined")return;
  if(!_mmInited){_mmInited=true;try{mermaid.initialize({startOnLoad:false,theme:S.ui.theme==="dark"?"dark":"default",securityLevel:"strict",fontFamily:"inherit",
@@ -128,26 +131,26 @@ async function runMermaid(){
   try{const out=await mermaid.render("mm"+(++_mmSeq),src,n);n.innerHTML=out.svg;keepMermaid(src,out.svg);
    // the same diagram elsewhere on screen (the reply redrawn meanwhile) takes the picture too
    for(const other of all(".mermaid:not([data-processed='true'])"))if(other.textContent===src){other.dataset.processed="true";other.innerHTML=out.svg;}}
-  catch(_){const bad='<pre class="mermaid-error">'+esc(src)+'</pre><small class="muted">图表语法未能解析</small>';n.innerHTML=bad;keepMermaid(src,bad);}
+  catch(_){const bad="<pre class=\"mermaid-error\">"+esc(src)+"</pre><small class=\"muted\">"+$t("图表语法未能解析")+"</small>";n.innerHTML=bad;keepMermaid(src,bad);}
  }
 }
 /* Maths, drawn by KaTeX (ui/vendor/katex): $…$ and \(…\) in a line, $$…$$ and \[…\] on their own. A $ that opens
    before a space, or closes before a digit, is a price, not maths. Drawings are cached, so streaming replies stay quick. */
 const MATH_RE=/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|(?<![\\$\w])\$(?=[^\s$])((?:\\\$|[^$\n])+?)(?<=[^\s\\])\$(?![\d$])/g;
 const texCache=new Map();
-function texHtml(tex,display){
+export function texHtml(tex,display){
  const key=(display?"D":"I")+tex;if(texCache.has(key))return texCache.get(key);
  let out;
  // The source stays with the drawing, so a copied formula comes out as TeX.
  try{out=typeof katex==="undefined"?'<code>'+esc(tex)+'</code>':'<span class="tex" data-tex="'+esc(tex)+'"'+(display?' data-display="1"':"")+'>'+
   katex.renderToString(tex,{displayMode:display,throwOnError:false,strict:"ignore",output:"html"})+'</span>';}
- catch(_){out='<code class="math-error" title="公式写错了">'+esc(tex)+'</code>';}
+ catch(_){out="<code class=\"math-error\" title=\""+$t("公式写错了")+"\">"+esc(tex)+"</code>";}
  if(texCache.size>800)texCache.clear();texCache.set(key,out);return out;
 }
-function markdown(text){
+export function markdown(text){
  // A file's own attributes at the top (--- … ---) show as a small table, not as Markdown.
  const fm=/^---\n([\s\S]*?)\n(?:---|\.\.\.)\s*(?:\n|$)/.exec(String(text||""));
- if(fm&&typeof propsHtml==="function")return propsHtml(fm[1])+markdown(String(text).slice(fm[0].length));
+ if(fm)return propsHtml(fm[1])+markdown(String(text).slice(fm[0].length));
  const src=String(text||""),codes=[],maths=[];
  const masked=src.replace(/(`+)([\s\S]*?)\1/g,m=>{codes.push(m);return "\u0000"+(codes.length-1)+"\u0000";})
   .replace(MATH_RE,(m,a,b,c,d)=>{maths.push({tex:a??b??c??d,display:a!=null||b!=null});return "\uE000"+(maths.length-1)+"\uE001";});
@@ -166,59 +169,64 @@ function markdown(text){
    .replace(/\uE002(\d+)\uE003/g,(_,i)=>mermaidSvgs[+i]||"");
   if(out.includes('class="mermaid"'))scheduleMermaid();
   // Code fences coloured like the editor (editor.js); a language still loading is coloured when it arrives.
-  return typeof highlightBlocks==="function"?highlightBlocks(out):out;}
+  return highlightBlocks(out);}
  catch(_){return '<pre>'+esc(text)+'</pre>';}
 }
 /* What rendered Markdown names in the vault: images, loaded through the backend (the page cannot read the vault),
    and embedded notes (notes.js). depth counts embeds inside embeds. */
-function hydrateVault(root,base,depth=0){
+export function hydrateVault(root,base,depth=0){
  if(!root)return;
- if(typeof fillEmbed==="function")for(const e of all(".embed[data-embed]:not([data-filled])",root)){e.dataset.filled="1";fillEmbed(e,base,depth);}
+ for(const e of all(".embed[data-embed]:not([data-filled])",root)){e.dataset.filled="1";fillEmbed(e,base,depth);}
  if(typeof vaultImage!=="function")return;
  for(const img of all("img",root)){
   const src=img.dataset.vaultSrc||(img.getAttribute("src")&&!/^(https?:|data:|qrc:|blob:)/.test(img.getAttribute("src"))?img.getAttribute("src"):null);
   if(!src||img.dataset.hydrated)continue;img.dataset.hydrated="1";img.removeAttribute("src");
-  vaultImage(src,base).then(url=>{if(url)img.src=url;else img.alt="图片找不到："+src;});
+  vaultImage(src,base).then(url=>{if(url)img.src=url;else img.alt=$t("图片找不到：")+src;});
  }
 }
-async function rpc(method,args={},timeout=240000){
- if(!S.bridge)throw new Error("本地桌面桥尚未连接");
+export async function rpc(method,args={},timeout=240000){
+ if(!S.bridge)throw new Error($t("本地桌面桥尚未连接"));
  return await new Promise((resolve,reject)=>{
   let done=false;
-  const timer=timeout>0?setTimeout(()=>{if(!done){done=true;reject(new Error("本地调用超时："+method));}},timeout):null;
+  const timer=timeout>0?setTimeout(()=>{if(!done){done=true;reject(new Error($t("本地调用超时：")+method));}},timeout):null;
   S.bridge.request(JSON.stringify(Object.assign({method},args)),raw=>{
    if(done)return;done=true;if(timer)clearTimeout(timer);
-   try{const r=JSON.parse(raw);if(r.ok)resolve(r.data);else{const e=new Error(r.error||"未知错误");e.conflict=!!r.conflict;reject(e);}}catch(err){reject(err);}
+   try{const r=JSON.parse(raw);if(r.ok)resolve(r.data);else{const e=new Error(r.error||$t("未知错误"));e.conflict=!!r.conflict;reject(e);}}catch(err){reject(err);}
   });
  });
 }
-function toast(text,type="info"){
+export function toast(text,type="info"){
  const box=el("#toast");if(!box)return;
  box.textContent=text;box.className="visible"+(type==="error"?" error":"");
  clearTimeout(S.toastTimer);S.toastTimer=setTimeout(()=>box.className="",3800);
 }
-async function safe(fn){try{return await fn();}catch(e){console.error(e);toast(e.message||String(e),"error");return null;}}
-function button(label,action,attrs="",variant=""){return '<button class="btn '+variant+'" data-action="'+esc(action)+'" '+attrs+'>'+label+'</button>';}
-function iconButton(icon,action,title,attrs=""){return '<button class="icon" data-action="'+esc(action)+'" title="'+esc(title)+'" aria-label="'+esc(title)+'" '+attrs+'>'+svg(icon,15)+'</button>';}
+export async function safe(fn){try{return await fn();}catch(e){console.error(e);toast(e.message||String(e),"error");return null;}}
+export function button(label,action,attrs="",variant=""){return '<button class="btn '+variant+'" data-action="'+esc(action)+'" '+attrs+'>'+label+'</button>';}
+export function iconButton(icon,action,title,attrs=""){return '<button class="icon" data-action="'+esc(action)+'" title="'+esc(title)+'" aria-label="'+esc(title)+'" '+attrs+'>'+svg(icon,15)+'</button>';}
 /* One window at a time; whoever opened it can hear when it closes (Esc, a click outside, or replaced by another). */
-const Modal={onClose:null};
+export const Modal={onClose:null,back:null};
 function modalClosed(){const f=Modal.onClose;Modal.onClose=null;f?.();}
-function modal(content,size=""){
+export function modal(content,size=""){
  modalClosed();
+ Modal.back=document.activeElement;
  el("#overlays").innerHTML='<div class="modal-backdrop" data-dismiss="1"><div class="modal '+size+'" role="dialog" aria-modal="true">'+content+'</div></div>';
- return el("#overlays .modal");
+ const box=el("#overlays .modal");
+ // Into the window, unless what built it has its own place to start.
+ requestAnimationFrame(()=>{if(box.isConnected&&!box.contains(document.activeElement))box.querySelector('a[href],button:not(:disabled),input,textarea,select')?.focus();});
+ return box;
 }
-function closeModal(){el("#overlays").innerHTML="";modalClosed();}
+export function closeModal(){el("#overlays").innerHTML="";modalClosed();if(Modal.back?.isConnected)Modal.back.focus();Modal.back=null;}
 /* The program's own question box instead of the system's confirm() and prompt(): same look as the rest, Enter to agree,
    Esc or a click outside to cancel. It sits above any open window, so a question asked from one does not close it. */
-function dialog({title,message="",ok="确定",cancel="取消",danger=false,input=null}){
+export function dialog({title,message="",ok=$t("确定"),cancel=$t("取消"),danger=false,input=null}){
  return new Promise(done=>{
+  const back=document.activeElement;
   const box=h('<div class="dialog-backdrop"><div class="dialog'+(danger?" danger":"")+'" role="alertdialog" aria-modal="true">'+
    (title?'<h3>'+esc(title)+'</h3>':"")+(message?'<p>'+esc(message)+'</p>':"")+
    (input?(input.multiline?'<textarea class="dialog-input" rows="5" placeholder="'+esc(input.placeholder||"")+'" spellcheck="false">'+esc(input.value||"")+'</textarea>':'<input class="dialog-input" value="'+esc(input.value||"")+'" placeholder="'+esc(input.placeholder||"")+'" spellcheck="false"/>')+(input.hint?'<small>'+esc(input.hint)+'</small>':""):"")+
    '<div class="dialog-actions"><button class="btn ghost" data-answer="no">'+esc(cancel)+'</button><button class="btn '+(danger?"danger":"primary")+'" data-answer="yes">'+esc(ok)+'</button></div></div></div>');
   const field=box.querySelector(".dialog-input");
-  const finish=yes=>{document.removeEventListener("keydown",keys,true);box.classList.add("leaving");setTimeout(()=>box.remove(),120);
+  const finish=yes=>{document.removeEventListener("keydown",keys,true);box.classList.add("leaving");setTimeout(()=>box.remove(),120);if(back?.isConnected)back.focus();
    done(input?(yes?field.value.trim()||(input.allowEmpty?"":null):null):yes);};
   const keys=e=>{
    if(e.key==="Escape"){e.preventDefault();e.stopPropagation();finish(false);}
@@ -230,32 +238,32 @@ function dialog({title,message="",ok="确定",cancel="取消",danger=false,input
   requestAnimationFrame(()=>{if(field){field.focus();const dot=field.value.lastIndexOf(".");field.setSelectionRange(0,input.selectStem&&dot>0?dot:field.value.length);}else box.querySelector('[data-answer="yes"]').focus();});
  });
 }
-function ask(message,opts={}){return dialog({message,...opts});}
-function askText(title,value="",opts={}){return dialog({title,input:{value,...opts},ok:opts.ok||"好"});}
-function modalHead(title){return '<div class="modal-top"><h2>'+esc(title)+'</h2>'+iconButton("close","modal-close","关闭")+'</div>';}
-function emptyState(icon,title,desc){return '<div class="empty"><div class="empty-icon">'+svg(icon,30)+'</div><h3>'+esc(title)+'</h3><p>'+esc(desc)+'</p></div>';}
+export function ask(message,opts={}){return dialog({message,...opts});}
+export function askText(title,value="",opts={}){return dialog({title,input:{value,...opts},ok:opts.ok||$t("好")});}
+export function modalHead(title){return '<div class="modal-top"><h2>'+esc(title)+'</h2>'+iconButton("close","modal-close",$t("关闭"))+'</div>';}
+export function emptyState(icon,title,desc){return '<div class="empty"><div class="empty-icon">'+svg(icon,30)+'</div><h3>'+esc(title)+'</h3><p>'+esc(desc)+'</p></div>';}
 function stripAnsi(t){return String(t||"").replace(/\x1b\[[0-9;]*m/g,"");}
 function joined(v){return Array.isArray(v)?v.join(""):String(v||"");}
 /* Run and kernel outputs share one shape (nbformat outputs). Kernel HTML is sanitized, never executed. */
-function outputHtml(outputs){
+export function outputHtml(outputs){
  return (outputs||[]).map(o=>{
   if(o.output_type==="stream")return '<pre class="out-text'+(o.name==="stderr"?" stderr":"")+'">'+esc(stripAnsi(joined(o.text)))+'</pre>';
   if(o.output_type==="error")return '<pre class="out-error">'+esc(stripAnsi((o.traceback||[]).length?o.traceback.join("\n"):(o.ename+": "+o.evalue)))+'</pre>';
   const d=o.data||{};
-  if(d["image/png"])return '<img class="out-image" alt="运行输出的图像" src="data:image/png;base64,'+esc(joined(d["image/png"]))+'"/>';
-  if(d["image/jpeg"])return '<img class="out-image" alt="运行输出的图像" src="data:image/jpeg;base64,'+esc(joined(d["image/jpeg"]))+'"/>';
+  if(d["image/png"])return "<img class=\"out-image\" alt=\""+$t("运行输出的图像")+"\" src=\"data:image/png;base64,"+esc(joined(d["image/png"]))+"\"/>";
+  if(d["image/jpeg"])return "<img class=\"out-image\" alt=\""+$t("运行输出的图像")+"\" src=\"data:image/jpeg;base64,"+esc(joined(d["image/jpeg"]))+"\"/>";
   if(d["text/html"])return '<div class="out-html">'+DOMPurify.sanitize(joined(d["text/html"]),{ALLOWED_TAGS:["table","thead","tbody","tr","td","th","div","span","p","b","strong","em","br","pre","code"],ALLOWED_ATTR:["colspan","rowspan"]})+'</div>';
   if(d["text/markdown"])return '<div class="markdown">'+markdown(joined(d["text/markdown"]))+'</div>';
   return d["text/plain"]?'<pre class="out-text">'+esc(joined(d["text/plain"]))+'</pre>':"";
  }).join("");
 }
-const stageName={suggested:"待探索",seen:"接触过",explained:"能解释",applied:"能应用"};
+export const stageName={suggested:$t("待探索"),seen:$t("接触过"),explained:$t("能解释"),applied:$t("能应用")};
 // What kind of knowledge a card holds (lattice/model.py CARD_TYPES).
-const cardTypeName={concept:"概念",principle:"原理",method:"方法",idea:"思想",fact:"事实"};
-const stageColor={suggested:"#5b6675",seen:"#e0be88",explained:"#b5a8fa",applied:"#83e2c7"};
-const linkName={prerequisite:"是前置",part_of:"是一部分",related:"有关联",applies_to:"应用于",contrasts:"对比",explains:"解释了",branch_of:"分支自",mentions:"提到"};
-const kindName={topic:"主题",card:"知识卡",lesson:"课程",note:"笔记",insight:"薄弱点",notebook:"实验笔记",file:"文件",annotation:"批注"};
-const journalName={annotated:"批注",asked:"提问",answered:"作答",judged:"AI 判断",explained:"讲解",ran:"运行",viewed:"查看",wrote:"写作",staged:"理解阶段",reviewed:"回顾",detour:"岔开",bridged:"接回主干",insight:"薄弱点",organized:"整理",searched:"联网",net:"沙箱上网",installed:"装包",action:"AI 动作",undo:"撤销",skill_proposed:"提议改技能",skill_changed:"改了技能",skill_change_dismissed:"没采用的技能修改",skill_compared:"两版对比",skill_compare_done:"两版对比",carded:"记了卡",imported:"导入对话"};
+export const cardTypeName={concept:$t("概念"),principle:$t("原理"),method:$t("方法"),idea:$t("思想"),fact:$t("事实")};
+export const stageColor={suggested:"#5b6675",seen:"#e0be88",explained:"#b5a8fa",applied:"#83e2c7"};
+export const linkName={prerequisite:$t("是前置"),part_of:$t("是一部分"),related:$t("有关联"),applies_to:$t("应用于"),contrasts:$t("对比"),explains:$t("解释了"),branch_of:$t("分支自"),mentions:$t("提到")};
+export const kindName={topic:$t("主题"),card:$t("知识卡"),lesson:$t("课程"),note:$t("笔记"),insight:$t("薄弱点"),notebook:$t("实验笔记"),file:$t("文件"),annotation:$t("批注")};
+export const journalName={annotated:$t("批注"),asked:$t("提问"),answered:$t("作答"),judged:$t("AI 判断"),explained:$t("讲解"),ran:$t("运行"),viewed:$t("查看"),wrote:$t("写作"),staged:$t("理解阶段"),reviewed:$t("回顾"),detour:$t("岔开"),bridged:$t("接回主干"),insight:$t("薄弱点"),organized:$t("整理"),searched:$t("联网"),net:$t("沙箱上网"),installed:$t("装包"),action:$t("AI 动作"),undo:$t("撤销"),skill_proposed:$t("提议改技能"),skill_changed:$t("改了技能"),skill_change_dismissed:$t("没采用的技能修改"),skill_compared:$t("两版对比"),skill_compare_done:$t("两版对比"),carded:$t("记了卡"),imported:$t("导入对话")};
 // A change to an agent's rules is recorded like a skill's, and named for what it is.
-const rulesJournalName={skill_proposed:"提议改规则",skill_changed:"改了规则",skill_change_dismissed:"没采用的规则修改"};
-function who(actor){return actor==="me"?"我":({tutor:"主会话",flash:"快答",coach:"练习教练",organizer:"整理",builder:"应用助手",lattice:"Lattice",app:"Lattice"})[actor]||actor;}
+export const rulesJournalName={skill_proposed:$t("提议改规则"),skill_changed:$t("改了规则"),skill_change_dismissed:$t("没采用的规则修改")};
+export function who(actor){return actor==="me"?$t("我"):({tutor:$t("主会话"),flash:$t("快答"),coach:$t("练习教练"),organizer:$t("整理"),builder:$t("应用助手"),lattice:"Lattice",app:"Lattice"})[actor]||actor;}

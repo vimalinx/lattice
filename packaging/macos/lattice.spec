@@ -18,7 +18,7 @@ for dist in distributions():
 a = Analysis([str(ROOT / 'main.py')], pathex=[str(ROOT)],
     datas=[(str(ROOT/'ui'),'ui'), (str(ROOT/'lattice/agents'),'lattice/agents'),
            (str(ROOT/'lattice/skills'),'lattice/skills'), (str(ROOT/'lattice/mpl'),'lattice/mpl'),
-           (str(ROOT/'lattice/rules.md'),'lattice'), (str(ROOT/'lattice/netfwd.py'),'lattice'),
+           (str(ROOT/'lattice/rules.md'),'lattice'), (str(ROOT/'lattice/locales'),'lattice/locales'), (str(ROOT/'lattice/netfwd.py'),'lattice'),
            (str(ROOT/'LICENSE'),'licenses/Lattice'), *copy_metadata('jupyter_client'), *licenses],
     binaries=[(os.environ['LATTICE_UV'], 'bin')],
     hiddenimports=[*collect_submodules('jupyter_client'), *collect_submodules('lattice')],

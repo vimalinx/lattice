@@ -10,6 +10,8 @@ message it was. It stays where the words are, whatever becomes of the window it 
 """
 from __future__ import annotations
 
+from .i18n import tr
+
 import json
 from pathlib import Path
 import re
@@ -93,9 +95,9 @@ def describe(l, source, anchor):
     """Where something is, in the words an agent gets: enough to read around it."""
     p, label = place(l, source), (anchor or {}).get("label") or ""
     if p["kind"] == "thread":
-        return f"对话「{p['title']}」（thread:{p['thread']}" + (f"，第 {anchor['at']['message']} 条消息" if (anchor or {}).get("at", {}).get("message") else "") + "）"
+        return tr("对话「{0}」（thread:{1}{2}）", p['title'], p['thread'], tr("，第 {0} 条消息", anchor['at']['message']) if (anchor or {}).get("at", {}).get("message") else "")
     if p["kind"] == "web":
-        return f"网页 {p['url']}" + (f"（{label}）" if label else "")
+        return tr("网页 ") + str(p['url']) + str(f"（{label}）" if label else "")
     return (p.get("path") or p["title"]) + (f"（{label}）" if label else "")
 
 
@@ -137,7 +139,7 @@ def _view(l, row, places, texts):
 def get(l, ident):
     row = l.index.one("SELECT * FROM annotations WHERE id=?", (str(ident).removeprefix("ann:"),))
     if not row:
-        raise ValueError("找不到这条批注")
+        raise ValueError(tr("找不到这条批注"))
     return _view(l, row, {}, {})
 
 
@@ -170,11 +172,11 @@ def _write(l, rel, data):
 def _holder(l, ident):
     row = l.index.one("SELECT path FROM annotations WHERE id=?", (ident,))
     if not row:
-        raise ValueError("找不到这条批注")
+        raise ValueError(tr("找不到这条批注"))
     data = l.vault.read_json(row["path"])
     item = next((x for x in data["items"] if x.get("id") == ident), None)
     if not item:
-        raise ValueError("找不到这条批注")
+        raise ValueError(tr("找不到这条批注"))
     return row["path"], data, item
 
 
@@ -182,7 +184,7 @@ def add(l, where, anchor, note="", color=None, by="me", ask=None):
     source = source_of(l, where)
     anchor = clean(anchor)
     if not anchor["text"].strip():
-        raise ValueError("批注要有一段原文")
+        raise ValueError(tr("批注要有一段原文"))
     item = {"id": uid(), "by": str(by), "color": color if color in COLORS else COLORS[0], "note": str(note or "").strip()[:20000],
             "created": now(), "anchor": anchor, **({"ask": ask} if ask else {})}
     row = l.index.one("SELECT path FROM annotations WHERE source=? LIMIT 1", (source,))
@@ -227,7 +229,7 @@ def asked(l, ident):
     """The question an annotation stands for and what was answered, from the conversation as it is now."""
     item = get(l, ident)
     if not item.get("ask"):
-        raise ValueError("这条批注不是一个问题")
+        raise ValueError(tr("这条批注不是一个问题"))
     # The same words can be asked about again: those questions stand on the same place, and open together.
     same = [json.loads(r["ask"]) for r in l.index.rows("SELECT ask FROM annotations WHERE source=? AND text=? AND ask!='' AND id!=? ORDER BY created DESC",
                                                        (item["source"], item["text"], item["id"]))]

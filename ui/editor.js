@@ -1,15 +1,18 @@
-"use strict";
+import {$t} from "./i18n.js";
+import {S,all,esc,hydrateVault,kindName,markdown,rpc,safe,svg,texHtml,toast} from "./core.js";
+import {Embeds,fillEmbed} from "./notes.js";
+import {popMenu} from "./app.js";
 /* The editor for notes and code, built on CodeMirror 6 (ui/vendor/codemirror.js).
    Markdown gets a live preview like Obsidian's: it renders in place and shows its marks only where the cursor is,
    with [[links]], #tags, checkboxes and embedded images. Code gets highlighting, bracket pairs, Tab out of a closing
    bracket, completion, folding and search. A host element stands in for the old textarea: it carries the same data
    attributes and a `value`, so the panels read and save it the same way. */
-const CV=CM.view,CS=CM.state,CL=CM.language,CC=CM.commands,CA=CM.autocomplete,CQ=CM.search,CT=CM.highlight.tags;
+export const CV=CM.view,CS=CM.state,CL=CM.language,CC=CM.commands,CA=CM.autocomplete,CQ=CM.search,CT=CM.highlight.tags;
 const CMInit={};let cmSeq=0;
 const IMAGE_RE=/\.(png|jpe?g|gif|svg|webp|bmp)$/i;
 
 /* ---- the look: colours come from the page's own variables, so light and dark both follow ------------------- */
-const cmHighlight=CL.HighlightStyle.define([
+export const cmHighlight=CL.HighlightStyle.define([
  {tag:CT.keyword,class:"tk-kw"},{tag:[CT.controlKeyword,CT.moduleKeyword,CT.definitionKeyword,CT.operatorKeyword],class:"tk-kw"},
  {tag:[CT.string,CT.special(CT.string),CT.regexp,CT.character],class:"tk-str"},{tag:[CT.number,CT.bool,CT.null,CT.atom],class:"tk-num"},
  {tag:[CT.comment,CT.lineComment,CT.blockComment,CT.docComment],class:"tk-com"},
@@ -22,7 +25,7 @@ const cmHighlight=CL.HighlightStyle.define([
  {tag:[CT.link,CT.url],class:"tk-link"},{tag:CT.monospace,class:"tk-mono"},{tag:[CT.processingInstruction,CT.contentSeparator,CT.meta],class:"tk-mark"},
  {tag:CT.quote,class:"tk-quote"},{tag:CT.labelName,class:"tk-label"},
 ]);
-const cmTheme=CV.EditorView.theme({
+export const cmTheme=CV.EditorView.theme({
  "&":{color:"var(--text)",backgroundColor:"transparent",fontSize:"inherit"},
  "&.cm-focused":{outline:"none"},
  ".cm-content":{caretColor:"var(--accent)",padding:"6px 0"},
@@ -89,7 +92,7 @@ const SetMarks=CS.StateEffect.define();
 const markField=CS.StateField.define({create:()=>CV.Decoration.none,
  update(deco,tr){deco=deco.map(tr.changes);for(const e of tr.effects)if(e.is(SetMarks))deco=e.value;return deco;},
  provide:f=>CV.EditorView.decorations.from(f)});
-function setEditorMarks(view,ranges){
+export function setEditorMarks(view,ranges){
  if(!ranges.length&&view.state.field(markField).size===0)return;
  const marks=ranges.filter(r=>r.to>r.from).sort((a,b)=>a.from-b.from).map(r=>CV.Decoration.mark({class:"lmark lmark-"+r.style+(r.note?" has-note":""),
   attributes:{"data-mark":r.id,...(r.note?{"data-tip":r.note}:{})}}).range(r.from,r.to));
@@ -128,13 +131,13 @@ class Picture extends CV.WidgetType{
  eq(o){return o.src===this.src&&o.alt===this.alt;}
  toDOM(){
   const box=document.createElement("span");box.className="cm-img";const img=document.createElement("img");img.alt=this.alt||"";box.appendChild(img);
-  vaultImage(this.src,this.base).then(url=>{if(url)img.src=url;else box.textContent="图片找不到："+this.src;});
+  vaultImage(this.src,this.base).then(url=>{if(url)img.src=url;else box.textContent=$t("图片找不到：")+this.src;});
   return box;
  }
  ignoreEvent(){return false;}
 }
 /* An image named in a note: a web or data address as it is, otherwise a file in the vault, next to the note first. */
-async function vaultImage(src,base){
+export async function vaultImage(src,base){
  if(/^(https?:|data:)/.test(src))return src;
  const clean=decodeURI(src).replace(/^\.\//,""),dir=String(base||"").split("/").slice(0,-1).join("/");
  for(const path of [dir?dir+"/"+clean:null,clean].filter(Boolean)){
@@ -236,7 +239,7 @@ function frontmatter(doc){
  for(let i=2;i<=Math.min(doc.lines,300);i++){const t=doc.line(i).text.trim();if(t==="---"||t==="...")return {from:0,to:doc.line(i).to,last:i};}
  return null;
 }
-function propsHtml(yaml){
+export function propsHtml(yaml){
  const rows=String(yaml).split("\n").map(l=>/^([\w.-]+):\s*(.*)$/.exec(l)).filter(Boolean);
  return '<div class="props">'+rows.map(([,k,v])=>'<div class="prop"><span>'+esc(k)+'</span><b>'+esc(v.replace(/^\[|\]$/g,"").replace(/^["']|["']$/g,""))+'</b></div>').join("")+'</div>';
 }
@@ -342,9 +345,7 @@ function writeTable(t){
 function inlineMd(text){return String(text).trim()?markdown(text).trim().replace(/^<p>([\s\S]*)<\/p>$/,"$1"):"";}
 function gridRender(box){
  const t=box._table,cell=(tag,r,c,text)=>'<'+tag+' data-r="'+r+'" data-c="'+c+'" contenteditable="true" spellcheck="false"'+(t.align[c]?' style="text-align:'+t.align[c]+'"':"")+'>'+inlineMd(text)+'</'+tag+'>';
- box.innerHTML='<div class="markdown grid-wrap"><div class="table-wrap"><table><thead><tr>'+t.rows[0].map((x,c)=>cell("th",0,c,x)).join("")+'</tr></thead><tbody>'+
-  t.rows.slice(1).map((row,i)=>'<tr>'+row.map((x,c)=>cell("td",i+1,c,x)).join("")+'</tr>').join("")+'</tbody></table></div>'+
-  '<button class="grid-add grid-add-row" data-grid="row" title="加一行">+</button><button class="grid-add grid-add-col" data-grid="col" title="加一列">+</button></div>';
+ box.innerHTML="<div class=\"markdown grid-wrap\"><div class=\"table-wrap\"><table><thead><tr>"+t.rows[0].map((x,c)=>cell("th",0,c,x)).join("")+"</tr></thead><tbody>"+t.rows.slice(1).map((row,i)=>'<tr>'+row.map((x,c)=>cell("td",i+1,c,x)).join("")+'</tr>').join("")+"</tbody></table></div><button class=\"grid-add grid-add-row\" data-grid=\"row\" title=\""+$t("加一行")+"\">+</button><button class=\"grid-add grid-add-col\" data-grid=\"col\" title=\""+$t("加一列")+"\">+</button></div>";
  hydrateVault(box,box._grid?.base);
 }
 function gridCell(box,r,c){return box.querySelector('[data-r="'+r+'"][data-c="'+c+'"]');}
@@ -383,7 +384,7 @@ function gridChange(box,fn,focus){
  gridWrite(box);fn(box._table);gridRender(box);gridWrite(box);
  if(focus)gridFocus(box,...focus);
 }
-function gridAction(kind,a){
+export function gridAction(kind,a){
  const box=Grids.box,t=box?._table;if(!t||!box.isConnected)return null;
  const r=Grids.r,c=Grids.c,R=t.rows.length,C=t.align.length,blank=()=>Array(C).fill("");
  switch(kind){
@@ -397,7 +398,7 @@ function gridAction(kind,a){
   case "grid-col-right-move":if(c<C-1)gridChange(box,t=>{t.rows.forEach(x=>{[x[c+1],x[c]]=[x[c],x[c+1]];});[t.align[c+1],t.align[c]]=[t.align[c],t.align[c+1]];},[r,c+1]);return;
   case "grid-align":return gridChange(box,t=>{t.align[c]=a.dataset.align||null;},[r,c]);
   case "grid-sort":{const dir=a.dataset.dir==="desc"?-1:1;return gridChange(box,t=>{const body=t.rows.slice(1).sort((x,y)=>dir*String(x[c]).localeCompare(String(y[c]),"zh",{numeric:true}));t.rows.splice(1,body.length,...body);},[r,c]);}
-  case "grid-row-delete":if(r===0)return toast("表头这一行不能删；要删整个表格，用「删除表格」");return gridChange(box,t=>t.rows.splice(r,1),[Math.min(r,R-2),c]);
+  case "grid-row-delete":if(r===0)return toast($t("表头这一行不能删；要删整个表格，用「删除表格」"));return gridChange(box,t=>t.rows.splice(r,1),[Math.min(r,R-2),c]);
   case "grid-col-delete":if(C===1)return gridAction("grid-delete",a);return gridChange(box,t=>{t.rows.forEach(x=>x.splice(c,1));t.align.splice(c,1);},[r,Math.min(c,C-2)]);
   case "grid-source":{const view=box._view,g=box._grid,doc=view.state.doc,line=doc.line(Math.min(doc.lineAt(g.from).number+(r===0?0:r+1),doc.lines));view.focus();view.dispatch({selection:{anchor:cellStart(line,c)}});return;}
   case "grid-delete":{const view=box._view,g=box._grid,end=Math.min(view.state.doc.length,g.from+g.src.length+1);view.focus();view.dispatch({changes:{from:g.from,to:end,insert:""},selection:{anchor:g.from},userEvent:"delete"});return;}
@@ -407,13 +408,7 @@ function gridAction(kind,a){
 function gridMenu(box,cell,at){
  const r=+cell.dataset.r,c=+cell.dataset.c,t=box._table;Grids.box=box;Grids.r=r;Grids.c=c;
  const b=(kind,icon,label,extra="",off=false)=>'<button data-action="'+kind+'" '+extra+(off?" disabled":"")+'>'+svg(icon,14)+'<span>'+label+'</span></button>';
- popMenu(at,'<div class="menu-label">行</div>'+b("grid-row-above","arrowup","上面加一行","",r===0)+b("grid-row-below","chevrondown","下面加一行")+
-  b("grid-row-up","arrowup","这一行上移","",r<=1)+b("grid-row-down","chevrondown","这一行下移","",r===0||r>=t.rows.length-1)+b("grid-row-delete","trash","删掉这一行","",r===0)+
-  '<hr/><div class="menu-label">列</div>'+b("grid-col-left","plus","左边加一列")+b("grid-col-right","plus","右边加一列")+
-  b("grid-col-left-move","chevron","这一列左移","",c===0)+b("grid-col-right-move","chevron","这一列右移","",c>=t.align.length-1)+b("grid-col-delete","trash","删掉这一列")+
-  '<div class="menu-row"><span>对齐</span><span class="seg">'+[["left","左"],["center","中"],["right","右"],["","默认"]].map(([v,l])=>'<button data-action="grid-align" data-align="'+v+'" class="'+((t.align[c]||"")===v?"on":"")+'">'+l+'</button>').join("")+'</span></div>'+
-  '<div class="menu-row"><span>按这一列排序</span><span class="seg"><button data-action="grid-sort" data-dir="asc">升序</button><button data-action="grid-sort" data-dir="desc">降序</button></span></div>'+
-  '<hr/>'+b("grid-source","code","编辑这个表格的源码")+b("grid-delete","trash","删除表格"),{cls:"menu-wide"});
+ popMenu(at,"<div class=\"menu-label\">"+$t("行")+"</div>"+b("grid-row-above","arrowup",$t("上面加一行"),"",r===0)+b("grid-row-below","chevrondown",$t("下面加一行"))+b("grid-row-up","arrowup",$t("这一行上移"),"",r<=1)+b("grid-row-down","chevrondown",$t("这一行下移"),"",r===0||r>=t.rows.length-1)+b("grid-row-delete","trash",$t("删掉这一行"),"",r===0)+"<hr/><div class=\"menu-label\">"+$t("列")+"</div>"+b("grid-col-left","plus",$t("左边加一列"))+b("grid-col-right","plus",$t("右边加一列"))+b("grid-col-left-move","chevron",$t("这一列左移"),"",c===0)+b("grid-col-right-move","chevron",$t("这一列右移"),"",c>=t.align.length-1)+b("grid-col-delete","trash",$t("删掉这一列"))+"<div class=\"menu-row\"><span>"+$t("对齐")+"</span><span class=\"seg\">"+[["left",$t("左")],["center",$t("中")],["right",$t("右")],["",$t("默认")]].map(([v,l])=>'<button data-action="grid-align" data-align="'+v+'" class="'+((t.align[c]||"")===v?"on":"")+'">'+l+'</button>').join("")+"</span></div><div class=\"menu-row\"><span>"+$t("按这一列排序")+"</span><span class=\"seg\"><button data-action=\"grid-sort\" data-dir=\"asc\">"+$t("升序")+"</button><button data-action=\"grid-sort\" data-dir=\"desc\">"+$t("降序")+"</button></span></div><hr/>"+b("grid-source","code",$t("编辑这个表格的源码"))+b("grid-delete","trash",$t("删除表格")),{cls:"menu-wide"});
 }
 class Grid extends CV.WidgetType{
  constructor(src,from,base){super();this.src=src;this.from=from;this.base=base;}
@@ -482,7 +477,7 @@ class Grid extends CV.WidgetType{
  ignoreEvent(){return true;}
 }
 // A new table at the cursor, ready to type in its first cell.
-function insertTable(view,cols=3,rows=2){
+export function insertTable(view,cols=3,rows=2){
  const st=view.state,line=st.doc.lineAt(st.selection.main.head),t={rows:[Array(cols).fill(""),...[...Array(rows)].map(()=>Array(cols).fill(""))],align:Array(cols).fill(null)};
  const before=line.text.trim()?"\n\n":"",at=line.text.trim()?line.to:line.from,src=writeTable(t);
  const insert=before+src+"\n",from=at+before.length;
@@ -537,7 +532,7 @@ function highlightedCode(text,support){
  if(codeHtml.size>300)codeHtml.clear();codeHtml.set(key,out);return out;
 }
 const unescapeHtml=s=>s.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,"&");
-function highlightBlocks(html){
+export function highlightBlocks(html){
  return html.replace(/<pre><code class="language-([\w+#.-]+)">([\s\S]*?)<\/code><\/pre>/g,(m,lang,body)=>{
   const sup=codeSupport(lang);
   if(sup===null)return m;
@@ -645,13 +640,13 @@ async function tagComplete(ctx){
  const m=ctx.matchBefore(/(?:^|\s)#[^\s#]+$/);if(!m)return null;
  const from=m.from+m.text.indexOf("#")+1;
  const tags=await knownTags();
- return {from,options:tags.map(t=>({label:t.tag,detail:t.count+" 篇",type:"keyword"})),validFor:/^[^\s#]*$/};
+ return {from,options:tags.map(t=>({label:t.tag,detail:t.count+" "+$t("篇"),type:"keyword"})),validFor:/^[^\s#]*$/};
 }
 async function insertImages(view,files,opts,at=null){
  for(const f of files){
   const data=await new Promise((ok,bad)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=()=>bad(r.error);r.readAsDataURL(f);});
   const stamp=new Date().toISOString().slice(0,19).replace(/[-:T]/g,"");
-  const name=f.name&&f.name!=="image.png"?f.name:"粘贴 "+stamp+"."+((f.type.split("/")[1]||"png").replace("jpeg","jpg").replace("svg+xml","svg"));
+  const name=f.name&&f.name!=="image.png"?f.name:$t("粘贴 {0}.",stamp)+(f.type.split("/")[1]||"png").replace("jpeg","jpg").replace("svg+xml","svg");
   const r=await rpc("attach_data",{name,data});
   const pos=at??view.state.selection.main.head,text="![["+r.path+"]]";
   view.dispatch({changes:{from:pos,insert:text},selection:{anchor:pos+text.length},userEvent:"input"});at=null;
@@ -676,20 +671,20 @@ function dropAndPaste(opts){
 /* ---- making one ------------------------------------------------------------------------------------------------------ */
 /* opts: markdown (bool), live (render in place), filename (picks the code language), readonly, placeholder, path (for images),
    onChange(host), onCursor(view), keys (extra key bindings, highest precedence). */
-function editorHost(text,attrs,opts={}){
+export function editorHost(text,attrs,opts={}){
  const id=++cmSeq;CMInit[id]={text:String(text??""),opts};
  let cls="cm-host";attrs=String(attrs||"").replace(/\bclass="([^"]*)"/,(_,c)=>{cls+=" "+c;return "";});
  return '<div class="'+cls+'" data-cm="'+id+'" '+attrs+'></div>';
 }
-function mountEditors(root){
+export function mountEditors(root){
  for(const host of all(".cm-host[data-cm]",root)){
   const init=CMInit[host.dataset.cm];if(!init||host.cmView)continue;delete CMInit[host.dataset.cm];
   host.cmView=createEditor(host,init.text,init.opts);
   Object.defineProperty(host,"value",{get:()=>host.cmView.state.doc.toString(),configurable:true});
  }
 }
-function destroyEditors(root){all(".cm-host",root).forEach(h=>{h.cmView?.destroy();h.cmView=null;});}
-function refreshEditors(){all(".cm-host").forEach(h=>h.cmView?.dispatch({effects:Refresh.of(null)}));}
+export function destroyEditors(root){all(".cm-host",root).forEach(h=>{h.cmView?.destroy();h.cmView=null;});}
+export function refreshEditors(){all(".cm-host").forEach(h=>h.cmView?.dispatch({effects:Refresh.of(null)}));}
 function createEditor(host,text,opts){
  const md=!!opts.markdown,lang=new CS.Compartment();
  const keys=[
@@ -736,9 +731,9 @@ function createEditor(host,text,opts){
  return view;
 }
 /* Helpers the panels use in place of textarea calls. */
-function editorIn(root,field){const h=field?root?.querySelector('.cm-host[data-field="'+field+'"]'):root?.querySelector(".cm-host");return h?.cmView||null;}
-function focusEditor(root,end=false){const v=editorIn(root);if(!v)return;v.focus();if(end)v.dispatch({selection:{anchor:v.state.doc.length}});}
-function editorGoto(view,at){
+export function editorIn(root,field){const h=field?root?.querySelector('.cm-host[data-field="'+field+'"]'):root?.querySelector(".cm-host");return h?.cmView||null;}
+export function focusEditor(root,end=false){const v=editorIn(root);if(!v)return;v.focus();if(end)v.dispatch({selection:{anchor:v.state.doc.length}});}
+export function editorGoto(view,at){
  const doc=view.state.doc,text=doc.toString();let from=0,to=0;
  if(at.heading){const want=at.heading.trim().toLowerCase(),i=text.split("\n").findIndex(l=>/^#{1,6}\s/.test(l)&&l.replace(/^#+\s*|\s*#*\s*$/g,"").toLowerCase()===want);if(i>=0)at={line:i+1,select:false};}
  if(at.highlight&&text.includes(at.highlight)){from=text.indexOf(at.highlight);to=from+at.highlight.length;}
@@ -746,7 +741,7 @@ function editorGoto(view,at){
  view.focus();view.dispatch({selection:{anchor:from,head:to},effects:CV.EditorView.scrollIntoView(from,{y:"center"})});
 }
 // Which lines are on screen, for the agents' screen().
-function editorViewport(view){
+export function editorViewport(view){
  const box=view.dom.closest("[data-keep-scroll]")||view.scrollDOM,r=box.getBoundingClientRect(),top=view.documentTop;
  const a=view.lineBlockAtHeight(Math.max(0,r.top-top)),b=view.lineBlockAtHeight(Math.max(0,r.bottom-top));
  return {from:view.state.doc.lineAt(a.from).number,to:view.state.doc.lineAt(b.from).number,lines:view.state.doc.lines};

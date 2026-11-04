@@ -19,6 +19,8 @@ anything the learner would later run unsandboxed or rewrite the history.
 """
 from __future__ import annotations
 
+from .i18n import tr
+
 import glob
 import os
 from pathlib import Path
@@ -66,8 +68,8 @@ class Sandbox:
         return self._ok
 
     def why_not(self):
-        return "" if self.available() else ("沙箱不可用：系统里没有 bubblewrap（Arch：pacman -S bubblewrap；Debian/Ubuntu：apt install bubblewrap）"
-                                            if not self.bwrap else "沙箱不可用：bubblewrap 无法创建隔离环境（可能是系统禁用了非特权用户命名空间）")
+        return "" if self.available() else (tr("沙箱不可用：系统里没有 bubblewrap（Arch：pacman -S bubblewrap；Debian/Ubuntu：apt install bubblewrap）")
+                                            if not self.bwrap else tr("沙箱不可用：bubblewrap 无法创建隔离环境（可能是系统禁用了非特权用户命名空间）"))
 
     def visible(self):
         """Read-only paths beyond /usr: toolchains under home, interpreters of the vault's environments."""
@@ -106,7 +108,7 @@ class Sandbox:
         args += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/tmp/home"]
         if gpu:
             if not gpu.get("devices"):
-                raise RuntimeError("这台电脑上没有能在沙箱里用的显卡")
+                raise RuntimeError(tr("这台电脑上没有能在沙箱里用的显卡"))
             for node in gpu["devices"]:
                 if os.path.exists(node):
                     args += ["--dev-bind", node, node]

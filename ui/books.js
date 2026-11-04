@@ -1,30 +1,37 @@
-"use strict";
+import {$t,LANG} from "./i18n.js";
+import {Dock,panelType} from "./state.js";
+import {all,baseName,button,emptyState,rpc,safe,svg} from "./core.js";
+import {refreshTab,remember} from "./dock.js";
+import {openWeb} from "./reader.js";
+import {markOpen,markStyle,marksRefresh,openMarks} from "./marks.js";
+import {appUrl} from "./apps.js";
+import {Sel,clearSelection,closeMenus,hidePop,reportScreen,showSelPop} from "./app.js";
 /* The book window: PDF, EPUB, MOBI, AZW3, FB2 and CBZ, drawn on a site of their own (ui/book/), as a book holds someone
    else's HTML and Lattice's page holds the agents' tools. This side only opens the book there and hears what it reports:
    where the learner is, what they selected, a link they followed. What an agent reads of a book comes from the vault. */
-const Books={};   // pid -> {title, label, progress, showing, error}
+export const Books={};   // pid -> {title, label, progress, showing, error}
 const BOOK_NAME=/\.(pdf|epub|mobi|azw3?|prc|fb2|fb2\.zip|cbz)$/i;
-function isBook(path){return BOOK_NAME.test(String(path||""));}
+export function isBook(path){return BOOK_NAME.test(String(path||""));}
 panelType("book",{side:"mine",icon:"book",
  title:p=>Books[p.pid]?.title||p.title||baseName(p.path),
  mount(p,node,pid){
   p.pid=pid;Books[pid]={};
-  node.innerHTML='<iframe class="app-frame book-frame" sandbox="allow-scripts allow-same-origin" title="书"></iframe>';
-  node.firstChild.src=appUrl("lattice-app://book/_lattice/book/index.html");
+  node.innerHTML="<iframe class=\"app-frame book-frame\" sandbox=\"allow-scripts allow-same-origin\" title=\""+$t("书")+"\"></iframe>";
+  node.firstChild.src=appUrl("lattice-app://book/_lattice/book/index.html")+"&lang="+LANG;
  },
  unmount(p,node){const st=Books[node.dataset.pid];clearTimeout(st?.placeTimer);if(st?.selected)clearSelection();delete Books[node.dataset.pid];},
  // What an agent sees of the book on screen.
  screen(p,node){
-  const st=Books[node.dataset.pid];if(!st)return {view:"书",path:p.path};
-  return {view:"书",path:p.path,title:st.title,where:st.label,section:st.section,progress:st.progress==null?undefined:Math.round(st.progress*100)+"%",showing:st.showing};
+  const st=Books[node.dataset.pid];if(!st)return {view:$t("书"),path:p.path};
+  return {view:$t("书"),path:p.path,title:st.title,where:st.label,section:st.section,progress:st.progress==null?undefined:Math.round(st.progress*100)+"%",showing:st.showing};
  }});
 function frameRect(frame,r={}){
  const box=frame.getBoundingClientRect(),k=box.width/(frame.offsetWidth||box.width||1);
  return {left:box.left+(r.left||0)*k,top:box.top+(r.top||0)*k,bottom:box.top+(r.bottom||0)*k,width:(r.width||0)*k};
 }
 function bookPost(pid,message){Dock.els[pid]?.querySelector("iframe.book-frame")?.contentWindow?.postMessage(message,"*");}
-function bookMarks(pid,items){bookPost(pid,{book:"marks",marks:items.map(m=>({id:m.id,color:markStyle(m),at:m.anchor.at||{},text:m.anchor.text}))});}
-function bookGoto(pid,at){
+export function bookMarks(pid,items){bookPost(pid,{book:"marks",marks:items.map(m=>({id:m.id,color:markStyle(m),at:m.anchor.at||{},text:m.anchor.text}))});}
+export function bookGoto(pid,at){
  const st=Books[pid];if(!st)return;
  if(!st.ready||st.win!==Dock.els[pid]?.querySelector("iframe.book-frame")?.contentWindow){st.pendingAt=at;return;}
  bookPost(pid,{book:"goto",at:at.anchor?.at||(at.page?{page:at.page}:{}),text:at.anchor?.text||at.highlight||""});
@@ -60,8 +67,8 @@ addEventListener("message",e=>{
  // A link in a book: to the web only, in the reader.
  if(d.book==="link"&&/^https?:\/\//i.test(String(d.href||"")))return openWeb(String(d.href),pid);
  if(d.book==="error"){
-  st.error=String(d.message||"打不开这本书").slice(0,300);
-  Dock.els[pid].innerHTML=emptyState("book","打不开这本书",st.error)+'<div class="center">'+button(svg("external",13)+" 用系统程序打开","book-external",'data-pid="'+pid+'"',"")+'</div>';
+  st.error=String(d.message||$t("打不开这本书")).slice(0,300);
+  Dock.els[pid].innerHTML=emptyState("book",$t("打不开这本书"),st.error)+'<div class="center">'+button(svg("external",13)+" "+$t("用系统程序打开"),"book-external",'data-pid="'+pid+'"',"")+'</div>';
  }
 });
 // The learner switches the look: the book follows.

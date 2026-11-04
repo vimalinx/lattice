@@ -2,6 +2,7 @@
 # The interface, the agents' rules, the skills and the figures backend go along as they are; numpy and matplotlib
 # stay out (they live in the learner's own Python environments, not in Lattice).
 from pathlib import Path
+import sys
 
 from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
@@ -13,6 +14,7 @@ datas = [(str(ROOT / "ui"), "ui"),
          (str(ROOT / "lattice" / "skills"), "lattice/skills"),
          (str(ROOT / "lattice" / "mpl"), "lattice/mpl"),
          (str(ROOT / "lattice" / "rules.md"), "lattice"),
+         (str(ROOT / "lattice" / "locales"), "lattice/locales"),
          (str(ROOT / "lattice" / "netfwd.py"), "lattice"),
          # jupyter_client finds how to start a kernel through its package metadata.
          *copy_metadata("jupyter_client")]
@@ -36,7 +38,6 @@ def version_file():
     """Lattice.exe's version, as Windows shows it in the file's properties (a build between releases, x.y.z-dev.N, as
     x.y.z.N)."""
     import re
-    import sys
     from PyInstaller.utils.win32 import versioninfo as vi
     sys.path.insert(0, str(ROOT))
     from lattice import __version__
@@ -57,5 +58,5 @@ def version_file():
 a.datas = [d for d in a.datas if wanted(d)]
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="Lattice", console=False, icon=str(icon) if icon.exists() else None,
-          version=version_file())
+          version=version_file() if sys.platform == "win32" else None)
 coll = COLLECT(exe, a.binaries, a.datas, name="Lattice")

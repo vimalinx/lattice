@@ -15,7 +15,7 @@ w.page.renderProcessTerminated.connect(lambda *x:print('RENDER_TERMINATED',x,flu
 def probe():
     print('PROBE_URL',w.page.url().toString(),'PID',w.page.renderProcessPid(),flush=True)
     w.view.grab().save(str(qa/'probe.png'))
-    w.page.runJavaScript('JSON.stringify({title:document.title,body:document.body.innerText.slice(0,1500),ready:typeof S!=="undefined"&&!!S.data})',lambda x:print('JS_RESULT',x,flush=True))
+    w.page.runJavaScript('JSON.stringify({title:document.title,body:document.body.innerText.slice(0,1500),ready:!!document.querySelector(".stack")})',lambda x:print('JS_RESULT',x,flush=True))
 def end():
     print('PROBE_DONE',flush=True);w.close();app.quit()
 QTimer.singleShot(6000,probe);QTimer.singleShot(17000,end)

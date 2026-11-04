@@ -10,6 +10,8 @@ messages as a tree. Both are read the same way once the messages are in order.
 """
 from __future__ import annotations
 
+from .i18n import tr
+
 from datetime import datetime, timezone
 import json
 import re
@@ -38,18 +40,18 @@ def is_share_link(text):
 def from_share(url, download):
     """A shared conversation from its link; `download(url)` gives (final url, content type, bytes)."""
     if not is_share_link(url):
-        raise ImportError_("现在能导入的是 ChatGPT 的分享链接（chatgpt.com/share/…）")
+        raise ImportError_(tr("现在能导入的是 ChatGPT 的分享链接（chatgpt.com/share/…）"))
     _, _, data = download(url)
     html = data.decode("utf-8", "replace")
     flat = _turbo_stream(html)
     if flat is None:
-        raise ImportError_("这个页面里找不到对话：链接可能失效了，或者分享被关掉了")
+        raise ImportError_(tr("这个页面里找不到对话：链接可能失效了，或者分享被关掉了"))
     root = _decode(flat)
     response = next((route.get("serverResponse") for route in (root.get("loaderData") or {}).values()
                      if isinstance(route, dict) and isinstance(route.get("serverResponse"), dict)), None)
     conversation = (response or {}).get("data")
     if not isinstance(conversation, dict):
-        raise ImportError_("这个页面里找不到对话：链接可能失效了，或者分享被关掉了")
+        raise ImportError_(tr("这个页面里找不到对话：链接可能失效了，或者分享被关掉了"))
     nodes = conversation.get("linear_conversation") or _path(conversation)
     return _conversation(conversation, nodes, "ChatGPT", url)
 
@@ -59,7 +61,7 @@ def from_export(raw):
     try:
         items = json.loads(raw)
     except ValueError:
-        raise ImportError_("这不是 ChatGPT 导出的 conversations.json") from None
+        raise ImportError_(tr("这不是 ChatGPT 导出的 conversations.json")) from None
     if isinstance(items, dict):
         items = [items]
     out = []
@@ -70,7 +72,7 @@ def from_export(raw):
             if found["messages"]:
                 out.append(found)
     if not out:
-        raise ImportError_("这个文件里没有能导入的对话")
+        raise ImportError_(tr("这个文件里没有能导入的对话"))
     return sorted(out, key=lambda c: c.get("created") or "", reverse=True)
 
 

@@ -6,6 +6,8 @@ search backend, run timeouts and runner overrides.
 """
 from __future__ import annotations
 
+from .i18n import tr
+
 import asyncio
 import copy
 import json
@@ -32,18 +34,19 @@ LOG = logging.getLogger("lattice")
 # servers). chat_path and models_path are joined to the base URL and may carry a query (Azure's api-version).
 def _preset(label, base_url, model="", env="", auth="bearer", headers=None, extra_body=None, note="", chat_path="chat/completions",
             models_path="models", auth_header="", group="云服务", key_url="", effort="standard"):
-    return {"label": label, "base_url": base_url, "model": model, "env": env, "auth": auth, "auth_header": auth_header, "key_url": key_url,
+    # The group is a key the settings page sorts by; the label is only shown.
+    return {"label": tr(label), "base_url": base_url, "model": model, "env": env, "auth": auth, "auth_header": auth_header, "key_url": key_url,
             "headers": headers or {}, "extra_body": extra_body or {}, "chat_path": chat_path, "models_path": models_path, "note": note, "group": group,
             "effort_style": effort}
 
 
 # How hard a model thinks: one scale for the learner, sent the way each service understands it (effort_style of a
 # connection). An empty level sends nothing, leaving the service's own default.
-EFFORT_LEVELS = {"off": "关", "low": "低", "medium": "中", "high": "高", "max": "最高"}
-EFFORT_STYLES = {"standard": "reasoning_effort（none / low / medium / high / max）", "openai": "OpenAI：reasoning_effort（最高是 xhigh）",
-                 "deepseek": "DeepSeek：thinking 开关 + reasoning_effort", "openrouter": "OpenRouter：reasoning.effort",
-                 "anthropic": "Claude：thinking.budget_tokens", "qwen": "通义千问 / Qwen3：enable_thinking + thinking_budget",
-                 "thinking": "只有开关：thinking.type", "none": "不支持调思考强度"}
+EFFORT_LEVELS = {"off": tr("关"), "low": tr("低"), "medium": tr("中"), "high": tr("高"), "max": tr("最高")}
+EFFORT_STYLES = {"standard": "reasoning_effort（none / low / medium / high / max）", "openai": tr("OpenAI：reasoning_effort（最高是 xhigh）"),
+                 "deepseek": tr("DeepSeek：thinking 开关 + reasoning_effort"), "openrouter": "OpenRouter：reasoning.effort",
+                 "anthropic": "Claude：thinking.budget_tokens", "qwen": tr("通义千问 / Qwen3：enable_thinking + thinking_budget"),
+                 "thinking": tr("只有开关：thinking.type"), "none": tr("不支持调思考强度")}
 BUDGET = {"low": 1024, "medium": 4096, "high": 16384, "max": 32768}
 
 
@@ -98,8 +101,8 @@ PRESETS = {
     "openrouter": _preset("OpenRouter", "https://openrouter.ai/api/v1", "openrouter/auto", "OPENROUTER_API_KEY", group="聚合", effort="openrouter"),
     "siliconflow": _preset("硅基流动 SiliconFlow", "https://api.siliconflow.cn/v1", "", "SILICONFLOW_API_KEY", group="聚合", effort="qwen"),
     "openai": _preset("OpenAI", "https://api.openai.com/v1", "", "OPENAI_API_KEY", effort="openai"),
-    "anthropic": _preset("Anthropic Claude", "https://api.anthropic.com/v1", "", "ANTHROPIC_API_KEY", note="走 Anthropic 的 OpenAI 兼容接口", effort="anthropic"),
-    "gemini": _preset("Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "", "GEMINI_API_KEY", note="走 Gemini 的 OpenAI 兼容接口"),
+    "anthropic": _preset("Anthropic Claude", "https://api.anthropic.com/v1", "", "ANTHROPIC_API_KEY", note=tr("走 Anthropic 的 OpenAI 兼容接口"), effort="anthropic"),
+    "gemini": _preset("Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "", "GEMINI_API_KEY", note=tr("走 Gemini 的 OpenAI 兼容接口")),
     "xai": _preset("xAI Grok", "https://api.x.ai/v1", "", "XAI_API_KEY"),
     "mistral": _preset("Mistral", "https://api.mistral.ai/v1", "", "MISTRAL_API_KEY", effort="none"),
     "groq": _preset("Groq", "https://api.groq.com/openai/v1", "", "GROQ_API_KEY"),
@@ -109,15 +112,15 @@ PRESETS = {
     "moonshot": _preset("月之暗面 Kimi", "https://api.moonshot.cn/v1", "", "MOONSHOT_API_KEY", group="国内", effort="none"),
     "zhipu": _preset("智谱 GLM", "https://open.bigmodel.cn/api/paas/v4", "", "ZHIPUAI_API_KEY", group="国内", effort="thinking"),
     "dashscope": _preset("阿里云百炼 通义千问", "https://dashscope.aliyuncs.com/compatible-mode/v1", "", "DASHSCOPE_API_KEY", group="国内", effort="qwen"),
-    "ark": _preset("火山方舟 豆包", "https://ark.cn-beijing.volces.com/api/v3", "", "ARK_API_KEY", group="国内", note="模型名填推理接入点 ID 或模型 ID"),
+    "ark": _preset("火山方舟 豆包", "https://ark.cn-beijing.volces.com/api/v3", "", "ARK_API_KEY", group="国内", note=tr("模型名填推理接入点 ID 或模型 ID")),
     "minimax": _preset("MiniMax", "https://api.minimaxi.com/v1", "", "MINIMAX_API_KEY", group="国内", effort="none"),
     "stepfun": _preset("阶跃星辰 StepFun", "https://api.stepfun.com/v1", "", "STEPFUN_API_KEY", group="国内", effort="none"),
     "azure": _preset("Azure OpenAI", "https://<资源名>.openai.azure.com/openai/deployments/<部署名>", "", "AZURE_OPENAI_API_KEY", auth="header",
-                     auth_header="api-key", chat_path="chat/completions?api-version=2024-10-21", models_path="", note="把 Base URL 里的资源名和部署名换成你的"),
+                     auth_header="api-key", chat_path="chat/completions?api-version=2024-10-21", models_path="", note=tr("把 Base URL 里的资源名和部署名换成你的")),
     "ollama": _preset("Ollama（本机）", "http://127.0.0.1:11434/v1", "", auth="none", group="本机"),
     "lmstudio": _preset("LM Studio（本机）", "http://127.0.0.1:1234/v1", "", auth="none", group="本机"),
     "vllm": _preset("vLLM / 自建服务", "http://127.0.0.1:8000/v1", "", auth="none", group="本机"),
-    "custom": _preset("完全自定义", "", "", group="自定义", note="所有字段自己填"),
+    "custom": _preset("完全自定义", "", "", group="自定义", note=tr("所有字段自己填")),
 }
 # Where to get a key, for the providers whose page we know.
 KEY_URLS = {"deepseek": "https://platform.deepseek.com/api_keys", "openrouter": "https://openrouter.ai/keys", "siliconflow": "https://cloud.siliconflow.cn/account/ak", "openai": "https://platform.openai.com/api-keys", "anthropic": "https://console.anthropic.com/settings/keys", "gemini": "https://aistudio.google.com/apikey", "xai": "https://console.x.ai", "mistral": "https://console.mistral.ai/api-keys", "groq": "https://console.groq.com/keys", "moonshot": "https://platform.moonshot.cn/console/api-keys"}
@@ -126,8 +129,8 @@ for _id, _url in KEY_URLS.items():
 CONN_FIELDS = {"preset", "label", "base_url", "model", "headers", "extra_body", "auth", "auth_header", "chat_path", "models_path", "key_env", "models",
                "effort_style"}
 BACKGROUND = {"organizer", "builder"}
-AGENT_NAMES = {"tutor": "主会话", "flash": "快答", "coach": "练习教练", "organizer": "整理", "builder": "应用助手"}
-WEB_BACKENDS = {"duckduckgo": "DuckDuckGo（无需 Key）", "searxng": "SearXNG（自建地址）", "brave": "Brave Search API", "tavily": "Tavily API"}
+AGENT_NAMES = {"tutor": tr("主会话"), "flash": tr("快答"), "coach": tr("练习教练"), "organizer": tr("整理"), "builder": tr("应用助手")}
+WEB_BACKENDS = {"duckduckgo": tr("DuckDuckGo（无需 Key）"), "searxng": tr("SearXNG（自建地址）"), "brave": "Brave Search API", "tavily": "Tavily API"}
 WEB_SECRETS = {"brave_key", "tavily_key"}
 DEFAULTS = {
     "apis": {},
@@ -162,12 +165,13 @@ DEFAULTS = {
     "vault": "",
     # Seconds the learner pauses before their edits are committed.
     "commit_idle": 30,
-    # Everything about the interface: appearance, the sidebar, workspaces.
+    # Everything about the interface: appearance, the sidebar. The working states are files in the vault (states.py).
     # zoom: each kind of panel's default size ("chat:tutor", "file", ...); a window can still set its own.
-    # spaces: the working states on the status bar; templates: the ones the learner saved; side.list: the list in the left column; side.shut: whether the column is folded.
+    # templates: the working states the learner saved to start new ones from; side: the left column as it was last left,
+    # where a new state's starts (each state keeps its own).
     "ui": {"theme": "dark", "thinking": "collapsed", "md_mode": "live", "font_size": 14.5, "note_font_size": 16, "code_font_size": 13, "line_height": 1.8, "read_width": 42, "zoom": {"chat:tutor": 1.1},
            "density": "comfortable", "send_key": "enter",
-           "selection_popup": True, "ai_annotate": "auto", "activity_plus": False, "themes": {}, "theme_custom": None, "side": {"width": 270}, "spaces": [], "templates": []},
+           "selection_popup": True, "ai_annotate": "auto", "activity_plus": False, "themes": {}, "theme_custom": None, "side": {"width": 270}, "templates": []},
 }
 AGENT_FIELDS = ("api", "model", "max_tokens", "temperature", "effort")
 # Settings saved by earlier versions under flat names.
@@ -236,12 +240,12 @@ def localrouter_base(conn):
                 return base + "/v1"
         except (httpx.HTTPError, ValueError):
             continue
-    raise ValueError("LocalRouter 没有响应（试过 " + "、".join(key) + "）")
+    raise ValueError(tr("LocalRouter 没有响应（试过 {0}）", "、".join(key)))
 
 
 def _connection(preset, own=None):
     base = PRESETS[preset]
-    conn = {"preset": preset, "label": base["label"] if preset != "custom" else "自定义", "key_env": base["env"], "models": [],
+    conn = {"preset": preset, "label": base["label"] if preset != "custom" else tr("自定义"), "key_env": base["env"], "models": [],
             **{k: copy.deepcopy(base[k]) for k in ("base_url", "model", "headers", "extra_body", "auth", "auth_header", "chat_path", "models_path", "effort_style")},
             "api_key": ""}
     conn.update({k: v for k, v in (own or {}).items() if k in CONN_FIELDS | {"api_key"}})
@@ -258,7 +262,7 @@ def _changed(ident, conn):
 
 def model_label(model):
     """Short display name: the model id without its vendor prefix."""
-    return str(model).rsplit("/", 1)[-1] or "未选择模型"
+    return str(model).rsplit("/", 1)[-1] or tr("未选择模型")
 
 
 class Config:
@@ -329,7 +333,7 @@ class Config:
             lane = {**lane, "model": str(use["model"]).strip()[:200], **({"api": use["api"]} if use.get("api") in config["apis"] else {})}
         api = lane["api"] if lane["api"] in config["apis"] else next(iter(config["apis"]), "")
         if not api:
-            raise ValueError("还没有任何模型连接，请先在设置的「模型连接」里添加一个")
+            raise ValueError(tr("还没有任何模型连接，请先在设置的「模型连接」里添加一个"))
         conn, notice = config["apis"][api], ""
         if api == LOCALROUTER:
             try:
@@ -352,7 +356,7 @@ class Config:
         """A connection on its own, for testing it before any agent uses it."""
         config = config or self.read()
         if api not in config["apis"]:
-            raise ValueError("没有这个连接")
+            raise ValueError(tr("没有这个连接"))
         conn = config["apis"][api]
         if api == LOCALROUTER:
             conn = {**conn, "base_url": localrouter_base(conn)}
@@ -396,20 +400,20 @@ class Config:
 
     def save(self, changes):
         if not isinstance(changes, dict):
-            raise ValueError("配置必须是对象")
+            raise ValueError(tr("配置必须是对象"))
         unexpected = set(changes) - set(DEFAULTS)
         if unexpected:
-            raise ValueError("未知配置项：" + ", ".join(unexpected))
+            raise ValueError(tr("未知配置项：") + str(", ".join(unexpected)))
         updated = self.read()
         for key, val in changes.items():
             if key == "agents":
                 if not isinstance(val, dict) or set(val) - set(AGENT_NAMES):
-                    raise ValueError("未知的 AI")
+                    raise ValueError(tr("未知的 AI"))
                 for name, part in val.items():
                     updated["agents"][name].update({k: v for k, v in part.items() if k in AGENT_FIELDS})
             elif key == "web":
                 if not isinstance(val, dict) or set(val) - set(DEFAULTS["web"]) - {"clear"}:
-                    raise ValueError("联网设置含不支持的字段")
+                    raise ValueError(tr("联网设置含不支持的字段"))
                 for k, v in val.items():
                     if k in WEB_SECRETS and not v:
                         continue  # an empty secret field keeps the saved one
@@ -422,20 +426,20 @@ class Config:
                 updated[key] = val
         api_changes = changes.get("apis", {})
         if not isinstance(api_changes, dict):
-            raise ValueError("模型连接的改动应为对象")
+            raise ValueError(tr("模型连接的改动应为对象"))
         for ident, change in api_changes.items():
             if ident == LOCALROUTER:
-                raise ValueError("LocalRouter 连接由 localrouter.toml 管理，在那里改")
+                raise ValueError(tr("LocalRouter 连接由 localrouter.toml 管理，在那里改"))
             if not re.fullmatch(r"[\w.-]{1,40}", str(ident)):
-                raise ValueError("连接的标识只能用字母、数字、下划线、点和横线")
+                raise ValueError(tr("连接的标识只能用字母、数字、下划线、点和横线"))
             if change is None:
                 updated["apis"].pop(ident, None)
                 continue
             if not isinstance(change, dict) or set(change) - CONN_FIELDS - {"api_key", "clear_key"}:
-                raise ValueError("模型连接含不支持的字段")
+                raise ValueError(tr("模型连接含不支持的字段"))
             if ident not in updated["apis"]:
                 preset = change.get("preset") if change.get("preset") in PRESETS else "custom"
-                updated["apis"][ident] = _connection(preset, {"label": "自定义连接"} if preset == "custom" else None)
+                updated["apis"][ident] = _connection(preset, {"label": tr("自定义连接")} if preset == "custom" else None)
             conn = updated["apis"][ident]
             conn.update({k: v for k, v in change.items() if k in CONN_FIELDS})
             if change.get("clear_key"):
@@ -447,9 +451,9 @@ class Config:
         return self.public()
 
     def save_ui(self, ui):
-        """The interface's own preferences, saved as one object (appearance, sidebar, workspaces)."""
+        """The interface's own preferences, saved as one object (appearance, sidebar, templates)."""
         if not isinstance(ui, dict) or len(json.dumps(ui, ensure_ascii=False)) > 4_000_000:
-            raise ValueError("界面设置应为不超过 4MB 的对象")
+            raise ValueError(tr("界面设置应为不超过 4MB 的对象"))
         updated = self.read()
         updated["ui"] = {**DEFAULTS["ui"], **ui}
         self._write(updated)
@@ -484,21 +488,21 @@ class Config:
             base = str(api["base_url"]).strip()
             url = urlsplit(base)
             if base and (url.scheme not in {"https", "http"} or not url.hostname or url.username or url.password or url.query or url.fragment):
-                raise ValueError(label + " 的 Base URL 必须是没有嵌入凭据、查询或片段的 HTTP(S) 地址")
+                raise ValueError(str(label) + tr(" 的 Base URL 必须是没有嵌入凭据、查询或片段的 HTTP(S) 地址"))
             api["base_url"] = base.rstrip("/")
             if not isinstance(api["extra_body"], dict) or set(api["extra_body"]) & {"messages", "model", "stream", "max_tokens", "temperature", "tools"}:
-                raise ValueError(label + " 的附加参数应为 JSON 对象，不能覆盖 messages/model/stream/max_tokens/temperature/tools")
+                raise ValueError(str(label) + tr(" 的附加参数应为 JSON 对象，不能覆盖 messages/model/stream/max_tokens/temperature/tools"))
             if not isinstance(api["headers"], dict) or not all(isinstance(v, str) for v in api["headers"].values()) \
                     or {k.casefold() for k in api["headers"]} & {"authorization", "content-type"}:
-                raise ValueError(label + " 的请求头应为字符串对象，不能覆盖 Authorization/Content-Type")
+                raise ValueError(str(label) + tr(" 的请求头应为字符串对象，不能覆盖 Authorization/Content-Type"))
             if api.get("auth") not in ("bearer", "header", "none"):
-                raise ValueError(label + " 的鉴权方式应为 bearer、header 或 none")
+                raise ValueError(str(label) + tr(" 的鉴权方式应为 bearer、header 或 none"))
             if api["auth"] == "header" and not re.fullmatch(r"[\w-]{1,60}", str(api.get("auth_header") or "")):
-                raise ValueError(label + " 用请求头传 Key 时要写出请求头的名字，例如 api-key")
+                raise ValueError(str(label) + tr(" 用请求头传 Key 时要写出请求头的名字，例如 api-key"))
             for key in ("chat_path", "models_path"):
                 value = str(api.get(key) or "").strip().lstrip("/")
                 if value.startswith(("http:", "https:")) or ".." in value or len(value) > 200:
-                    raise ValueError(label + " 的接口路径应是接在 Base URL 后面的相对路径")
+                    raise ValueError(str(label) + tr(" 的接口路径应是接在 Base URL 后面的相对路径"))
                 api[key] = value
             if not api["chat_path"]:
                 api["chat_path"] = "chat/completions"
@@ -509,28 +513,28 @@ class Config:
             if not isinstance(api.get("models"), list):
                 api["models"] = []
         if updated["vault"] and not str(updated["vault"]).startswith(("/", "~")):
-            raise ValueError("学习库位置应为绝对路径")
+            raise ValueError(tr("学习库位置应为绝对路径"))
         updated["commit_idle"] = max(5, min(int(updated["commit_idle"]), 3600))
         updated["gpu_launcher"] = str(updated.get("gpu_launcher") or "auto").strip()[:200] or "auto"
         if not isinstance(updated["ui"], dict):
-            raise ValueError("界面设置应为对象")
+            raise ValueError(tr("界面设置应为对象"))
         for name, lane in updated["agents"].items():
             if lane.get("temperature") not in (None, ""):
                 lane["temperature"] = max(0, min(float(lane["temperature"]), 2))
             if lane["api"] not in updated["apis"]:
-                raise ValueError(AGENT_NAMES[name] + "用的连接已经不在了，请给它另选一个")
+                raise ValueError(str(AGENT_NAMES[name]) + tr("用的连接已经不在了，请给它另选一个"))
             lane["model"] = str(lane["model"]).strip()
             lane["max_tokens"] = max(256, min(int(lane["max_tokens"]), 64000))
             if lane.get("effort") not in EFFORT_LEVELS:
                 lane["effort"] = ""
             if lane["api"] != LOCALROUTER and not updated["apis"][lane["api"]]["base_url"]:
-                raise ValueError(AGENT_NAMES[name] + "所选连接还没有 Base URL")
+                raise ValueError(str(AGENT_NAMES[name]) + tr("所选连接还没有 Base URL"))
             if not lane["model"] and not updated["apis"][lane["api"]].get("model"):
-                raise ValueError("请填写" + AGENT_NAMES[name] + "的模型名")
+                raise ValueError(tr("请填写{0}的模型名", AGENT_NAMES[name]))
         if updated["web"]["search"] not in WEB_BACKENDS:
-            raise ValueError("未知的搜索服务")
+            raise ValueError(tr("未知的搜索服务"))
         if updated["web"]["searxng_url"] and urlsplit(updated["web"]["searxng_url"]).scheme not in {"http", "https"}:
-            raise ValueError("SearXNG 地址应为 HTTP(S)")
+            raise ValueError(tr("SearXNG 地址应为 HTTP(S)"))
         updated["timeout"] = max(5, min(int(updated["timeout"]), 600))
         updated["temperature"] = max(0, min(float(updated["temperature"]), 2))
         for key in ("kernel_timeout", "run_timeout"):
@@ -539,9 +543,9 @@ class Config:
         for key in ("agent_auto_run", "agent_network", "agent_auto_organize", "auto_cards", "auto_install", "gpu"):
             updated[key] = bool(updated[key])
         if not isinstance(updated["runners"], dict) or not all(re.fullmatch(r"\.[\w+-]{1,12}", k) and isinstance(v, str) for k, v in updated["runners"].items()):
-            raise ValueError("运行器应为「扩展名 → 命令」的对象，例如 {\".lua\": \"lua {file}\"}")
+            raise ValueError(tr("运行器应为「扩展名 → 命令」的对象，例如 {\".lua\": \"lua {file}\"}"))
         if not isinstance(updated["sandbox_paths"], list) or not all(isinstance(p, str) and p.startswith("/") for p in updated["sandbox_paths"]):
-            raise ValueError("沙箱额外可见路径应为绝对路径列表")
+            raise ValueError(tr("沙箱额外可见路径应为绝对路径列表"))
 
 
 def endpoint(base, suffix):
@@ -673,7 +677,7 @@ class ApiWorker(QThread):
                 data = json.loads(await response.aread())
                 choices = data.get("choices") or []
                 if not choices:
-                    raise ValueError("API 未返回 choices，无法读取回答")
+                    raise ValueError(tr("API 未返回 choices，无法读取回答"))
                 message = choices[0].get("message") or {}
                 content = str(message.get("content") or "")
                 if content:
@@ -692,7 +696,7 @@ class ApiWorker(QThread):
                     continue
                 data = json.loads(raw)
                 if data.get("error"):
-                    raise ValueError("API 流返回错误：" + json.dumps(data["error"], ensure_ascii=False))
+                    raise ValueError(tr("API 流返回错误：") + str(json.dumps(data["error"], ensure_ascii=False)))
                 usage = data.get("usage") or usage
                 for choice in data.get("choices", []):
                     delta = choice.get("delta") or {}
@@ -721,7 +725,7 @@ class ApiWorker(QThread):
                         content += piece
                         self.partial = content
                         if len(content) > 2_000_000:
-                            raise ValueError("API 回答超过安全大小限制；已停止接收")
+                            raise ValueError(tr("API 回答超过安全大小限制；已停止接收"))
                         self.emit("chunk", text=piece)
                     for part in delta.get("tool_calls") or []:
                         slot = calls.setdefault(part.get("index", 0), {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
@@ -734,7 +738,7 @@ class ApiWorker(QThread):
         if reasoning and started:
             self.think_seconds += time.monotonic() - started
         if finish is None:
-            raise ValueError("API 数据流在完成标记前断开；已保留收到的部分回答")
+            raise ValueError(tr("API 数据流在完成标记前断开；已保留收到的部分回答"))
         return content.lstrip("\n") if separate else content, reasoning, [calls[i] for i in sorted(calls)], finish, usage
 
     async def _run(self):
@@ -746,9 +750,9 @@ class ApiWorker(QThread):
                 raise asyncio.CancelledError()
             config = self.config
             if not self.api_key:
-                raise ValueError(config["label"] + " 尚未配置 API Key。请在设置里填写。")
+                raise ValueError(str(config["label"]) + tr(" 尚未配置 API Key。请在设置里填写。"))
             if not config.get("base_url"):
-                raise ValueError(config["label"] + " 还没有 Base URL。请在设置的「模型连接」里填写。")
+                raise ValueError(str(config["label"]) + tr(" 还没有 Base URL。请在设置的「模型连接」里填写。"))
             session = self.thread or "lattice-test"
             headers = {**{k: v.replace("{session}", session) for k, v in config["headers"].items()}, "Content-Type": "application/json"}
             # How the key travels: Authorization: Bearer, a named header (Azure's api-key), or not at all (local servers).
@@ -767,7 +771,7 @@ class ApiWorker(QThread):
                     if models_path:
                         response = await client.get(endpoint(config["base_url"], models_path), headers=headers)
                         if response.status_code >= 400:
-                            raise ValueError(f"读取模型列表失败：HTTP {response.status_code} {response.text[:300]}")
+                            raise ValueError(tr("读取模型列表失败：HTTP {0} ", response.status_code) + str(response.text[:300]))
                         payload = response.json()
                         rows = payload.get("data", payload.get("models", [])) if isinstance(payload, dict) else payload
                         models = [x.get("id") or x.get("name") for x in rows if isinstance(x, dict)] if isinstance(rows, list) else []
@@ -776,7 +780,7 @@ class ApiWorker(QThread):
                         return
                     # No model list on this service: one tiny request shows whether key and model work.
                     if not model:
-                        raise ValueError("这个服务不提供模型列表，请先填上模型名再测试")
+                        raise ValueError(tr("这个服务不提供模型列表，请先填上模型名再测试"))
                     response = await client.post(self.chat_url, headers=headers, json={**config["extra_body"], "model": model, "max_tokens": 8,
                                                                                     "messages": [{"role": "user", "content": "ping"}]})
                     if response.status_code >= 400:
@@ -853,20 +857,20 @@ class ApiWorker(QThread):
                             break
                         rounds += 1
                         if rounds > 40:
-                            raise ValueError("这一轮的工具调用超过 40 次，已停止")
+                            raise ValueError(tr("这一轮的工具调用超过 40 次，已停止"))
                         # Thinking-mode models need their reasoning replayed alongside the calls they made.
                         messages.append({"role": "assistant", "content": content or None, "tool_calls": calls,
                                          **({"reasoning_content": reasoning} if reasoning else {})})
                         for call in calls:
                             messages.append({"role": "tool", "tool_call_id": call["id"], "content": await self._tool(call)})
                     if not body.strip() and stop_reason == "max_tokens":
-                        raise ValueError("模型的思考用完了回复上限，还没开始回答。请在设置里调大回复上限。")
+                        raise ValueError(tr("模型的思考用完了回复上限，还没开始回答。请在设置里调大回复上限。"))
                     if body.strip() or stop_reason != "end_turn" or not thought or rounds or attempt:
                         break
                     LOG.warning("API worker %s: answer was empty after reasoning; retrying once", self.thread)
                 if not body.strip() and stop_reason == "end_turn" and not rounds:
-                    raise ValueError("模型这次只思考、没有给出回答（已自动重试一次）。请再发一次。" if thought
-                                     else "API 返回了空回答，请检查模型与附加参数")
+                    raise ValueError(tr("模型这次只思考、没有给出回答（已自动重试一次）。请再发一次。") if thought
+                                     else tr("API 返回了空回答，请检查模型与附加参数"))
         except asyncio.CancelledError:
             body += self.partial
             stop_reason = "cancelled"
