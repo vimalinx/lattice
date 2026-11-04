@@ -26,8 +26,9 @@ def test_every_shipped_rule_and_skill_has_its_english_version():
 
 
 def test_nothing_on_show_is_left_in_chinese():
-    env = {**os.environ, "LATTICE_LANG": "en", "QT_QPA_PLATFORM": "offscreen"}
-    done = subprocess.run([sys.executable, str(ROOT / "tests" / "i18n_sweep.py")], env=env, capture_output=True, text=True, timeout=240)
+    # What is left in Chinese is printed: UTF-8 whatever the console's code page (cp1252 on Windows).
+    env = {**os.environ, "LATTICE_LANG": "en", "QT_QPA_PLATFORM": "offscreen", "PYTHONIOENCODING": "utf-8"}
+    done = subprocess.run([sys.executable, str(ROOT / "tests" / "i18n_sweep.py")], env=env, capture_output=True, encoding="utf-8", errors="replace", timeout=240)
     line = next((l for l in done.stdout.splitlines() if l.startswith("SWEEP ")), None)
     assert line, done.stdout[-2000:] + done.stderr[-2000:]
     found = json.loads(line[6:])

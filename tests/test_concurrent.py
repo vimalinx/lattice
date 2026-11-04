@@ -26,7 +26,8 @@ class Model(BaseHTTPRequestHandler):
         for word in (["答", "一"] if last.startswith("slow") else ["答", "二"]):
             self.wfile.write(("data: " + json.dumps({"choices": [{"delta": {"content": word}}]}, ensure_ascii=False) + "\n\n").encode())
             self.wfile.flush()
-            time.sleep(.6 if last.startswith("slow") else .02)
+            # The slow one takes long enough that the quick one, asked after it, finishes first even on a slow machine.
+            time.sleep(2 if last.startswith("slow") else .02)
         self.wfile.write(b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
         self.wfile.flush()
 

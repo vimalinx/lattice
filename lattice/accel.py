@@ -146,13 +146,13 @@ def _launcher(best, setting):
     if setting and setting not in ("auto", "none"):
         parts = shlex.split(setting)
         if parts and _which(parts[0]):
-            return [_which(parts[0]), *parts[1:]], "设置里指定的：" + setting
-        return None, f"设置里指定的「{setting}」在这台电脑上找不到，现在直接运行"
+            return [_which(parts[0]), *parts[1:]], tr("设置里指定的：{0}", setting)
+        return None, tr("设置里指定的「{0}」在这台电脑上找不到，现在直接运行", setting)
     if setting == "none" or not best:
-        return None, "直接运行"
+        return None, tr("直接运行")
     if best["kind"] == "nvidia" and _which("nvidia-run"):
         return [_which("nvidia-run"), "--"], tr("nvidia-run：运行时唤醒显卡，结束后回到休眠")
-    return None, "直接运行（显卡由驱动自己管）"
+    return None, tr("直接运行（显卡由驱动自己管）")
 
 
 def _devices(kind):
