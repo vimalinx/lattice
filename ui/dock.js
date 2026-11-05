@@ -2,7 +2,7 @@ import {$t} from "./i18n.js";
 import {Dock} from "./state.js";
 import {S,WINDOW,all,button,el,emptyState,esc,h,rpc,safe,scheduleMermaid,svg,toast} from "./core.js";
 import {themeOp} from "./theme.js";
-import {SPACE_ICONS,createSpace,currentSpace,findSpace,layoutFromSpec,seedSpaces,spaceOf,spaceSpec,switchSpace,visibleSpaces} from "./spaces.js";
+import {SPACE_ICONS,createSpace,currentSpace,findSpace,inSpace,layoutFromSpec,seedSpaces,spaceOf,spaceSpec,switchSpace,visibleSpaces} from "./spaces.js";
 import {fitComposer} from "./chat.js";
 import {Files,flushAll,flushFile} from "./files.js";
 import {noteFollow} from "./notes.js";
@@ -13,8 +13,19 @@ import {applyUi,readWidth,renderStatus,reportScreen,saveUi} from "./app.js";
 /* The panel layout: splits, tab stacks and floating windows, one arrangement per working state (spaces.js).
    Panels are shared: the same panel can sit in several workspaces, so the main conversation is one conversation everywhere.
    What opens lands in an existing stack of the same side in the workspace on screen. */
-// A separate window showing one panel, not a whole working state.
+// A separate window taken out for a panel, not a whole working state; what is opened from inside it opens there too.
 export function onePanel(){return !!WINDOW&&!Dock.own;}
+/* One panel is open in one window: asked for where another window has it, that window comes to the front. */
+function heldElsewhere(params){
+ const key=panelKey(params);
+ for(const [w,list] of Object.entries(Dock.held))if(w!==WINDOW&&list.some(p=>panelKey(p)===key))return w;
+ return null;
+}
+// This window's panels, told to the others (after a change settles).
+let heldTimer=null;
+export function reportHeld(){clearTimeout(heldTimer);heldTimer=setTimeout(()=>safe(()=>rpc("window_held",{window:WINDOW,panels:Object.values(Dock.panels)})),300);}
+// A separate window with nothing left in it closes.
+function closeIfEmpty(){if(onePanel()&&!Object.keys(Dock.panels).length)safe(()=>rpc("window_return",{window:WINDOW}));}
 export function newId(prefix){return prefix+Math.random().toString(36).slice(2,10);}
 export function stackNode(tabs){return {t:"stack",id:newId("s"),tabs,active:tabs[0]||null};}
 export function setLayout(layout){layout.floats=layout.floats||[];Dock.layout=layout;Dock.spaces[Dock.space]=layout;}
@@ -139,9 +150,8 @@ export function targetStack(side){
 export function openPanel(params,opts={}){
  if(params.type==="file"&&isBook(params.path))params={type:"book",path:params.path};
  if(!params.space)params=bindSpace(params);
- // From a separate window, whatever else is opened opens in the main window.
- if(onePanel()){const own=findPanel(params);if(own){activate(own);opts.then?.(own);return own;}safe(()=>rpc("open_in_main",{params}));return null;}
  let pid=opts.reuse===false?null:findPanel(params);
+ if(!pid&&opts.reuse!==false){const there=heldElsewhere(params);if(there!=null){safe(()=>rpc("window_show",{window:there,params}));return null;}}
  // Already a tab behind a conversation that is on show: bring it out to a free group rather than hide the conversation.
  if(pid&&params.type!=="chat"){const s=stackOf(pid);if(s&&s.active!==pid&&covers(s)){detach(pid);tidy();}}
  // Already open, maybe in another workspace: show the same panel here too (moved into the group asked for, if any).
@@ -167,7 +177,17 @@ export async function closePanel(pid){
  const elsewhere=Object.entries(Dock.spaces).some(([id,l])=>{if(id===Dock.space)return false;let hit=false;eachStack(s=>{if(s.tabs.includes(pid))hit=true;},l);return hit;});
  if(!elsewhere&&type?.beforeClose&&await type.beforeClose(p,Dock.els[pid])===false)return;
  detach(pid);if(!elsewhere)unmountPanel(pid);
- tidy();renderDock();saveLayout();
+ tidy();renderDock();saveLayout();closeIfEmpty();
+}
+/* A tab dropped into another window: it leaves this one, from every working state here. */
+export async function letGo(pid){
+ if(!Dock.panels[pid])return;
+ if(Files[pid])await flushFile(pid);
+ const here=Dock.layout;
+ Object.values(Dock.spaces).forEach(l=>{Dock.layout=l;detach(pid);tidy();});
+ Dock.layout=here;unmountPanel(pid);
+ if(Dock.focus===pid)Dock.focus=null;
+ renderDock();saveLayout();closeIfEmpty();
 }
 export function unmountPanel(pid){
  const p=Dock.panels[pid],type=Dock.types[p?.type],node=Dock.els[pid];
@@ -186,13 +206,21 @@ export async function toWindow(pid){
  await rpc("window_open",{params:p,title:panelTitle(pid),origin});
  detach(pid);unmountPanel(pid);tidy();renderDock();saveLayout();
 }
-// A panel back from its own window, where it was.
+// A panel back from its own window, where it was: in the working state it came from, which stays where it is if the
+// learner has gone to another one since, and is marked.
 export function fromWindow(params,origin={}){
  if(!params?.type||!Dock.types[params.type])return;
  const found=findPanel(params);if(found)return activate(found);
  const pid=newId("p");Dock.panels[pid]=params;mountPanel(pid);
- if(origin.float){Dock.layout.floats.push({id:newId("f"),...origin.float,stack:stackNode([pid]),origin:{stack:origin.stack,index:origin.index}});tidy();renderDock();saveLayout();return activate(pid);}
- dockAt(pid,origin);
+ const sp=spaceOf(origin.space),away=sp&&!sp.hidden&&sp.id!==Dock.space&&!Dock.out[sp.id]?sp.id:null;
+ if(!away){putBack(pid,origin);tidy();renderDock();saveLayout();return activate(pid);}
+ if(!Dock.spaces[away])Dock.spaces[away]=layoutFromSpec(spaceSpec(sp),away);
+ Dock.into=null;inSpace(away,()=>{putBack(pid,origin);const s=stackOf(pid);if(s)s.active=pid;tidy();});
+ Dock.notice.add(away);renderDock();saveLayout();renderStatus();
+}
+function putBack(pid,origin){
+ if(origin.float)Dock.layout.floats.push({id:newId("f"),...origin.float,stack:stackNode([pid]),origin:{stack:origin.stack,index:origin.index}});
+ else placeAt(pid,origin);
 }
 export let windowTitleShown="";
 function windowTitle(title){if(title!==windowTitleShown){windowTitleShown=title;safe(()=>rpc("window_title",{window:WINDOW,title}));}}
@@ -215,12 +243,12 @@ function placeOf(pid){
  const s=stackOf(pid);return s?{stack:s.id,index:s.tabs.indexOf(pid)}:{};
 }
 // Back into the group it came from, at its place among the tabs (or wherever its kind opens, if that group is gone).
-function dockAt(pid,origin){
+function dockAt(pid,origin){placeAt(pid,origin);tidy();renderDock();saveLayout();activate(pid);}
+function placeAt(pid,origin){
  let target=origin?.stack&&findStack(origin.stack);
  if(!target||Dock.layout.floats.some(f=>f.stack===target))target=targetStack(sideOf(pid));
  detach(pid);
  target.tabs.splice(origin?.index>=0?Math.min(origin.index,target.tabs.length):target.tabs.length,0,pid);target.active=pid;
- tidy();renderDock();saveLayout();activate(pid);
 }
 export function unfloat(pid){const f=Dock.layout.floats.find(x=>x.stack.tabs.includes(pid));dockAt(pid,f?.origin);}
 /* Size: each kind of panel has a default in the settings; a window can set its own, kept in the layout.
@@ -258,7 +286,7 @@ export function stepZoom(pid,dir){const p=Dock.panels[pid];if(p)setZoom(pid,dir?
 function zoomBadge(pid){const p=Dock.panels[pid];return p?.zoom?Math.round(p.zoom*100)+"%":"";}
 export function panelTitle(pid){const p=Dock.panels[pid];return Dock.types[p.type]?.title(p,Dock.els[pid])||p.type;}
 export function refreshTab(pid){
- if(onePanel()&&Dock.panels[pid])windowTitle(panelTitle(pid));
+ if(onePanel()&&Dock.panels[pid]&&stackOf(pid)?.active===pid)windowTitle(panelTitle(pid));
  const tab=el('.tab[data-pid="'+pid+'"] .tab-title');if(!tab)return;
  const p=Dock.panels[pid];tab.textContent=panelTitle(pid);
  const badge=tab.parentElement.querySelector(".tab-zoom");if(badge)badge.textContent=zoomBadge(pid);
@@ -325,17 +353,19 @@ function nodeEl(n){
  });
  return box;
 }
+function cornerStack(n=Dock.layout.root){return n.t==="stack"?n:cornerStack(n.dir==="h"?n.kids[n.kids.length-1]:n.kids[0]);}
 function stackEl(s,floating=null){
  const node=h('<div class="stack" data-stack="'+s.id+'"><div class="tabs" data-stack="'+s.id+'"></div><div class="stack-body" data-stack="'+s.id+'"></div></div>');
  const bar=node.firstElementChild;
  s.tabs.forEach(pid=>{
   const p=Dock.panels[pid],type=Dock.types[p?.type]||{};
-  bar.appendChild(h("<div class=\"tab"+(pid===s.active?" active":"")+(type.side==="ai"?" ai":"")+"\" draggable=\"true\" data-pid=\""+pid+"\" title=\""+esc(panelTitle(pid))+"\">"+svg(typeof type.icon==="function"?type.icon(p):type.icon||"file",13)+"<span class=\"tab-title\">"+esc(panelTitle(pid))+"</span><small class=\"tab-zoom\" title=\""+$t("这个窗口单独调过大小；右键标签可以恢复")+"\">"+zoomBadge(pid)+"</small>"+(onePanel()?"":floating?"<button class=\"tab-btn\" data-action=\"dock-unfloat\" data-pid=\""+pid+"\" title=\""+$t("放回原处")+"\">"+svg("undo",12)+"</button>"+(WINDOW?"":"<button class=\"tab-btn\" data-action=\"dock-window\" data-pid=\""+pid+"\" title=\""+$t("放大成单独的窗口（能拖到别的屏幕）")+"\">"+svg("external",12)+"</button>"):
+  bar.appendChild(h("<div class=\"tab"+(pid===s.active?" active":"")+(type.side==="ai"?" ai":"")+"\" draggable=\"true\" data-pid=\""+pid+"\" title=\""+esc(panelTitle(pid))+"\">"+svg(typeof type.icon==="function"?type.icon(p):type.icon||"file",13)+"<span class=\"tab-title\">"+esc(panelTitle(pid))+"</span><small class=\"tab-zoom\" title=\""+$t("这个窗口单独调过大小；右键标签可以恢复")+"\">"+zoomBadge(pid)+"</small>"+(floating?"<button class=\"tab-btn\" data-action=\"dock-unfloat\" data-pid=\""+pid+"\" title=\""+$t("放回原处")+"\">"+svg("undo",12)+"</button>"+(WINDOW?"":"<button class=\"tab-btn\" data-action=\"dock-window\" data-pid=\""+pid+"\" title=\""+$t("放大成单独的窗口（能拖到别的屏幕）")+"\">"+svg("external",12)+"</button>"):
     "<button class=\"tab-btn\" data-action=\"dock-float\" data-pid=\""+pid+"\" title=\""+$t("浮出")+"\">"+svg("float",12)+"</button>")+"<button class=\"tab-btn\" data-action=\"dock-close\" data-pid=\""+pid+"\" title=\""+$t("关闭")+"\">"+svg("close",12)+"</button></div>"));
  });
- if(onePanel())bar.appendChild(h("<button class=\"tab-return\" data-action=\"window-return\" title=\""+$t("关掉这个窗口，面板回到主窗口里原来的地方")+"\">"+svg("undo",12)+"<span>"+$t("放回主窗口")+"</span></button>"));
- else bar.appendChild(h("<button class=\"tab-add\" data-action=\"stack-add\" data-stack=\""+s.id+"\" title=\""+$t("在这一组里新建或打开…")+"\">"+svg("plus",13)+"</button>"));
+ bar.appendChild(h("<button class=\"tab-add\" data-action=\"stack-add\" data-stack=\""+s.id+"\" title=\""+$t("在这一组里新建或打开…")+"\">"+svg("plus",13)+"</button>"));
  bar.appendChild(h('<div class="tabs-fill" data-stack="'+s.id+'"'+(floating?' data-float-move="'+floating.id+'"':"")+'></div>'));
+ // A separate window's way back sits at the right end of its top right group.
+ if(WINDOW&&!floating&&cornerStack()===s)bar.appendChild(h("<button class=\"tab-return\" data-action=\"window-return\" title=\""+(Dock.own?$t("关掉这个窗口，这个工作状态回到主窗口"):$t("关掉这个窗口，里面的面板回到主窗口"))+"\">"+svg("undo",12)+"<span>"+$t("放回主窗口")+"</span></button>"));
  if(s.active&&Dock.els[s.active]){
   if(Dock.els[s.active].parentElement?.id==="dock-keep")node.lastElementChild.dataset.awaits=s.active;
   else node.lastElementChild.appendChild(Dock.els[s.active]);
@@ -356,18 +386,18 @@ export function stateUnit(id){
 }
 function writeLayout(){
  clearTimeout(Dock.saveTimer);
+ if(onePanel())return safe(()=>rpc("window_save",{window:WINDOW,unit:{...stateUnit(Dock.space),home:"w"+WINDOW.slice(0,10)}}));
  if(Dock.own)return safe(()=>rpc("states_save",{states:{[Dock.own]:stateUnit(Dock.own)}}));
  return safe(()=>rpc("states_save",{states:Object.fromEntries(Object.keys(Dock.spaces).map(id=>[id,stateUnit(id)])),list:S.states||[],now:Dock.space}));
 }
 export function saveLayout(){
- // A separate window with one panel: the arrangement saved is the main window's.
- if(onePanel()){reportScreen();return;}
+ reportHeld();
  clearTimeout(Dock.saveTimer);
  Dock.saveTimer=setTimeout(writeLayout,600);
  reportScreen();
 }
 // Written out at once: before a state goes into a window of its own, and as that window closes.
-export function flushLayout(){return onePanel()?null:writeLayout();}
+export function flushLayout(){return writeLayout();}
 /* Every workspace's arrangement comes back as it was left; one never opened yet is built from its default when first shown. */
 export function loadLayout(saved){
  seedSpaces(saved);
@@ -412,23 +442,38 @@ function showDrop(target,zone){
  Object.assign(mark.style,{display:"grid",left:box.left+"px",top:box.top+"px",width:box.width+"px",height:box.height+"px"});
 }
 export function initDock(){
+ /* A tab can be dropped into another window too: what it is travels with the drag (nothing else gets through while one
+    is under way), and the window it is dropped in opens it and tells this one to let it go. What is typed in it is
+    written out first. Caught before what is under the pointer (an editor would take the tab's title as text). */
+ const PANEL="text/lattice-panel",lattice=e=>!!Dock.drag||!!e.dataTransfer?.types.includes(PANEL);
  document.addEventListener("dragstart",e=>{
   const tab=e.target.closest?.(".tab");if(!tab)return;
-  Dock.drag=tab.dataset.pid;e.dataTransfer.setData("text/lattice-panel",tab.dataset.pid);e.dataTransfer.effectAllowed="move";
+  const pid=tab.dataset.pid;
+  Dock.drag=pid;e.dataTransfer.setData(PANEL,JSON.stringify({window:WINDOW,pid,params:Dock.panels[pid]}));e.dataTransfer.setData("text/plain",panelTitle(pid));e.dataTransfer.effectAllowed="move";
+  if(Files[pid])safe(()=>flushFile(pid));
  });
  document.addEventListener("dragend",()=>{Dock.drag=null;showDrop(null);});
+ document.addEventListener("dragleave",e=>{if(!e.relatedTarget)showDrop(null);});
  document.addEventListener("dragover",e=>{
-  if(!Dock.drag)return;
+  if(!lattice(e))return;
   const body=e.target.closest?.(".stack-body"),bar=e.target.closest?.(".tabs");
-  if(body){e.preventDefault();showDrop(body,body.closest(".float")?"center":dropZone(body,e.clientX,e.clientY));}
-  else if(bar){e.preventDefault();showDrop(bar,"center");}
+  if(body||bar){e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect="move";}
+  if(body)showDrop(body,body.closest(".float")?"center":dropZone(body,e.clientX,e.clientY));
+  else if(bar)showDrop(bar,"center");
   else showDrop(null);
- });
+ },true);
  document.addEventListener("drop",e=>{
-  const pid=Dock.drag;if(!pid)return;
+  if(!lattice(e))return;
+  let pid=Dock.drag,remote=null;
+  if(!pid){try{remote=JSON.parse(e.dataTransfer.getData(PANEL));}catch(_){}if(remote?.window===WINDOW||!remote?.params?.type||!Dock.types[remote.params.type])return;}
   const body=e.target.closest?.(".stack-body"),bar=e.target.closest?.(".tabs");
-  if(!body&&!bar)return;e.preventDefault();showDrop(null);Dock.drag=null;
+  if(!body&&!bar)return;e.preventDefault();e.stopPropagation();showDrop(null);Dock.drag=null;
   const target=findStack((body||bar).dataset.stack);if(!target)return;
+  if(remote){
+   pid=findPanel(remote.params);
+   if(!pid){pid=newId("p");Dock.panels[pid]=remote.params;mountPanel(pid);}
+   safe(()=>rpc("tab_moved",{window:remote.window,pid:remote.pid}));
+  }
   // A floating window holds one stack, so anything dropped on it joins that stack.
   const floating=Dock.layout.floats.some(f=>f.stack===target);
   const zone=body&&!floating?dropZone(body,e.clientX,e.clientY):"center";
@@ -443,7 +488,7 @@ export function initDock(){
   }
   remember(pid);
   tidy();renderDock();saveLayout();
- });
+ },true);
  document.addEventListener("mousedown",e=>{
   const tab=e.target.closest?.(".tab");
   if(tab&&!e.target.closest(".tab-btn")){activate(tab.dataset.pid);return;}
@@ -556,6 +601,8 @@ export async function runUiOps(ops,thread){
   try{
    if(op.do==="open"){
     const params=paramsOf(op);let pid=findPanel(params);
+    const there=pid?null:heldElsewhere(params);
+    if(there!=null){safe(()=>rpc("window_show",{window:there,params}));results.push({ok:true,note:$t("它开在另一个窗口里，那个窗口到了前面")});continue;}
     if(!pid){pid=newId("p");Dock.panels[pid]=params;mountPanel(pid);}
     placePanel(pid,op.where,resolvePanel(op.to));results.push({ok:true,panel:pid});
    }else if(["close","focus","float","move"].includes(op.do)){
@@ -568,7 +615,7 @@ export async function runUiOps(ops,thread){
    }else if(op.do==="layout"){
     setLayout(layoutFromSpec(op.spec||{}));await dropUnused();results.push({ok:true});
    }else if(op.do==="workspace"){
-    if(Dock.own)throw new Error($t("这个工作状态在单独的窗口里，这里不能切换或新建工作状态"));
+    if(WINDOW)throw new Error(Dock.own?$t("这个工作状态在单独的窗口里，这里不能切换或新建工作状态"):$t("这是单独的窗口，这里不能切换或新建工作状态"));
     if(away)throw new Error($t("学习者已经离开这个工作状态，这里不能切换"));
     const found=findSpace(op.name);
     if(op.new){

@@ -558,7 +558,7 @@ export async function chatSend(pid,text,extra={}){
   const skill=text==null?st.skill:null;
   // The screen as it is now, so the tab directory sent along says what the learner was just using.
   clearTimeout(screenTimer);await safe(sendScreen);
-  const from=Dock.space,r=await rpc("send",{agent:p.agent,message,thread:st.thread,...(p.space?{space:p.space}:{}),selection,task:extra.task||"",note:screenNote(),answer:extra.answer||null,attach,model:p.model||null,skill:skill?.slug||null,effort:p.effort||null,anchor,...(Dock.own?{window:WINDOW}:{})});
+  const from=Dock.space,r=await rpc("send",{agent:p.agent,message,thread:st.thread,...(p.space?{space:p.space}:{}),selection,task:extra.task||"",note:screenNote(),answer:extra.answer||null,attach,model:p.model||null,skill:skill?.slug||null,effort:p.effort||null,anchor,...(WINDOW?{window:WINDOW}:{})});
   st.thread=r.thread;Dock.origin[r.thread]=from;if(extra.selection==null){st.quote="";st.quoteAt=null;}if(text==null){st.attach=[];st.skill=null;}
   const L=runOf(st,r.run||r.thread,r.question);if(skill&&!L.liveSkill)L.liveSkill={slug:skill.slug,title:skill.title};
   if(!st.data.messages.some(m=>String(m.id)===String(r.question)))st.data.messages.push({id:r.question??"pending",role:"user",content:message||({check:$t("我写好了，帮我看看我的代码和运行结果。"),hint:$t("我卡住了，给我一点提示，先别直接给答案。"),capture:$t("把我们讨论过的内容整理成知识卡。")})[extra.task]||"",meta:{selection,answer:extra.answer,attach,skill:skill?.slug,skill_title:skill?.title},at:new Date().toISOString()});

@@ -162,8 +162,9 @@ class MainWindow(QMainWindow):
         window.show()
 
     def raise_window(self,ident):
-        if ident in self.windows:
-            window=self.windows[ident]
+        # No id: the main window.
+        if not ident or ident in self.windows:
+            window=self.windows[ident] if ident else self
             window.showNormal() if window.isMinimized() else window.show()
             window.raise_()
             window.activateWindow()

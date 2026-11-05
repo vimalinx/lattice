@@ -27,7 +27,7 @@ from .files import FilesPart
 from .skills import SkillsPart
 from .imported import ImportedPart
 from .notes import MarksPart
-from .windows import WindowsPart
+from .windows import WindowsPart, panels_back
 from .notebooks import NotebooksPart
 from .running import RunningPart
 from .turns import TurnsPart
@@ -82,12 +82,13 @@ class Bridge(VaultPart, FilesPart, SkillsPart, ImportedPart, MarksPart, WindowsP
         self.runs, self.kernels, self.kernel_states, self.batches = {}, {}, {}, {}
         self.screen, self.edits, self.last_write = {}, {}, 0.0
         self.window_screens = {}   # what each separate window shows, by its id
+        self.window_held = {}      # the panels each window has open, by its id ("" for the main window)
         self.thread_windows = {}   # a conversation last spoken to in a window holding a working state: that window
         self.imports_read = {}     # conversations read to be imported, by request
         self.book_files = {}       # the book window's way to a book's bytes: token -> where the file is
         # Panels left in windows of their own when Lattice last closed: they come back into the main window.
-        self.returned_windows = [{"params": w["params"], "origin": w.get("origin") or {}} for w in (self.lattice.setting("separate_windows") or {}).values()
-                                 if isinstance(w, dict) and w.get("params")]
+        self.returned_windows = [back for w in (self.lattice.setting("separate_windows") or {}).values()
+                                 if isinstance(w, dict) and w.get("params") for back in panels_back(w)]
         self.lattice.set_setting("separate_windows", {})
         self.tests, self._retired = [], []
         self.ui_waiters = {}

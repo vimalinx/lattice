@@ -1269,14 +1269,11 @@ input[type=checkbox],input[type=radio],input[type=range]{accent-color:var(--acce
 /* A working state in a window of its own: the whole interface, its state named in the status line where the tabs were. */
 .st-tab.out{color:var(--muted)}
 .st-tab.out>svg:last-of-type{flex:0 0 auto;opacity:.7}
-#status .st-own{flex:0 0 auto;height:100%;display:flex;align-items:center;gap:6px;padding:0 4px 0 10px;border-top:2px solid var(--accent);background:var(--panel);color:var(--text);font-size:11.5px}
+#status .st-own{flex:0 0 auto;height:100%;display:flex;align-items:center;gap:6px;padding:0 10px;border-top:2px solid var(--accent);background:var(--panel);color:var(--text);font-size:11.5px}
 #status .st-own span{color:inherit}
-.st-own button{display:grid;place-items:center;width:22px;height:20px;border:0;border-radius:5px;background:transparent;color:var(--subtle)}
-.st-own button:hover{color:var(--text);background:var(--surface)}
-/* A separate window shows one panel, filling it: no activity bar, sidebar or status line. */
+/* A separate window shows its panels, filling it: no activity bar, sidebar or status line. */
 body.separate-window #activity,body.separate-window #side,body.separate-window #side-gutter,body.separate-window #status{display:none!important}
-body.separate-window .tab-btn{display:none}
-.tab-return{display:flex;align-items:center;gap:5px;margin:0 6px;padding:3px 10px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--muted);font-size:12px;white-space:nowrap}
+.tab-return{flex:0 0 auto;align-self:center;display:flex;align-items:center;gap:5px;margin:0 6px;padding:3px 10px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--muted);font-size:12px;white-space:nowrap}
 .tab-return:hover{color:var(--text);background:var(--surface-hover)}
 /* A conversation brought in from an AI on the web: the window that reads it, and where its imported part ends. */
 .import-row{display:flex;gap:8px;margin:10px 0}

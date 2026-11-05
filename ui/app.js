@@ -2,7 +2,7 @@ import {$t,LOCALE} from "./i18n.js";
 import {Dock} from "./state.js";
 import {S,WINDOW,all,ask,askText,closeModal,el,emptyState,esc,fmtDate,h,kindName,modal,rpc,safe,shorten,svg,toast} from "./core.js";
 import {activeTheme,applyTheme,themeColorPick,themeOp} from "./theme.js";
-import {VIEW_KEYS,activate,splitOut,applyView,closePanel,eachStack,findPanel,float,fromWindow,initDock,loadLayout,onePanel,openPanel,panelTitle,refreshTab,restoreUi,runUiOps,saveLayout,setView,setZoom,sideOf,stackNode,stepZoom,toWindow,unfloat,viewOf,windowTitleShown,zoomDefault,zoomOf,spaceFlash,followingPanel} from "./dock.js";
+import {VIEW_KEYS,activate,splitOut,applyView,closePanel,eachStack,findPanel,float,fromWindow,initDock,letGo,loadLayout,openPanel,panelTitle,refreshTab,restoreUi,runUiOps,saveLayout,setView,setZoom,sideOf,stackNode,stepZoom,toWindow,unfloat,viewOf,windowTitleShown,zoomDefault,zoomOf,spaceFlash,followingPanel} from "./dock.js";
 import {currentSpace,mainSpaces,sendToSpace,setTopicOf,spaceAction,spaceFromWindow,spaceMenu,spaceOf,spaceTabs,switchSpace,topicHere,topicOf,visibleSpaces} from "./spaces.js";
 import {focusEditor,gridAction} from "./editor.js";
 import {CODE_EXT,snippetRuns} from "./blocks.js";
@@ -105,7 +105,7 @@ export function popMenu(anchor,html,opts={}){
 export function tabMenu(pid,at){
  const p=Dock.panels[pid];if(!p)return;
  const floating=Dock.layout.floats.some(f=>f.stack.tabs.includes(pid));
- popMenu(at,"<div class=\"menu-label\">"+$t("这个窗口的大小")+(p.zoom?$t("（单独调过）"):"")+"</div><div class=\"zoom-row\"><button data-action=\"zoom-step\" data-pid=\""+pid+"\" data-dir=\"-1\" title=\""+$t("缩小 · Ctrl -")+"\">A−</button><b>"+Math.round(zoomOf(p)*100)+"%</b><button data-action=\"zoom-step\" data-pid=\""+pid+"\" data-dir=\"1\" title=\""+$t("放大 · Ctrl =")+"\">A+</button></div>"+(p.zoom?"<button data-action=\"zoom-step\" data-pid=\""+pid+"\" data-dir=\"0\">"+svg("undo",14)+"<span>"+$t("恢复成这种面板的默认（{0}%）",Math.round(zoomDefault(p)*100))+"</span></button>":"")+"<hr/>"+(onePanel()?"":(floating?"":"<button data-action=\"dock-float\" data-pid=\""+pid+"\">"+svg("float",14)+"<span>"+$t("浮出")+"</span></button>")+(WINDOW?"":"<button data-action=\"dock-window\" data-pid=\""+pid+"\">"+svg("external",14)+"<span>"+$t("放大成单独的窗口")+"</span></button>"))+(onePanel()?"":"<button data-action=\"tab-split\" data-where=\"right\" data-pid=\""+pid+"\">"+svg("split",14)+"<span>"+$t("分到右边")+"</span></button><button data-action=\"tab-split\" data-where=\"bottom\" data-pid=\""+pid+"\">"+svg("split",14)+"<span>"+$t("分到下面")+"</span></button>"+(WINDOW?[]:mainSpaces()).filter(x=>x.id!==Dock.space).map(x=>"<button data-action=\"tab-send\" data-to=\""+esc(x.id)+"\" data-pid=\""+pid+"\">"+svg(x.icon||"layout",14)+"<span>"+$t("移到「{0}」",esc(x.name))+"</span></button>").join("")+"<hr/>")+"<button data-action=\"dock-close\" data-pid=\""+pid+"\">"+svg("close",14)+"<span>"+$t("关闭")+"</span></button>");
+ popMenu(at,"<div class=\"menu-label\">"+$t("这个窗口的大小")+(p.zoom?$t("（单独调过）"):"")+"</div><div class=\"zoom-row\"><button data-action=\"zoom-step\" data-pid=\""+pid+"\" data-dir=\"-1\" title=\""+$t("缩小 · Ctrl -")+"\">A−</button><b>"+Math.round(zoomOf(p)*100)+"%</b><button data-action=\"zoom-step\" data-pid=\""+pid+"\" data-dir=\"1\" title=\""+$t("放大 · Ctrl =")+"\">A+</button></div>"+(p.zoom?"<button data-action=\"zoom-step\" data-pid=\""+pid+"\" data-dir=\"0\">"+svg("undo",14)+"<span>"+$t("恢复成这种面板的默认（{0}%）",Math.round(zoomDefault(p)*100))+"</span></button>":"")+"<hr/>"+((floating?"":"<button data-action=\"dock-float\" data-pid=\""+pid+"\">"+svg("float",14)+"<span>"+$t("浮出")+"</span></button>")+(WINDOW?"":"<button data-action=\"dock-window\" data-pid=\""+pid+"\">"+svg("external",14)+"<span>"+$t("放大成单独的窗口")+"</span></button>"))+("<button data-action=\"tab-split\" data-where=\"right\" data-pid=\""+pid+"\">"+svg("split",14)+"<span>"+$t("分到右边")+"</span></button><button data-action=\"tab-split\" data-where=\"bottom\" data-pid=\""+pid+"\">"+svg("split",14)+"<span>"+$t("分到下面")+"</span></button>"+(WINDOW?[]:mainSpaces()).filter(x=>x.id!==Dock.space).map(x=>"<button data-action=\"tab-send\" data-to=\""+esc(x.id)+"\" data-pid=\""+pid+"\">"+svg(x.icon||"layout",14)+"<span>"+$t("移到「{0}」",esc(x.name))+"</span></button>").join("")+"<hr/>")+"<button data-action=\"dock-close\" data-pid=\""+pid+"\">"+svg("close",14)+"<span>"+$t("关闭")+"</span></button>");
  Menus.reopen=()=>tabMenu(pid,at);
 }
 function panelHere(){const a=document.activeElement?.closest?.(".panel");return a?.dataset.pid||(Dock.panels[Dock.focus]?Dock.focus:null);}
@@ -236,12 +236,18 @@ export function screenNote(){
 }
 /* ---- events from the backend ---------------------------------------------------------------------------------- */
 async function onEvent(evt){
- // Moving panels, opening things and checking apps are the main window's to do; a separate window shows its panel.
- // A window holding a working state does what an AI asked from it; the main window, what was asked from it.
- if(["ui","open"].includes(evt.type)&&(evt.window||"")!==(Dock.own?WINDOW:""))return;
- if(WINDOW&&["open_annotation","app_check","open_panel","window_closed"].includes(evt.type)||onePanel()&&["ui","open"].includes(evt.type))return;
- if(evt.type==="open_panel")return openPanel(evt.params);
- if(evt.type==="window_closed")return evt.state?spaceFromWindow(evt.state,evt.unit):fromWindow(evt.params,evt.origin||{});
+ // What every window has open is every window's to know.
+ if(evt.type==="held"){if(evt.window!==WINDOW){if(evt.panels.length)Dock.held[evt.window]=evt.panels;else delete Dock.held[evt.window];}return;}
+ if(["show_panel","panel_gone"].includes(evt.type)){
+  if(evt.window!==WINDOW)return;
+  if(evt.type==="panel_gone")return letGo(evt.pid);
+  const pid=findPanel(evt.params);return pid?activate(pid):openPanel(evt.params);
+ }
+ // Opening things and moving panels an AI asked for are done in the window it was asked from; checking apps and
+ // annotations are the main window's to do.
+ if(["ui","open"].includes(evt.type)&&(evt.window||"")!==WINDOW)return;
+ if(WINDOW&&["open_annotation","app_check","window_closed"].includes(evt.type))return;
+ if(evt.type==="window_closed")return evt.state?spaceFromWindow(evt.state,evt.unit):(evt.panels||[]).forEach(w=>fromWindow(w.params,w.origin||{}));
  if(evt.type==="agent"&&evt.kind==="finished"&&Dock.origin[evt.thread]&&Dock.origin[evt.thread]!==Dock.space){Dock.notice.add(Dock.origin[evt.thread]);renderStatus();}
  if(evt.type==="agent"&&String(evt.thread||"").startsWith("compare:"))return compareEvent(evt);
  if(evt.type==="agent"&&evt.agent==="builder"){appAgentEvent(evt);if(evt.kind==="finished")refreshState();return;}
@@ -583,6 +589,8 @@ function initInteractions(){
  setInterval(trackDwell,2000);
  setInterval(()=>safe(flushAll),25000);
 }
+// What this window has open, told to the others; what they have open, known here.
+async function knowHeld(){const held=await rpc("window_held",{window:WINDOW,panels:Object.values(Dock.panels)});delete held[WINDOW];Dock.held=held;}
 async function boot(){
  try{
   if(typeof qt==="undefined"||!qt.webChannelTransport)throw new Error($t("必须由 Lattice 桌面程序启动（缺少本地 Qt WebChannel）"));
@@ -600,17 +608,18 @@ async function boot(){
       Dock.own=params.state;document.body.classList.add("state-window");
       const unit=params.unit||{};
       loadLayout({panels:unit.panels||{},spaces:unit.layout?.root?{[Dock.own]:unit.layout}:{},space:Dock.own});
-      await refreshState();renderSide();reportScreen();topicHere();return;
+      await refreshState();renderSide();reportScreen();topicHere();await knowHeld();return;
      }
-     // A separate window: just its panel, filling it.
+     // A separate window: the panel taken out, filling it, and whatever was opened beside it there since.
      document.body.classList.add("separate-window");
-     const sp=visibleSpaces()[0].id,pid="w"+WINDOW.slice(0,10);
-     if(!params){el("#dock-wrap").innerHTML=emptyState("layout",$t("这个窗口里的面板已经放回主窗口了"),$t("可以关掉这个窗口。"));return;}
-     loadLayout({panels:{[pid]:params},spaces:{[sp]:{root:stackNode([pid]),floats:[]}},space:sp});
-     await refreshState();refreshTab(pid);reportScreen();return;
+     if(!params?.params){el("#dock-wrap").innerHTML=emptyState("layout",$t("这个窗口里的面板已经放回主窗口了"),$t("可以关掉这个窗口。"));return;}
+     // In the state its panel belongs to, so a state's own conversation stays the one it is.
+     const own=spaceOf(params.params.space),sp=own&&!own.hidden?own.id:visibleSpaces()[0].id,pid="w"+WINDOW.slice(0,10),unit=params.unit;
+     loadLayout(unit?.layout?.root?{panels:unit.panels||{},spaces:{[sp]:unit.layout},space:sp}:{panels:{[pid]:params.params},spaces:{[sp]:{root:stackNode([pid]),floats:[]}},space:sp});
+     await refreshState();Object.keys(Dock.panels).forEach(refreshTab);reportScreen();await knowHeld();return;
     }
     loadLayout(S.data.layout);for(const w of S.data.returned_windows||[])fromWindow(w.params,w.origin||{});
-    await refreshState();renderSide();reportScreen();topicHere();
+    await refreshState();renderSide();reportScreen();topicHere();await knowHeld();
     if(S.data.migrated)toast($t("已把原来的学习数据迁移成文件，放在")+" "+S.data.vault);
     if(S.data.problems?.length)console.warn($t("读不了的文件"),S.data.problems);
    }catch(err){console.error(err);el("#app").innerHTML="<div class=\"boot\">"+$t("初始化失败：")+esc(err.message)+"<br/><button class=\"btn\" onclick=\"location.reload()\">"+$t("重试")+"</button></div>";}

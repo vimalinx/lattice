@@ -11,6 +11,32 @@ from ..providers import AGENT_NAMES
 from .. import host
 
 
+def panels_back(entry):
+    """The panels a separate window holds, to go back into the main window: those opened beside it there first, where
+    their kind opens in its working state, then the one taken out, to where it was. A window never rearranged holds just
+    that one."""
+    unit = entry.get("unit") or {}
+    if not unit.get("layout"):
+        return [{"params": entry["params"], "origin": entry.get("origin") or {}}]
+    order = []
+
+    def walk(node):
+        if not isinstance(node, dict):
+            return
+        if node.get("t") == "stack":
+            order.extend(pid for pid in node.get("tabs") or [] if pid not in order)
+        for kid in node.get("kids") or []:
+            walk(kid)
+    walk(unit["layout"].get("root"))
+    for f in unit["layout"].get("floats") or []:
+        walk(f.get("stack"))
+    panels, home, origin = unit.get("panels") or {}, unit.get("home"), entry.get("origin") or {}
+    order.sort(key=lambda pid: pid == home)
+    # Those opened beside it go back to the working state it came from too.
+    return [{"params": panels[pid], "origin": origin if pid == home else {"space": origin.get("space")} if origin.get("space") else {}}
+            for pid in order if isinstance(panels.get(pid), dict) and panels[pid].get("type")]
+
+
 class WindowsPart:
     # ---- panels in windows of their own -------------------------------------------------------------
     def rpc_window_open(self, params=None, title="", origin=None, state=None):
@@ -39,14 +65,23 @@ class WindowsPart:
         entry = (self.lattice.setting("separate_windows") or {}).get(window) or {}
         if entry.get("state"):
             return {"state": entry["state"], "unit": self.saved_state(entry["state"])}
-        return entry.get("params")
+        return {"params": entry["params"], "unit": entry.get("unit")} if entry.get("params") else None
+
+    def rpc_window_save(self, window, unit):
+        """A separate window's arrangement, as more is opened in it: what goes back when it closes."""
+        opened = self.lattice.setting("separate_windows") or {}
+        entry = opened.get(window)
+        if isinstance(entry, dict) and entry.get("params") and isinstance(unit, dict):
+            entry["unit"] = unit
+            self.lattice.set_setting("separate_windows", opened)
+        return True
 
     def rpc_window_raise(self, window):
         self.parent().raise_window(window)
         return True
 
     def rpc_window_return(self, window):
-        """Close a separate window: its panel goes back where it was in the main window."""
+        """Close a separate window: its panels go back into the main window, the one taken out where it was."""
         self.parent().close_window(window)
         return True
 
@@ -54,9 +89,24 @@ class WindowsPart:
         self.parent().title_window(window, str(title or "")[:120])
         return True
 
-    def rpc_open_in_main(self, params):
-        """Something opened from a separate window opens in the main one."""
-        self.announce({"type": "open_panel", "params": params})
+    def rpc_window_held(self, window="", panels=None):
+        """What a window (the main one: no id) has open, told to every other one so a panel opens in one window only;
+        answers with what each has open."""
+        window = str(window or "")
+        if isinstance(panels, list) and (not window or window in (self.lattice.setting("separate_windows") or {})):
+            self.window_held[window] = [p for p in panels if isinstance(p, dict)]
+            self.announce({"type": "held", "window": window, "panels": self.window_held[window]})
+        return self.window_held
+
+    def rpc_window_show(self, window, params):
+        """A panel open in another window, asked for again: that window comes to the front, showing it."""
+        self.parent().raise_window(str(window or ""))
+        self.announce({"type": "show_panel", "window": str(window or ""), "params": params})
+        return True
+
+    def rpc_tab_moved(self, window, pid):
+        """A tab dropped into another window: the window it came from lets it go."""
+        self.announce({"type": "panel_gone", "window": str(window or ""), "pid": pid})
         return True
 
     def window_closed(self, ident):
@@ -64,12 +114,14 @@ class WindowsPart:
         entry = opened.pop(ident, None)
         self.lattice.set_setting("separate_windows", opened)
         self.window_screens.pop(ident, None)
+        if self.window_held.pop(ident, None) is not None:
+            self.announce({"type": "held", "window": ident, "panels": []})
         self.thread_windows = {k: v for k, v in self.thread_windows.items() if v != ident}
         if entry and entry.get("state"):
             # The state goes back to the main window as that window last saved it.
             self.announce({"type": "window_closed", "window": ident, "state": entry["state"], "unit": self.saved_state(entry["state"])})
         elif entry:
-            self.announce({"type": "window_closed", "window": ident, "params": entry["params"], "origin": entry.get("origin") or {}})
+            self.announce({"type": "window_closed", "window": ident, "panels": panels_back(entry)})
 
     def rpc_typing(self, path):
         self.edits[path] = self.last_write = time.monotonic()

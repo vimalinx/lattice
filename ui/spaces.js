@@ -137,7 +137,7 @@ function moveSpaceTo(id,before){
 }
 export function spaceTabs(){
  // A window holding a state shows that one, and the way back.
- if(Dock.own){const sp=spaceOf(Dock.own);return "<div class=\"st-own\" title=\""+$t("这个窗口是工作状态「{0}」",esc(sp?.name||""))+"\">"+svg(sp?.icon||"layout",12)+"<span>"+esc(sp?.name||"")+"</span><button data-action=\"space-return\" data-space=\""+esc(Dock.own)+"\" title=\""+$t("放回主窗口")+"\" aria-label=\""+$t("放回主窗口")+"\">"+svg("undo",11)+"</button></div>";}
+ if(Dock.own){const sp=spaceOf(Dock.own);return "<div class=\"st-own\" title=\""+$t("这个窗口是工作状态「{0}」",esc(sp?.name||""))+"\">"+svg(sp?.icon||"layout",12)+"<span>"+esc(sp?.name||"")+"</span></div>";}
  return "<div class=\"st-tabs\">"+visibleSpaces().map((sp,i)=>'<button class="st-tab'+(sp.id===Dock.space?" on":"")+(Dock.out[sp.id]?" out":"")+'" draggable="true" data-action="space" data-space="'+esc(sp.id)+'"'+(Dock.out[sp.id]?' title="'+$t("在单独的窗口里，点一下切过去")+'"':"")+'>'+svg(sp.icon||"layout",12)+'<span>'+esc(sp.name)+'</span>'+(Dock.out[sp.id]?svg("external",10):"")+(Dock.notice.has(sp.id)?'<i></i>':"")+'</button>').join("")+"<button class=\"st-add\" data-action=\"space-add\" title=\""+$t("新工作状态")+"\">"+svg("plus",12)+"</button></div>";
 }
 export function spaceMenu(id,at){
@@ -197,7 +197,7 @@ function peekShow(id){
 function peekHide(){clearTimeout(Peek.timer);clearTimeout(Peek.hide);Peek.id=null;el("#st-peek")?.remove();}
 // A short step between a tab and its list, or from one tab to the next, does not close it.
 function peekLeave(){clearTimeout(Peek.timer);clearTimeout(Peek.hide);Peek.hide=setTimeout(peekHide,260);}
-function inSpace(id,fn){const space=Dock.space,layout=Dock.layout;Dock.space=id;Dock.layout=Dock.spaces[id];try{return fn();}finally{Dock.space=space;Dock.layout=layout;}}
+export function inSpace(id,fn){const space=Dock.space,layout=Dock.layout;Dock.space=id;Dock.layout=Dock.spaces[id];try{return fn();}finally{Dock.space=space;Dock.layout=layout;}}
 export function sendToSpace(pid,from,to,copy){
  if(from===to)return;
  if(Dock.out[to])return toast($t("「{0}」在单独的窗口里，先放回主窗口再移过去",spaceOf(to)?.name||""));
