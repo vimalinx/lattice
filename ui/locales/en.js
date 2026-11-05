@@ -622,7 +622,7 @@ export default {
  "快答": "Quick answer",
  "快答刚把一个问题转交给你了，请接住它。": "Quick answer just handed a question over to you. Please pick it up.",
  "快答正在回答…": "Quick answer is answering…",
- "快答还没打开，等一下再交": "Quick answer isn't open yet; hand it in a moment",
+ "对话还没打开，等一下再试": "The conversation isn't open yet; try again in a moment",
  "快速打开 · Ctrl O": "Quick open · Ctrl O",
  "快速打开笔记 · Ctrl O": "Quick open note · Ctrl O",
  "忽略": "Ignore",

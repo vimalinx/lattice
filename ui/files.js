@@ -1,5 +1,5 @@
 import {$t} from "./i18n.js";
-import {Dock,panelType} from "./state.js";
+import {Dock,panelHand,panelType} from "./state.js";
 import {S,all,ask,baseName,button,cardTypeName,closeModal,el,emptyState,esc,fmtDate,hydrateVault,iconButton,linkName,markdown,modal,modalHead,outputHtml,rpc,safe,stageName,svg,toast,who} from "./core.js";
 import {closePanel,openPanel,refreshTab,saveLayout} from "./dock.js";
 import {destroyEditors,editorGoto,editorHost,editorIn,editorViewport,focusEditor,insertTable,mountEditors} from "./editor.js";
@@ -44,8 +44,10 @@ export function openFile(path,at=null){
  if(!path)return;
  // An app the app builder made runs in its own window; its source is a button away there.
  if(/^apps\/[^/]+\.html?$/i.test(path))return openPanel({type:"app",path});
- return openPanel({type:"file",path},{then:pid=>{if(at)gotoIn(pid,at);}});
+ return openPanel({type:"file",path},at?{hand:{do:"goto",at}}:{});
 }
+panelHand("goto",(pid,h)=>gotoIn(pid,h.at));
+panelHand("edit",pid=>setTimeout(()=>focusEditor(Dock.els[pid]),400));
 function filePanels(path){return Object.keys(Files).filter(pid=>Dock.panels[pid]?.path===path);}
 export async function loadFile(pid,keep=false){
  const p=Dock.panels[pid],st=Files[pid];if(!p||!st)return;

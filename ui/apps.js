@@ -1,8 +1,8 @@
 import {$t} from "./i18n.js";
 import {Dock,panelType} from "./state.js";
 import {all,askText,baseName,button,emptyState,esc,fmtDate,iconButton,rpc,safe,shorten,svg,toast} from "./core.js";
-import {activate,followingPanel,newId,openPanel,refreshTab} from "./dock.js";
-import {Chat,WAIT_LABEL,elapsed,stepsHtml,updateComposer} from "./chat.js";
+import {newId,openPanel,refreshTab} from "./dock.js";
+import {WAIT_LABEL,elapsed,stepsHtml,toConversation} from "./chat.js";
 /* Apps: small web programs the app builder writes into apps/ for the learner to work with (hands-on practice,
    visualizations, simulations). Each is a site of its own (lattice-app://, see lattice/appscheme.py) in a sandboxed
    frame: it may use the internet and its own storage, not this computer, the local network or Lattice itself; it can
@@ -138,10 +138,7 @@ addEventListener("message",e=>{
   const frame=all("iframe.app-frame").find(f=>f.contentWindow===e.source);if(!frame)return;
   const pid=frame.closest(".panel")?.dataset.pid,title=Apps[pid]?.data?.title||$t("应用");
   // Into the main conversation's input as a quote; the learner adds the question.
-  let target=followingPanel("tutor");
-  if(!target)target=openPanel({type:"chat",agent:"tutor"});else activate(target);
-  const go=()=>{if(!Chat[target]?.data)return setTimeout(go,150);Chat[target].quote=$t("在应用「{0}」里：",title)+String(d.text||"");updateComposer(target);Dock.els[target]?.querySelector(".composer textarea")?.focus();};
-  go();
+  toConversation("tutor",{do:"quote",text:$t("在应用「{0}」里：",title)+String(d.text||"")});
  }
 });
 /* What an app shows right now, for an agent reading its tab: its page answers with its text and its controls' values. */

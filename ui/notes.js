@@ -1,7 +1,7 @@
 import {$t} from "./i18n.js";
-import {Dock,panelType} from "./state.js";
+import {Dock,panelHand,panelType} from "./state.js";
 import {S,all,ask,baseName,button,closeModal,el,emptyState,esc,fmtDate,hydrateVault,iconButton,kindName,linkName,markdown,modal,modalHead,rpc,safe,shorten,svg,toast} from "./core.js";
-import {activate,closePanel,detach,eachStack,findPanel,openPanel,renderDock,saveLayout,splitBeside,stackNode,stackOf,targetStack,tidy} from "./dock.js";
+import {activate,closePanel,detach,eachStack,findPanel,openPanel,renderDock,runHand,saveLayout,splitBeside,stackNode,stackOf,targetStack,tidy} from "./dock.js";
 import {refreshEditors} from "./editor.js";
 import {Files,fileIcon,flushAll,gotoIn,loadFile,openFile,renderFile} from "./files.js";
 import {openAnnotation} from "./marks.js";
@@ -180,9 +180,11 @@ export async function renderTags(pid){
 // A tag clicked anywhere opens the tag list beside the note, with that tag's notes.
 export function showTag(tag){
  let pid=null;eachStack(s=>{if(!pid)pid=s.tabs.find(x=>Dock.panels[x]?.type==="noteinfo")||null;});
- if(!pid)pid=openPanel({type:"noteinfo"});else activate(pid);
- Object.assign(Dock.panels[pid],{tab:"tags",tag,tagQuery:""});saveLayout();Notes.tags=null;renderNoteInfo(pid);
+ const hand={do:"tag",tag};
+ if(!pid)return openPanel({type:"noteinfo"},{hand});
+ activate(pid);runHand(pid,hand);
 }
+panelHand("tag",(pid,h)=>{Object.assign(Dock.panels[pid],{tab:"tags",tag:h.tag,tagQuery:""});saveLayout();Notes.tags=null;renderNoteInfo(pid);});
 
 /* ---- the folder tree ------------------------------------------------------------------------------------------------ */
 export async function notesSection(){
@@ -327,7 +329,7 @@ export async function notesAction(kind,a){
   case "note-move":return moveDialog(path);
   case "note-move-to":closeModal();return moveNote(path,a.dataset.folder);
   case "note-open-side":{
-   const anchor=stackOf(Dock.focus)||targetStack("mine"),pid=findPanel({type:"file",path})||openPanel({type:"file",path});
+   const anchor=stackOf(Dock.focus)||targetStack("mine"),pid=findPanel({type:"file",path})||openPanel({type:"file",path});if(!pid)return;
    detach(pid);splitBeside(anchor,"right",stackNode([pid]));tidy();renderDock();saveLayout();return;
   }
   case "note-dup":{const d=(await rpc("file_read",{path})).doc;if(!d)return;return newNote(folderOf(path),d.body,uniqueTitle(d.title+" "+$t("副本")));}

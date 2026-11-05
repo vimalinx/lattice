@@ -1,7 +1,7 @@
 import {$t,$p,LOCALE} from "./i18n.js";
-import {Dock,panelType} from "./state.js";
+import {Dock,panelHand,panelType} from "./state.js";
 import {S,WINDOW,all,ask,askText,button,cardTypeName,esc,fmtDate,h,hydrateVault,iconButton,markdown,rpc,safe,shorten,svg,toast} from "./core.js";
-import {activate,openPanel,panelTitle,refreshTab,saveLayout,stackOf,viewOf,zoomOf,followingPanel} from "./dock.js";
+import {activate,onePanel,openPanel,panelTitle,refreshTab,runHand,saveLayout,stackOf,viewOf,zoomOf,followingPanel} from "./dock.js";
 import {setTopicOf,topicOf} from "./spaces.js";
 import {BLOCK_RE,mountBlocks,replyHtml} from "./blocks.js";
 import {adaptImported,importedDivider} from "./imports.js";
@@ -63,10 +63,49 @@ export function sessionTip(x){return fmtDate(x.updated,true)+" · "+(x.summary?s
 function sessionsChanged(){sideChanged([]);}
 export async function openSession(id,space=Dock.space){
  const r=await rpc("session_open",{id,space});setTopicOf(space,r.topic);
- await refreshState();followingPanels().forEach(x=>loadChat(x,false));sessionsChanged();
+ await refreshState();followingChanged(space,false);sessionsChanged();
 }
 // The tutor's panel that follows along, brought forward (or opened) when a conversation is picked in the sidebar.
-export function showTutor(){const pid=followingPanel("tutor");if(pid)activate(pid);else openPanel({type:"chat",agent:"tutor"});}
+export function showTutor(hand=null){return toConversation("tutor",hand);}
+/* An AI's conversation that follows along in this state, shown (or opened) and handed something to do (hand: dock.js);
+   open in another window, it is done there. */
+export function toConversation(agent,hand=null){
+ const pid=followingPanel(agent);
+ if(!pid)return openPanel({type:"chat",agent},hand?{hand}:{});
+ activate(pid);if(hand)runHand(pid,hand);return pid;
+}
+// A conversation just opened can be handed something once it has loaded.
+export async function chatReady(pid){
+ for(let i=0;i<60&&Dock.panels[pid]&&!Chat[pid]?.data;i++)await new Promise(r=>setTimeout(r,100));
+ if(Chat[pid]?.data)return true;
+ if(Dock.panels[pid])toast($t("对话还没打开，等一下再试"),"error");
+ return false;
+}
+function focusComposer(pid){Dock.els[pid]?.querySelector("[data-composer]")?.focus();}
+panelHand("send",async(pid,h)=>{if(await chatReady(pid))await chatSend(pid,h.text,h.extra||{});});
+panelHand("quote",async(pid,h)=>{if(!await chatReady(pid))return;Chat[pid].quote=h.text;Chat[pid].quoteAt=h.anchor||null;updateComposer(pid);focusComposer(pid);});
+panelHand("focus",async pid=>{if(await chatReady(pid))focusComposer(pid);});
+panelHand("load",(pid,h,fresh)=>fresh?null:loadChat(pid));
+/* Which conversation a state follows changed (its topic, set here already; the session a topic opens): every window loads
+   again the ones it shows, a state's conversation in another window included, and the window holding the state keeps
+   the topic. */
+export function followingChanged(space=null,keep=true){
+ followingPanels().forEach(x=>loadChat(x,keep));
+ safe(()=>rpc("following",{window:WINDOW,...(space?{space,topic:topicOf(space)}:{}),changed:true,keep}));
+}
+export function followingHeard(evt){
+ if(evt.from===WINDOW)return;
+ const moved=!!evt.space&&!!Dock.spaces[evt.space]&&topicOf(evt.space)!==(evt.topic||null);
+ if(moved)setTopicOf(evt.space,evt.topic);
+ if(evt.changed)followingPanels().forEach(x=>loadChat(x,evt.keep));
+ else if(moved)followingPanels().filter(x=>Dock.panels[x].space===evt.space).forEach(x=>loadChat(x,false));
+}
+// A window showing a conversation of a state this window holds is told the topic that state is on.
+export function tellFollowing(panels){
+ if(onePanel())return;
+ const spaces=new Set((panels||[]).filter(p=>p.type==="chat"&&!p.thread&&p.space&&Dock.spaces[p.space]&&!Dock.out[p.space]).map(p=>p.space));
+ spaces.forEach(space=>safe(()=>rpc("following",{window:WINDOW,space,topic:topicOf(space)})));
+}
 // Renaming in place: Enter keeps it, Esc leaves it as it was, an empty name goes back to the first question.
 function renameSession(id){
  const span=document.querySelector('[data-session-title="'+CSS.escape(id)+'"]');if(!span)return;
@@ -80,17 +119,19 @@ export async function sessionAction(kind,a){
  const pid=a.dataset.pid,p=Dock.panels[pid];
  if(kind==="session-new"){
   const agent=a.dataset.agent||p?.agent||"tutor",topic=a.dataset.topic??(Chat[pid]?.data?.head?.topic||S.data.active_topic||"");
-  const r=await rpc("thread_new",{agent,topic,...(p?.space?{space:p.space}:{})});await openSession(r.thread,p?.space);if(!p)showTutor();
+  const r=await rpc("thread_new",{agent,topic,...(p?.space?{space:p.space}:{})});await openSession(r.thread,p?.space);
+  if(!p&&agent==="tutor")return showTutor({do:"focus"});
+  if(!p)showTutor();
   return setTimeout(()=>{const t=pid||followingPanel(agent);Dock.els[t]?.querySelector("[data-composer]")?.focus();},60);
  }
  if(kind==="session-open"){await openSession(a.dataset.id);return a.closest("#side")?showTutor():undefined;}
  const id=a.dataset.id,archived=a.dataset.archived==="1";
  if(kind==="session-more")return popMenu(a,"<button data-action=\"session-rename\" data-id=\""+esc(id)+"\">"+svg("edit",14)+"<span>"+$t("改名")+"</span></button><button data-action=\"session-archive\" data-id=\""+esc(id)+"\" data-archived=\""+(archived?1:0)+"\">"+svg("history",14)+"<span>"+(archived?$t("取消归档"):$t("归档"))+"</span></button><hr/><button class=\"danger\" data-action=\"session-delete\" data-id=\""+esc(id)+"\">"+svg("trash",14)+"<span>"+$t("删除")+"</span></button>");
  if(kind==="session-rename")return renameSession(id);
- if(kind==="session-archive"){await rpc("session_update",{id,archived:!archived});followingPanels().forEach(x=>loadChat(x,false));return sessionsChanged();}
+ if(kind==="session-archive"){await rpc("session_update",{id,archived:!archived});followingChanged(null,false);return sessionsChanged();}
  if(kind==="session-delete"){
   if(!await ask($t("对话会从会话列表和学习库里删掉，学习库的历史里还能找回。"),{title:$t("删除这段会话？"),danger:true,ok:$t("删除")}))return;
-  await rpc("session_delete",{id});followingPanels().forEach(x=>loadChat(x,false));return sessionsChanged();
+  await rpc("session_delete",{id});followingChanged(null,false);return sessionsChanged();
  }
 }
 function chatPanels(thread){return Object.keys(Chat).filter(pid=>Chat[pid].thread===thread);}
@@ -602,8 +643,8 @@ export function chatEvent(evt){
    if(evt.errors?.length)toast(evt.errors.join("；"),"error");
    if(evt.focus!==undefined){
     // The topic changes in the state this conversation is in, not in the others.
-    setTopicOf(Dock.panels[pid]?.space||Dock.space,evt.focus);
-    refreshState().then(()=>followingPanels().forEach(x=>loadChat(x)));
+    const space=Dock.panels[pid]?.space||Dock.space;setTopicOf(space,evt.focus);
+    refreshState().then(()=>followingChanged(space));
    }else loadChat(pid);
   }
  }
@@ -631,9 +672,9 @@ export async function endPractice(pid){
  if(!await ask($t("结束后这个练习就不能再继续对话了。"),{title:$t("结束这次练习，交给主会话复盘？"),ok:$t("结束练习")}))return;
  await flushAll();
  const r=await rpc("practice_end",{id:st.thread});
- const tutor=followingPanel("tutor");
- if(!tutor)openPanel({type:"chat",agent:"tutor"});else activate(tutor);
- await loadChat(pid);setTimeout(()=>Object.keys(Chat).filter(x=>Chat[x].thread===r.tutor_thread||Dock.panels[x]?.agent==="tutor").forEach(x=>loadChat(x)),300);
+ toConversation("tutor");
+ // The tutor's review is under way by then, in whichever window shows it.
+ await loadChat(pid);setTimeout(()=>{Object.keys(Chat).filter(x=>Chat[x].thread===r.tutor_thread||Dock.panels[x]?.agent==="tutor").forEach(x=>loadChat(x));if(!followingPanel("tutor"))toConversation("tutor",{do:"load"});},300);
  toast($t("已交给主会话复盘"));
 }
 export async function messageToCard(pid,mid){
@@ -646,10 +687,7 @@ export async function messageToCard(pid,mid){
 }
 export function escalate(pid,mid){
  const m=Chat[pid].data.messages.find(x=>String(x.id)===String(mid));if(!m)return;
- let tutor=followingPanel("tutor");
- if(!tutor)tutor=openPanel({type:"chat",agent:"tutor"});else activate(tutor);
- const send=()=>Chat[tutor]?.thread?chatSend(tutor,$t("我刚才和快答讨论了下面的内容。请检查它是否准确，再帮我深入理解，并接回主线：")+"\n\n"+m.content):setTimeout(send,200);
- send();
+ toConversation("tutor",{do:"send",text:$t("我刚才和快答讨论了下面的内容。请检查它是否准确，再帮我深入理解，并接回主线：")+"\n\n"+m.content});
 }
 /* The ⋯ menu: how this window shows the conversation, how all windows do, and the rest of what a conversation can do. */
 /* Token counts: compact numbers, a short label under each reply, the full breakdown when the mouse rests on it. */

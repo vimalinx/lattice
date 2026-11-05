@@ -2,11 +2,11 @@ import {$t,LOCALE} from "./i18n.js";
 import {Dock} from "./state.js";
 import {S,WINDOW,all,ask,askText,closeModal,el,emptyState,esc,fmtDate,h,kindName,modal,rpc,safe,shorten,svg,toast} from "./core.js";
 import {activeTheme,applyTheme,themeColorPick,themeOp} from "./theme.js";
-import {VIEW_KEYS,activate,splitOut,applyView,closePanel,eachStack,findPanel,float,fromWindow,initDock,letGo,loadLayout,openPanel,panelTitle,refreshTab,restoreUi,runUiOps,saveLayout,setView,setZoom,sideOf,stackNode,stepZoom,toWindow,unfloat,viewOf,windowTitleShown,zoomDefault,zoomOf,spaceFlash,followingPanel} from "./dock.js";
+import {VIEW_KEYS,splitOut,applyView,closePanel,eachStack,float,fromWindow,initDock,letGo,loadLayout,openPanel,panelTitle,refreshTab,restoreUi,runUiOps,saveLayout,setView,setZoom,sideOf,stackNode,stepZoom,toWindow,unfloat,viewOf,windowTitleShown,zoomDefault,zoomOf} from "./dock.js";
 import {currentSpace,mainSpaces,sendToSpace,setTopicOf,spaceAction,spaceFromWindow,spaceMenu,spaceOf,spaceTabs,switchSpace,topicHere,topicOf,visibleSpaces} from "./spaces.js";
-import {focusEditor,gridAction} from "./editor.js";
+import {gridAction} from "./editor.js";
 import {CODE_EXT,snippetRuns} from "./blocks.js";
-import {Chat,SESSION_AGENTS,agentTitle,attachMenu,chatEvent,chatModel,chatMoreMenu,chatRetry,chatSend,conversationMarkdown,endPractice,escalate,fitComposer,followingPanels,loadChat,messageToCard,modelMenu,openPractice,renderChat,sessionAction,setChatModel,startPractice,toBottomButton,topicMenu,topicTitle,updateComposer} from "./chat.js";
+import {Chat,SESSION_AGENTS,agentTitle,attachMenu,chatEvent,chatModel,chatMoreMenu,chatRetry,chatSend,conversationMarkdown,endPractice,escalate,fitComposer,followingChanged,followingHeard,loadChat,messageToCard,modelMenu,openPractice,renderChat,sessionAction,setChatModel,startPractice,tellFollowing,toBottomButton,toConversation,topicMenu,topicTitle,updateComposer} from "./chat.js";
 import {importAction,importChat,importEvent} from "./imports.js";
 import {openAttachment} from "./attach.js";
 import {Files,Organizer,fileAction,fileChange,fileChanged,fileIcon,fileInput,fileKey,fileScreen,flushAll,kernelEvent,openFile,renderOrganizer,runEvent,runFile,showHistory,versionAction} from "./files.js";
@@ -16,9 +16,9 @@ import {Books} from "./books.js";
 import {anchorGo,askedFinished,markAction,marksChanged,marksFollow,openAnnotation,openAsked,openMarks,selectionAnchor} from "./marks.js";
 import {appAction,appAgentEvent,appBuildEvent,appCheck,appLive} from "./apps.js";
 import {skillAction,skillMenu,skillsChanged} from "./skillstore.js";
-import {changeAction,compareAction,compareEvent,restoreVersion,skillChangeEvent,wideWindow} from "./skillchange.js";
+import {changeAction,compareAction,compareEvent,restoreVersion,skillChangeEvent} from "./skillchange.js";
 import {SIDE_SECTIONS,Side,initSideResize,renderActivity,renderSide,setSideOpen,showList,sideChanged,sideInput,sideList,sideOpen,topicFold} from "./side.js";
-import {Settings,cardViewsChanged,homesChanged,journalsChanged,libraryInput,loadJournal,loadMap,loadReview,mapsChanged,renderLibrary,renderSettings,settingsAction,settingsAutosave,settingsChange} from "./panels.js";
+import {Settings,cardViewsChanged,homesChanged,journalsChanged,libraryInput,loadJournal,loadMap,mapsChanged,renderLibrary,renderSettings,settingsAction,settingsAutosave,settingsChange} from "./panels.js";
 import {pickPath,writeClipboard} from "./popups.js";
 /* Boot, the top bar, routing of backend events and clicks, and reporting what is on screen. */
 export const Sel={text:"",timer:null,el:null,anchor:null};
@@ -119,7 +119,7 @@ async function newScratch(kind){
   path=(await rpc("file_create",{folder:"code",name})).path;
  }
  await refreshState();
- openPanel({type:"file",path,scratch:kind!=="notebook"},{then:pid=>setTimeout(()=>focusEditor(Dock.els[pid]),400)});
+ openPanel({type:"file",path,scratch:kind!=="notebook"},{hand:{do:"edit"}});
 }
 /* ---- the command palette -------------------------------------------------------------------------------- */
 function palette(){
@@ -237,11 +237,12 @@ export function screenNote(){
 /* ---- events from the backend ---------------------------------------------------------------------------------- */
 async function onEvent(evt){
  // What every window has open is every window's to know.
- if(evt.type==="held"){if(evt.window!==WINDOW){if(evt.panels.length)Dock.held[evt.window]=evt.panels;else delete Dock.held[evt.window];}return;}
+ if(evt.type==="held"){if(evt.window!==WINDOW){if(evt.panels.length)Dock.held[evt.window]=evt.panels;else delete Dock.held[evt.window];tellFollowing(evt.panels);}return;}
+ if(evt.type==="following")return followingHeard(evt);
  if(["show_panel","panel_gone"].includes(evt.type)){
   if(evt.window!==WINDOW)return;
   if(evt.type==="panel_gone")return letGo(evt.pid);
-  const pid=findPanel(evt.params);return pid?activate(pid):openPanel(evt.params);
+  return openPanel(evt.params,evt.hand?{hand:evt.hand}:{});
  }
  // Opening things and moving panels an AI asked for are done in the window it was asked from; checking apps and
  // annotations are the main window's to do.
@@ -323,7 +324,7 @@ async function onAction(a){
  case "open-agent":return openPanel({type:"chat",agent:a.dataset.agent});
  case "open-map":return openPanel({type:"map",topic:S.data.active_topic||null});
  case "open-journal":return openPanel({type:"journal"});
- case "open-review":{const had=findPanel({type:"review"}),id=openPanel({type:"review"});if(had)loadReview(Dock.els[id]);return;}
+ case "open-review":return openPanel({type:"review"},{hand:{do:"review-again"}});
  case "open-library":return openPanel({type:"library"});
  case "open-marks":return openMarks();
  case "open-asked":return openAsked(null);
@@ -331,7 +332,7 @@ async function onAction(a){
  case "open-noteinfo":return openPanel({type:"noteinfo"});
  case "open-skills":return openPanel({type:"skills"});
  case "open-apps":case "app-open":case "app-reload":case "app-stop":case "app-build":case "app-change":case "app-source":return appAction(kind,a);
- case "open-settings":{const page=a.dataset.page,had=findPanel({type:"settings"}),id=openPanel({type:"settings",...(page?{page}:{})});if(had&&page)renderSettings(Dock.els[id],page);return;}
+ case "open-settings":{const page=a.dataset.page;return openPanel({type:"settings",...(page?{page}:{})},page?{hand:{do:"settings-page",page}}:{});}
  case "open-file":return openFile(a.dataset.path||a.dataset.id,{line:a.dataset.line?Number(a.dataset.line):null,highlight:a.dataset.highlight||null});
  case "open-doc":{const d=(S.data.docs||[]).find(x=>x.id===a.dataset.id);if(d)return openFile(d.path);return toast($t("找不到这个文档，它可能已经被删除"),"error");}
  case "open-dir":Side.open.add(a.dataset.path);return showList("files");
@@ -400,8 +401,7 @@ async function onAction(a){
  case "practice-end":return endPractice(pid);
  case "message-card":return messageToCard(pid,a.dataset.mid);
  case "message-escalate":return escalate(pid,a.dataset.mid);
- case "handoff":{let tutor=followingPanel("tutor");if(!tutor)tutor=openPanel({type:"chat",agent:"tutor"});else activate(tutor);
-  return setTimeout(()=>chatSend(tutor,$t("快答刚把一个问题转交给你了，请接住它。")),300);}
+ case "handoff":return toConversation("tutor",{do:"send",text:$t("快答刚把一个问题转交给你了，请接住它。")});
  case "undo":{await rpc("undo",{id:a.dataset.id});toast($t("已撤销"));await refreshState();refreshChats();return renderOrganizer();}
  case "suggestion":{await rpc("suggestion",{thread:Chat[pid].thread,message:Number(a.dataset.mid),id:a.dataset.sid,decision:a.dataset.decision});return loadChat(pid);}
  case "quiz-answer":{
@@ -411,11 +411,7 @@ async function onAction(a){
   const sent={message:Number(message),block:Number(index),question};
   if(Dock.panels[chatPid]?.agent!=="tutor")return chatSend(chatPid,$t("我的回答：")+answer,{answer:sent,selection:""});
   // The tutor's small questions are checked by the quick-answer side, so the explanation is not interrupted.
-  let side=spaceFlash();
-  if(!side)side=openPanel({type:"chat",agent:"flash"});else if(!Dock.els[side]?.offsetParent)activate(side);
-  for(let i=0;i<60&&!Chat[side]?.data;i++)await new Promise(r=>setTimeout(r,100));
-  if(!Chat[side]?.data)return toast($t("快答还没打开，等一下再交"),"error");
-  await chatSend(side,$t("我的回答：")+answer,{answer:{...sent,thread:src.thread},selection:$t("主会话的小问题：")+shorten(question.replace(/[#*`]/g,""),400)});
+  toConversation("flash",{do:"send",text:$t("我的回答：")+answer,extra:{answer:{...sent,thread:src.thread},selection:$t("主会话的小问题：")+shorten(question.replace(/[#*`]/g,""),400)}});
   src.data.answers={...(src.data.answers||{}),[a.dataset.key]:answer};renderChat(chatPid);
   return;
  }
@@ -446,16 +442,16 @@ async function onAction(a){
  case "theme-color":return themeColorPick(a);
  case "sc-window":case "sc-all-left":case "sc-reset":case "sc-rebase":case "sc-history":case "sc-compare":case "sc-try-q":case "sc-dismiss":case "sc-approve":return changeAction(kind,a);
  case "sc-restore":return restoreVersion(a);
- case "open-change":return wideWindow(openPanel({type:"skillchange",change:a.dataset.change}));
+ case "open-change":return openPanel({type:"skillchange",change:a.dataset.change},{hand:{do:"wide"}});
  case "cmp-stop":case "cmp-window":case "cmp-pick":return compareAction(kind,a);
  case "organizer-dismiss":Organizer.text="";return renderOrganizer();
  case "topic-fold":return topicFold(a.dataset.id);
  case "topic-row":{if(a.dataset.id===(S.data.active_topic||""))return topicFold(a.dataset.id);Side.topicShut.delete(a.dataset.id);}
  // falls through: learning in another topic
- case "topic-focus":{await rpc("focus",{topic:a.dataset.id});setTopicOf(Dock.space,a.dataset.id);await refreshState();followingPanels().forEach(x=>loadChat(x));
-  const tutor=followingPanel("tutor");if(!tutor)openPanel({type:"chat",agent:"tutor"});else activate(tutor);return;}
+ case "topic-focus":{await rpc("focus",{topic:a.dataset.id});setTopicOf(Dock.space,a.dataset.id);await refreshState();followingChanged(Dock.space);
+  return toConversation("tutor");}
  case "topic-delete":{if(!await ask($t("里面的卡片、笔记和对话都会留下，只是不再属于它。主题文件会留在学习库的历史里。"),{title:$t("删除这个主题？"),...{danger:true,ok:$t("删除")}}))return;
-  await rpc("topic_delete",{id:a.dataset.id});const p=a.closest(".panel")?.dataset.pid;if(p)await closePanel(p);await refreshState();return followingPanels().forEach(x=>loadChat(x));}
+  await rpc("topic_delete",{id:a.dataset.id});const p=a.closest(".panel")?.dataset.pid;if(p)await closePanel(p);await refreshState();return followingChanged();}
  case "version-diff":case "version-restore":return versionAction(kind,a);
  case "file-history":return showHistory(pid);
  }
@@ -480,12 +476,7 @@ async function openRef(ref){
 /* ---- selection: ask about anything selected ----------------------------------------------------------------------- */
 export function hidePop(){el("#sel-pop")?.remove();}
 // Hands text to that conversation's input, with where it came from, and waits for the learner's own question.
-export function askAbout(agent,text,anchor){
- let target=followingPanel(agent);
- if(!target)target=openPanel({type:"chat",agent});else activate(target);
- const go=()=>{if(!Chat[target]?.data)return setTimeout(go,150);Chat[target].quote=text;Chat[target].quoteAt=anchor;updateComposer(target);Dock.els[target]?.querySelector(".composer textarea")?.focus();};
- go();
-}
+export function askAbout(agent,text,anchor){return toConversation(agent,{do:"quote",text,anchor:anchor||null});}
 export function showSelPop(rect){
  if(!rect||S.ui.selection_popup===false)return;hidePop();
  const pop=h("<div id=\"sel-pop\">"+(Sel.anchor?"<button data-action=\"mark-add\">"+svg("marker",13)+" "+$t("高亮")+"</button><button data-action=\"mark-note\">"+svg("edit",13)+" "+$t("批注")+"</button>":"")+"<button data-action=\"ask-flash\">"+svg("spark",13)+" "+$t("问快答")+"</button><button data-action=\"ask-tutor\">"+svg("bot",13)+" "+$t("问主会话")+"</button></div>");
@@ -562,7 +553,7 @@ function initInteractions(){
   if(mod&&e.key.toLowerCase()==="o"){e.preventDefault();switcher();return;}
   if(mod&&e.key.toLowerCase()==="s"){e.preventDefault();safe(async()=>{await flushAll();toast($t("已保存"));});return;}
   if(mod&&e.key.toLowerCase()==="n"){e.preventDefault();safe(()=>newScratch("note"));return;}
-  if(mod&&e.key.toLowerCase()==="j"){e.preventDefault();const f=spaceFlash()||openPanel({type:"chat",agent:"flash"});activate(f);setTimeout(()=>Dock.els[f]?.querySelector(".composer textarea")?.focus(),50);return;}
+  if(mod&&e.key.toLowerCase()==="j"){e.preventDefault();toConversation("flash",{do:"focus"});return;}
   if(mod&&e.key.toLowerCase()==="b"){e.preventDefault();setSideOpen(!sideOpen());return;}
   if(mod&&e.shiftKey&&!e.altKey&&/^Digit[1-9]$/.test(e.code)){const sp=visibleSpaces()[Number(e.code.slice(5))-1];if(sp){e.preventDefault();switchSpace(sp.id);}return;}
   if(mod&&!e.altKey&&!e.shiftKey&&/^[1-9]$/.test(e.key)){const k=Object.keys(SIDE_SECTIONS)[Number(e.key)-1];if(k){e.preventDefault();showList(k);}return;}

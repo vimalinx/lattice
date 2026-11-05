@@ -1,5 +1,5 @@
 import {$t,LOCALE,LANG} from "./i18n.js";
-import {Dock,panelType} from "./state.js";
+import {Dock,panelHand,panelType} from "./state.js";
 import {S,all,ask,baseName,button,cardTypeName,el,emptyState,esc,fmtDate,iconButton,rpc,safe,stageColor,stageName,svg,toast,who} from "./core.js";
 import {themeSettings} from "./theme.js";
 import {saveLayout} from "./dock.js";
@@ -60,6 +60,9 @@ export function journalsChanged(){clearTimeout(MapState.jtimer);MapState.jtimer=
 panelType("review",{side:"mine",icon:"refresh",title:()=>$t("回顾"),
  mount(p,node){node.innerHTML='<div class="review"><div class="review-body"></div></div>';loadReview(node);},
  screen(){return {view:$t("回顾到期的卡")};}});
+// Asked for again where it is open already: the review loads again, the settings go to the page asked for.
+panelHand("review-again",(pid,h,fresh)=>fresh?null:loadReview(Dock.els[pid]));
+panelHand("settings-page",(pid,h,fresh)=>fresh?null:renderSettings(Dock.els[pid],h.page));
 export async function loadReview(node){
  const due=await rpc("due");
  const body=node.querySelector(".review-body");

@@ -98,10 +98,17 @@ class WindowsPart:
             self.announce({"type": "held", "window": window, "panels": self.window_held[window]})
         return self.window_held
 
-    def rpc_window_show(self, window, params):
-        """A panel open in another window, asked for again: that window comes to the front, showing it."""
+    def rpc_window_show(self, window, params, hand=None):
+        """A panel open in another window, asked for again: that window comes to the front, showing it, and does there
+        what was handed to the panel (hand: a message to send, or text to ask about)."""
         self.parent().raise_window(str(window or ""))
-        self.announce({"type": "show_panel", "window": str(window or ""), "params": params})
+        self.announce({"type": "show_panel", "window": str(window or ""), "params": params, **({"hand": hand} if isinstance(hand, dict) else {})})
+        return True
+
+    def rpc_following(self, window="", space=None, topic=None, changed=False, keep=True):
+        """Which conversation a working state follows (its topic, the session it opens): changed in one window, or told to
+        a window showing one of the state's conversations, it is heard in every window."""
+        self.announce({"type": "following", "from": str(window or ""), "space": space, "topic": topic, "changed": bool(changed), "keep": bool(keep)})
         return True
 
     def rpc_tab_moved(self, window, pid):

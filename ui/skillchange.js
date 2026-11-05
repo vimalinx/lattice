@@ -1,5 +1,5 @@
 import {$t} from "./i18n.js";
-import {Dock,panelType} from "./state.js";
+import {Dock,panelHand,panelType} from "./state.js";
 import {Modal,all,ask,button,closeModal,dialog,el,emptyState,esc,fmtDate,h,iconButton,modal,modalHead,rpc,safe,shorten,svg,toast,who} from "./core.js";
 import {detach,newId,openPanel,refreshTab,renderDock,saveLayout,stackNode,tidy} from "./dock.js";
 import {CC,CL,CQ,CS,CV,cmHighlight,cmTheme,destroyEditors,editorHost,editorIn,mountEditors} from "./editor.js";
@@ -89,7 +89,7 @@ function changeStat(key){
 export async function changeAction(kind,a){
  const key=a.dataset.pid,c=Changes[key],d=c?.data;if(!d)return;
  const right=c.view?.b,rightText=()=>right?right.state.doc.toString():d.final||d.proposed;
- if(kind==="sc-window")return wideWindow(openPanel({type:"skillchange",change:d.id}));
+ if(kind==="sc-window")return openPanel({type:"skillchange",change:d.id},{hand:{do:"wide"}});
  if(kind==="sc-all-left"){right.dispatch({changes:{from:0,to:right.state.doc.length,insert:d.base}});return right.focus();}
  if(kind==="sc-reset"){if(right.state.doc.toString()!==d.proposed&&!await ask($t("右边你改的会丢掉。"),{title:$t("换回提议的样子？"),ok:$t("换回")}))return;right.dispatch({changes:{from:0,to:right.state.doc.length,insert:d.proposed}});return;}
  if(kind==="sc-rebase"){if(!await ask($t("左边会换成{0}现在的样子，右边不动；对照的就是现在的版本和右边。",(isRules(d)?$t("规则"):$t("技能"))),{title:$t("左边换成现在的？"),ok:$t("换")}))return;d.base=d.current;return renderChange(key);}
@@ -105,6 +105,7 @@ export async function changeAction(kind,a){
  }
 }
 /* Side by side needs room: a window that landed in a narrow place floats, large, over the workspace instead. */
+panelHand("wide",pid=>wideWindow(pid));
 export function wideWindow(pid){
  requestAnimationFrame(()=>{
   const n=Dock.els[pid];if(!n||n.getBoundingClientRect().width>=720||Dock.layout.floats.some(f=>f.stack.tabs.includes(pid)))return;
@@ -118,7 +119,7 @@ export function skillChangeEvent(evt){
  // An agent's proposal shows in its reply; the learner's own (from the store or a skill's history) has no conversation
  // to show in, so it opens in a window. A decision made in one place shows in every other.
  const keys=Object.keys(Changes).filter(k=>changeId(k)===evt.change);
- if(evt.state==="open"&&evt.by==="me"&&!keys.length)return wideWindow(openPanel({type:"skillchange",change:evt.change}));
+ if(evt.state==="open"&&evt.by==="me"&&!keys.length)return openPanel({type:"skillchange",change:evt.change},{hand:{do:"wide"}});
  keys.forEach(k=>{if(Changes[k]?.data&&(Changes[k].data.state==="open"||evt.state==="open"))loadChange(k);});
 }
 /* A skill's history: every committed version of its SKILL.md with the reason; any one can be compared with now and
@@ -148,7 +149,7 @@ async function startCompare(key,d,b,asked=null){
  const meta={compare:r.compare,slug:d.skill,title:d.title,question:r.question,thread:r.thread,thread_title:r.title,agent:r.agent};
  // From a review inside a reply, the comparison shows right under it; from a window, in a window.
  if(key.startsWith("in:"))return inlineCompare(key,meta,true);
- wideWindow(openPanel({type:"skillcompare",...meta},{reuse:false}));
+ openPanel({type:"skillcompare",...meta},{reuse:false,hand:{do:"wide"}});
 }
 function inlineCompare(changeKey,meta,first){
  const key="ic:"+meta.compare,box=Inline.roots[changeKey]?.querySelector(".sc-compares");if(!box)return;
@@ -222,7 +223,7 @@ export async function compareAction(kind,a){
  const key=a.dataset.pid,p=cmpMeta(key);if(!p)return;
  const side=a.dataset.side,c=Compares[p.compare];
  if(kind==="cmp-stop")return rpc("compare_stop",{id:p.compare});
- if(kind==="cmp-window")return wideWindow(openPanel({type:"skillcompare",...p}));
+ if(kind==="cmp-window")return openPanel({type:"skillcompare",...p},{hand:{do:"wide"}});
  if(kind==="cmp-pick"){
   await rpc("compare_pick",{id:p.compare,side,content:c?.[side]?.text??p[side]??""});
   p.picked=side;if(!key.startsWith("ic:"))saveLayout();renderCompare(key);

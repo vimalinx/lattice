@@ -1,5 +1,5 @@
 import {$t} from "./i18n.js";
-import {Dock,panelType} from "./state.js";
+import {Dock,panelHand,panelType} from "./state.js";
 import {all,ask,askText,button,dialog,el,emptyState,esc,fmtDate,hydrateVault,iconButton,markdown,rpc,safe,shorten,svg,toast,who} from "./core.js";
 import {activate,findPanel,onePanel,openPanel,panelTitle,saveLayout,sideOf,splitBeside,stackNode,stackOf} from "./dock.js";
 import {CV,setEditorMarks} from "./editor.js";
@@ -216,30 +216,33 @@ export function askedFinished(thread){
  Object.keys(Dock.panels).filter(pid=>Dock.panels[pid].type==="asked").forEach(renderAsked);
  const pop=el(".asked-pop");if(pop)closeMenus();
 }
+/* In a conversation, the message a mark is in: the marked words flash (anchor), or, to go on asking there, the message
+   comes to the top and the input takes the typing. In a web page, the marked passage. */
+panelHand("message",(pid,h)=>{
+ const go=(n=0)=>{
+  const box=Dock.els[pid]?.querySelector('.msg[data-mid="'+h.message+'"]');
+  if(!box)return n<40&&setTimeout(()=>go(n+1),100);
+  if(!h.anchor){if(Chat[pid])Chat[pid].bottom=false;box.scrollIntoView({block:"start"});Dock.els[pid].querySelector(".composer textarea")?.focus();return;}
+  const root=box.querySelector(".msg-body")||box.querySelector(".bubble"),r=root&&domLocate(root,h.anchor);
+  if(r)markFlash(r);else box.scrollIntoView({block:"center"});
+ };
+ go();
+});
+panelHand("passage",(pid,h)=>{
+ const go=(n=0)=>{
+  const root=Dock.els[pid]?.querySelector(".reader-page");
+  if(!root)return n<80&&setTimeout(()=>go(n+1),100);
+  const r=domLocate(root,h.anchor);if(r)markFlash(r);else toast($t("这一页上找不到那段话了"));
+ };
+ go();
+});
 export async function openAnnotation(id){const m=await rpc("annotation_get",{id});return anchorGo(m.source,m.anchor);}
 /* Back to where something was marked or quoted, wherever that is now. */
 export async function anchorGo(source,a){
  const pl=await rpc("anchor_place",{source,message:a.at?.message||null});
  if(pl.gone)return toast($t("它已经不在了"),"error");
- if(pl.kind==="thread"){
-  const pid=openPanel({type:"chat",agent:pl.agent,thread:pl.thread});
-  const go=(n=0)=>{
-   const box=Dock.els[pid]?.querySelector('.msg[data-mid="'+a.at?.message+'"]');
-   if(!box)return n<40&&setTimeout(()=>go(n+1),100);
-   const root=box.querySelector(".msg-body")||box.querySelector(".bubble"),r=root&&domLocate(root,a);
-   if(r)markFlash(r);else box.scrollIntoView({block:"center"});
-  };
-  return go();
- }
- if(pl.kind==="web"){
-  const pid=openWeb(pl.url);
-  const go=(n=0)=>{
-   const root=Dock.els[pid]?.querySelector(".reader-page");
-   if(!root)return n<80&&setTimeout(()=>go(n+1),100);
-   const r=domLocate(root,a);if(r)markFlash(r);else toast($t("这一页上找不到那段话了"));
-  };
-  return go();
- }
+ if(pl.kind==="thread")return openPanel({type:"chat",agent:pl.agent,thread:pl.thread},{hand:{do:"message",message:a.at?.message,anchor:a}});
+ if(pl.kind==="web")return openWeb(pl.url,null,false,{do:"passage",anchor:a});
  return openFile(pl.path,{anchor:a});
 }
 /* In a file's window: the rendered text when that is what shows, else the editor that has the words. */
@@ -260,13 +263,8 @@ export async function markAction(kind,a){
  switch(kind){
  case "mark-side":return openAsked(id);
  case "mark-thread":{
-  const q=await rpc("annotation_asked",{id}),pid=openPanel({type:"chat",agent:q.agent,thread:q.thread});
-  const go=(n=0)=>{
-   const box=Dock.els[pid]?.querySelector('.msg[data-mid="'+q.message+'"]');
-   if(!box)return n<40&&setTimeout(()=>go(n+1),100);
-   if(Chat[pid])Chat[pid].bottom=false;box.scrollIntoView({block:"start"});Dock.els[pid].querySelector(".composer textarea")?.focus();
-  };
-  return go();
+  const q=await rpc("annotation_asked",{id});
+  return openPanel({type:"chat",agent:q.agent,thread:q.thread},{hand:{do:"message",message:q.message}});
  }
  case "mark-deeper":{
   // The question comes along with what the quick answer said, for the main conversation to take further.

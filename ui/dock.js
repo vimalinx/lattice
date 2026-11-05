@@ -1,5 +1,5 @@
 import {$t} from "./i18n.js";
-import {Dock} from "./state.js";
+import {Dock,Hands} from "./state.js";
 import {S,WINDOW,all,button,el,emptyState,esc,h,rpc,safe,scheduleMermaid,svg,toast} from "./core.js";
 import {themeOp} from "./theme.js";
 import {SPACE_ICONS,createSpace,currentSpace,findSpace,inSpace,layoutFromSpec,seedSpaces,spaceOf,spaceSpec,switchSpace,visibleSpaces} from "./spaces.js";
@@ -21,6 +21,8 @@ function heldElsewhere(params){
  for(const [w,list] of Object.entries(Dock.held))if(w!==WINDOW&&list.some(p=>panelKey(p)===key))return w;
  return null;
 }
+// fresh: the panel has just been made, and loads what it shows by itself.
+export function runHand(pid,hand,fresh=false){const fn=Hands[hand?.do];if(fn)safe(()=>fn(pid,hand,fresh));}
 // This window's panels, told to the others (after a change settles).
 let heldTimer=null;
 export function reportHeld(){clearTimeout(heldTimer);heldTimer=setTimeout(()=>safe(()=>rpc("window_held",{window:WINDOW,panels:Object.values(Dock.panels)})),300);}
@@ -116,8 +118,6 @@ export function bindSpace(params,space=Building||Dock.space){
  return params?.type==="chat"&&BY_STATE.has(params.agent)&&!params.thread?{...params,space}:params;
 }
 function spaceFollow(agent){let found=null;eachStack(s=>{if(!found)found=s.tabs.find(pid=>Dock.panels[pid]?.type==="chat"&&Dock.panels[pid].agent===agent&&!Dock.panels[pid].thread)||null;});return found;}
-// This state's quick answer, if it has one open.
-export function spaceFlash(){return spaceFollow("flash");}
 // The panel an AI's conversation that follows along is shown in: the main conversation and the quick answer are this
 // state's own, never fetched from another state.
 export function followingPanel(agent){
@@ -147,23 +147,25 @@ export function targetStack(side){
  Dock.layout.root={t:"split",id:newId("n"),dir:"h",sizes:[.5,.5],kids:side==="ai"?[s,root]:[root,s]};
  return s;
 }
+/* The panel's id, or null when another window has it open: that window comes to the front and is handed opts.hand, so
+   whatever is to be done to the panel is said in the hand, not done here to the id. */
 export function openPanel(params,opts={}){
  if(params.type==="file"&&isBook(params.path))params={type:"book",path:params.path};
  if(!params.space)params=bindSpace(params);
  let pid=opts.reuse===false?null:findPanel(params);
- if(!pid&&opts.reuse!==false){const there=heldElsewhere(params);if(there!=null){safe(()=>rpc("window_show",{window:there,params}));return null;}}
+ if(!pid&&opts.reuse!==false){const there=heldElsewhere(params);if(there!=null){safe(()=>rpc("window_show",{window:there,params,...(opts.hand?{hand:opts.hand}:{})}));return null;}}
  // Already a tab behind a conversation that is on show: bring it out to a free group rather than hide the conversation.
  if(pid&&params.type!=="chat"){const s=stackOf(pid);if(s&&s.active!==pid&&covers(s)){detach(pid);tidy();}}
  // Already open, maybe in another workspace: show the same panel here too (moved into the group asked for, if any).
  if(pid&&Dock.into&&Dock.into.until>Date.now()&&findStack(Dock.into.stack)&&!findStack(Dock.into.stack).tabs.includes(pid)){detach(pid);tidy();}
- if(pid){activate(pid);if(opts.then)opts.then(pid);return pid;}
+ if(pid){activate(pid);if(opts.hand)runHand(pid,opts.hand);return pid;}
  pid=newId("p");Dock.panels[pid]=params;
  const side=Dock.types[params.type]?.side||"mine";
  const stack=opts.stack?findStack(opts.stack)||targetStack(side):targetStack(side);
  stack.tabs.push(pid);
  if(opts.activate!==false){stack.active=pid;Dock.focus=pid;}
  mountPanel(pid);renderDock();saveLayout();
- if(opts.then)opts.then(pid);
+ if(opts.hand)runHand(pid,opts.hand,true);
  return pid;
 }
 export function activate(pid){

@@ -1,8 +1,8 @@
 import {$t} from "./i18n.js";
-import {Dock,panelType} from "./state.js";
+import {Dock,panelHand,panelType} from "./state.js";
 import {all,ask,askText,button,closeModal,emptyState,esc,iconButton,markdown,modal,modalHead,rpc,safe,svg,toast} from "./core.js";
 import {openPanel,saveLayout} from "./dock.js";
-import {Chat,updateComposer} from "./chat.js";
+import {Chat,chatReady,updateComposer} from "./chat.js";
 import {openFile} from "./files.js";
 import {skillHistory} from "./skillchange.js";
 import {renderSide,sideGroup,sideList,sideRow} from "./side.js";
@@ -68,6 +68,7 @@ async function skillDetail(slug){
    button(svg("history",13)+" "+$t("历史"),"skill-history",'data-slug="'+esc(slug)+'"',"ghost")+button($t("打开文件"),"skill-open",'data-slug="'+esc(slug)+'"',"ghost"))+"</div></div>","large");
 }
 // Pick a skill for the next message in this conversation (or the main conversation, from the store).
+panelHand("skill",async(pid,h)=>{if(await chatReady(pid))useSkill(pid,h.skill);});
 function useSkill(pid,s){
  const st=Chat[pid];if(!st)return;
  st.skill={slug:s.slug,title:s.title};updateComposer(pid);
@@ -95,8 +96,8 @@ export async function skillAction(kind,a){
    // A trial runs in a conversation of its own, so nothing of it lands in the main conversation.
    closeModal();const s=(await skillList()).find(x=>x.slug===slug);if(!s)return;
    const r=await rpc("skill_trial",{slug,agent:s.agents.includes("tutor")?"tutor":s.agents[0]});
-   const target=openPanel({type:"chat",agent:r.agent,thread:r.thread});
-   const go=()=>{if(!Chat[target]?.data)return setTimeout(go,150);useSkill(target,s);toast($t("这是试用「{0}」的单独会话，不会进主会话",s.title));};return go();}
+   openPanel({type:"chat",agent:r.agent,thread:r.thread},{hand:{do:"skill",skill:s}});
+   return toast($t("这是试用「{0}」的单独会话，不会进主会话",s.title));}
   case "skill-new":{const title=await askText($t("新技能叫什么"),"",{hint:$t("比如「讲公式的三步法」；建好后会打开它的 SKILL.md，照模板写做法"),ok:$t("新建")});if(!title)return;
    const r=await rpc("skill_create",{title});await list();skillsChanged();return openFile(r.path);}
   case "skill-import":{const folder=await pickPath({mode:"dir",title:$t("导入一个技能文件夹"),ok:$t("导入"),hint:$t("文件夹里要有 SKILL.md；Claude 的技能文件夹也能直接导入")});if(!folder)return;const r=await rpc("skill_import",{folder});if(!r)return;await list();skillsChanged();toast($t("导入了；Claude 的技能文件夹也能直接导入"));return openFile(r.path);}

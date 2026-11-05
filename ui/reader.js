@@ -64,11 +64,11 @@ function readerRender(pid){
 }
 /* A web link: the reader, unless the learner asks for the browser (Ctrl or the middle button). Next to a reader it
    reuses that window and keeps a way back; elsewhere it opens one beside what is on screen. */
-export function openWeb(url,from=null,browser=false){
+export function openWeb(url,from=null,browser=false,hand=null){
  if(browser)return safe(()=>rpc("open_url",{url}));
  const here=from&&Dock.panels[from]?.type==="web"?from:null;
  if(here){const p=Dock.panels[here];if(p.url===url)return;p.back=[...(p.back||[]),p.url].slice(-30);p.url=url;Reader[here].page=null;saveLayout();refreshTab(here);return readerLoad(here);}
- return openPanel({type:"web",url});
+ return openPanel({type:"web",url},hand?{hand}:{});
 }
 export function readerAction(kind,a,pid){
  const p=Dock.panels[pid];if(!p)return;
