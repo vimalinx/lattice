@@ -21,8 +21,9 @@ function heldElsewhere(params){
  for(const [w,list] of Object.entries(Dock.held))if(w!==WINDOW&&list.some(p=>panelKey(p)===key))return w;
  return null;
 }
-// fresh: the panel has just been made, and loads what it shows by itself.
-export function runHand(pid,hand,fresh=false){const fn=Hands[hand?.do];if(fn)safe(()=>fn(pid,hand,fresh));}
+/* fresh: the panel has just been made, and loads what it shows by itself. A hand is done in the frame after the panel
+   shows, once it has been scrolled back to where it was (renderDock), so a hand that scrolls it is not undone. */
+export function runHand(pid,hand,fresh=false){const fn=Hands[hand?.do];if(fn)requestAnimationFrame(()=>safe(()=>fn(pid,hand,fresh)));}
 // This window's panels, told to the others (after a change settles).
 let heldTimer=null;
 export function reportHeld(){clearTimeout(heldTimer);heldTimer=setTimeout(()=>safe(()=>rpc("window_held",{window:WINDOW,panels:Object.values(Dock.panels)})),300);}
