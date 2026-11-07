@@ -570,6 +570,42 @@ function rainbowBrackets(){
  },{decorations:v=>v.decorations});
 }
 
+/* ---- Chinese punctuation in code: typed with a Chinese input method, it looks like the English one, and the language
+   takes it for an error (Python: invalid character '，'), which also throws off the highlighting and the indentation of
+   everything after it. Outside strings and comments each one is underlined; the mouse on it says what it should be and
+   puts that in, there or everywhere in the file. */
+const WIDE_PUNCT={"，":",","。":".","；":";","：":":","（":"(","）":")","【":"[","】":"]","｛":"{","｝":"}","“":"\"","”":"\"","‘":"'","’":"'",
+ "！":"!","？":"?","、":",","《":"<","》":">","＝":"=","＋":"+","－":"-","＊":"*","／":"/","％":"%","＃":"#","＜":"<","＞":">","｜":"|","＆":"&","～":"~","　":" "};
+const WIDE_RE=new RegExp("["+Object.keys(WIDE_PUNCT).join("")+"]","g"),WIDE_MARK=CV.Decoration.mark({class:"cm-widepunct"});
+function inText(tree,pos){for(let n=tree.resolveInner(pos,1);n;n=n.parent)if(/string|comment|char|regex/i.test(n.name))return true;return false;}
+function widePunct(state,from=0,to=state.doc.length){
+ const tree=CL.syntaxTree(state),text=state.sliceDoc(from,to),out=[];WIDE_RE.lastIndex=0;
+ for(let m;(m=WIDE_RE.exec(text));)if(!inText(tree,from+m.index))out.push(from+m.index);
+ return out;
+}
+function widePunctMarks(){
+ const build=view=>{const out=[];for(const {from,to} of view.visibleRanges)for(const at of widePunct(view.state,from,to))out.push(WIDE_MARK.range(at,at+1));return CV.Decoration.set(out,true);};
+ return [CV.ViewPlugin.fromClass(class{
+  constructor(view){this.decorations=build(view);}
+  update(u){if(u.docChanged||u.viewportChanged||CL.syntaxTree(u.startState)!==CL.syntaxTree(u.state))this.decorations=build(u.view);}
+ },{decorations:v=>v.decorations}),CV.hoverTooltip((view,pos,side)=>{
+  const at=side<0?pos-1:pos,ch=view.state.sliceDoc(at,at+1);
+  if(!WIDE_PUNCT[ch]||inText(CL.syntaxTree(view.state),at))return null;
+  return {pos:at,end:at+1,above:true,create(){
+   const dom=document.createElement("div"),want=WIDE_PUNCT[ch],shown=want===" "?$t("空格"):want,every=widePunct(view.state);
+   dom.className="cm-widepunct-tip";
+   dom.innerHTML='<p>'+esc($t("这是中文标点「{0}」，代码只认英文的「{1}」",ch==="　"?$t("全角空格"):ch,shown))+'</p><div>'+
+    '<button class="btn primary xs" data-fix="one">'+esc($t("换成「{0}」",shown))+'</button>'+(every.length>1?'<button class="btn ghost xs" data-fix="all">'+esc($t("全部换掉（{0} 处）",every.length))+'</button>':"")+'</div>';
+   dom.addEventListener("mousedown",e=>{
+    const b=e.target.closest("[data-fix]");if(!b)return;e.preventDefault();
+    const list=b.dataset.fix==="all"?widePunct(view.state):[at];
+    view.dispatch({changes:list.map(p=>({from:p,to:p+1,insert:WIDE_PUNCT[view.state.sliceDoc(p,p+1)]})),effects:CV.closeHoverTooltips,userEvent:"input"});view.focus();
+   });
+   return {dom};
+  }};
+ },{hoverTime:250})];
+}
+
 /* ---- typing help --------------------------------------------------------------------------------------------------- */
 // Tab steps over a closing bracket or quote right after the cursor; otherwise it indents.
 function tabOut(view){
@@ -788,7 +824,7 @@ function createEditor(host,text,opts){
   if(opts.live)ext.push(livePreview(opts),tablePreview(opts),mathPreview(),propsPreview());
  }else{
   if(opts.gutters!==false)ext.push(CV.lineNumbers(),CL.foldGutter(),CV.highlightActiveLineGutter());
-  ext.push(CV.highlightActiveLine(),CA.autocompletion({override:[isPython(opts)?pythonCompletion(opts,"e"+host.dataset.cm):ownCompletion],filterStrict:true,icons:false}),rainbowBrackets(),lang.of([]));
+  ext.push(CV.highlightActiveLine(),widePunctMarks(),CA.autocompletion({override:[isPython(opts)?pythonCompletion(opts,"e"+host.dataset.cm):ownCompletion],filterStrict:true,icons:false}),rainbowBrackets(),lang.of([]));
   if(opts.wrap)ext.push(CV.EditorView.lineWrapping);
  }
  const view=new CV.EditorView({state:CS.EditorState.create({doc:text,extensions:ext}),parent:host});

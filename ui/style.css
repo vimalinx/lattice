@@ -817,6 +817,8 @@ details.api summary span{font-size:11.5px}
 .card-view .cm-host.editor .cm-content,.topic-view .cm-host.editor .cm-content{max-width:none;margin:0;padding:10px 0 24px!important}
 .cm-rb0,.cm-rb0 *{color:var(--rb0)!important}.cm-rb1,.cm-rb1 *{color:var(--rb1)!important}.cm-rb2,.cm-rb2 *{color:var(--rb2)!important}
 .cm-rb-bad,.cm-rb-bad *{color:var(--red)!important;text-decoration:underline wavy var(--red)}
+.cm-widepunct{text-decoration:underline wavy var(--red);text-decoration-skip-ink:none;text-underline-offset:3px;background:color-mix(in srgb,var(--red) 14%,transparent);border-radius:2px}
+.cm-widepunct-tip{padding:8px 10px;max-width:320px;font-size:12.5px}.cm-widepunct-tip p{margin:0 0 7px}.cm-widepunct-tip div{display:flex;gap:6px}
 .act.act-new{margin-top:4px;color:var(--subtle);border:1px dashed var(--line)}
 .act.act-new:hover{border-color:var(--accent);color:var(--accent)}
 /* ---- popups: menus, windows, questions, notices and the editor's own, in one look --------------------------- */

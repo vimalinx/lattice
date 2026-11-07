@@ -1482,5 +1482,10 @@ export default {
  "属性": "attribute",
  "拖动调高度，双击放大或还原": "Drag to resize; double-click to maximize or restore",
  "还原": "Restore",
- "放大到整个面板": "Fill the panel"
+ "放大到整个面板": "Fill the panel",
+ "空格": "a space",
+ "全角空格": "full-width space",
+ "这是中文标点「{0}」，代码只认英文的「{1}」": "This is the Chinese punctuation mark “{0}”; code only takes the English “{1}”",
+ "换成「{0}」": "Change to “{0}”",
+ "全部换掉（{0} 处）": "Change them all ({0})"
 };
