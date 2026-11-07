@@ -978,6 +978,12 @@ select{appearance:none;padding-right:28px;background-image:linear-gradient(45deg
 .settings-nav{grid-template-rows:auto}
 .nav-save{margin-top:12px;justify-self:start;font-size:11px;padding:4px 9px;white-space:normal;line-height:1.4}
 .nav-version{justify-self:start;padding:6px 9px 2px;font-size:11px;color:var(--subtle);user-select:text}
+.settings-nav .nav-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);margin-left:auto;flex:none}
+.update-box{display:grid;gap:10px;padding:12px 14px;border:1px solid var(--line-soft);border-radius:10px;margin:4px 0 14px}
+.update-state{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.update-state .bad,.update-box .bad{color:var(--red)}
+.update-progress{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.update-notes{margin:0 0 14px}.update-notes summary{cursor:pointer;color:var(--muted);font-size:12.5px;margin-bottom:6px}
+.update-notes .markdown{max-height:360px;overflow:auto;padding:4px 14px;border-left:2px solid var(--line-soft)}
 @container (max-width:620px){.nav-save,.nav-version{display:none}}
 /* themes */
 .theme-list{display:grid;gap:4px;margin-bottom:10px}

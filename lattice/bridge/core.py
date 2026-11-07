@@ -34,9 +34,10 @@ from .turns import TurnsPart
 from .background import BackgroundPart
 from .apps import AppsPart
 from .settings import SettingsPart
+from .update import UpdatePart
 
 
-class Bridge(VaultPart, FilesPart, SkillsPart, ImportedPart, MarksPart, WindowsPart, NotebooksPart, RunningPart, TurnsPart, BackgroundPart, AppsPart, SettingsPart, QObject):
+class Bridge(VaultPart, FilesPart, SkillsPart, ImportedPart, MarksPart, WindowsPart, NotebooksPart, RunningPart, TurnsPart, BackgroundPart, AppsPart, SettingsPart, UpdatePart, QObject):
     event = Signal(str)
     _done = Signal(object, object)
     _progress = Signal(object)   # news from work off the GUI thread (how far an install is), announced on it
@@ -91,6 +92,7 @@ class Bridge(VaultPart, FilesPart, SkillsPart, ImportedPart, MarksPart, WindowsP
                                  if isinstance(w, dict) and w.get("params") for back in panels_back(w)]
         self.lattice.set_setting("separate_windows", {})
         self.tests, self._retired = [], []
+        self._update_init()
         self.ui_waiters = {}
         self.closing = False
         self.history_warned = -60.0

@@ -165,6 +165,8 @@ DEFAULTS = {
     "vault": "",
     # Seconds the learner pauses before their edits are committed.
     "commit_idle": 30,
+    # Whether Lattice looks on GitHub once a day for a newer release.
+    "update_check": True,
     # Everything about the interface: appearance, the sidebar. The working states are files in the vault (states.py).
     # zoom: each kind of panel's default size ("chat:tutor", "file", ...); a window can still set its own.
     # templates: the working states the learner saved to start new ones from; side: the left column as it was last left,

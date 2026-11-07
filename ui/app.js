@@ -18,7 +18,7 @@ import {appAction,appAgentEvent,appBuildEvent,appCheck,appLive} from "./apps.js"
 import {skillAction,skillMenu,skillsChanged} from "./skillstore.js";
 import {changeAction,compareAction,compareEvent,restoreVersion,skillChangeEvent} from "./skillchange.js";
 import {SIDE_SECTIONS,Side,initSideResize,renderActivity,renderSide,setSideOpen,showList,sideChanged,sideInput,sideList,sideOpen,topicFold} from "./side.js";
-import {Settings,cardViewsChanged,homesChanged,journalsChanged,libraryInput,loadJournal,loadMap,mapsChanged,renderLibrary,renderSettings,settingsAction,settingsAutosave,settingsChange} from "./panels.js";
+import {Settings,cardViewsChanged,homesChanged,journalsChanged,libraryInput,loadJournal,loadMap,mapsChanged,renderLibrary,renderSettings,settingsAction,settingsAutosave,settingsChange,updateEvent} from "./panels.js";
 import {pickPath,writeClipboard} from "./popups.js";
 /* Boot, the top bar, routing of backend events and clicks, and reporting what is on screen. */
 export const Sel={text:"",timer:null,el:null,anchor:null};
@@ -271,6 +271,8 @@ async function onEvent(evt){
  if(evt.type==="run")return runEvent(evt);
  if(evt.type==="kernel"){kernelEvent(evt);if(["run_finished","batch_finished"].includes(evt.kind))journalsChanged();return;}
  if(evt.type==="notice"){toast(evt.message);return;}
+ // A new version found by the daily check is told once, in the main window.
+ if(evt.type==="update"||evt.type==="update_progress"){if(evt.tell&&!WINDOW)toast($t("Lattice {0} 可以更新了：在设置的「更新」里下载",evt.update.latest.version));return updateEvent(evt);}
  if(evt.type==="web")return readerEvent(evt);
  if(evt.type==="ui"){const result=await runUiOps(evt.ops,evt.thread);return rpc("ui_done",{request:evt.request,result});}
  if(evt.type==="changed"){fileChanged(evt);embedsChanged(evt.paths);if(evt.paths.some(p=>p.startsWith("skills/")))skillsChanged();sideChanged(evt.paths);mapsChanged();journalsChanged();homesChanged();if(evt.paths.some(p=>p.startsWith("annotations/")))marksChanged();if(evt.external||evt.paths.some(p=>/^(topics|cards|lessons|notes|insights|notebooks)\//.test(p)))refreshState();return;}

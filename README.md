@@ -155,6 +155,8 @@ python3 run.py
 2. 回到对话，想学什么直接说。
 3. 学习库默认在 `~/Lattice`，设置里可以换；想先看看效果，`python3 tests/seed_demo.py --launch` 会在 `/tmp/lattice-demo` 放一份演示数据并打开。
 
+更新：Lattice 每天到 GitHub 看一次有没有新版本（设置的「更新」里可以关掉，也可以随时点「检查更新」），有了会提示一次。下载和安装都等你点：Windows 安装版关闭后静默装上新版本再自动打开；Windows zip 版和 Linux 版把新版本解开在程序文件夹旁边，关闭后替换旧文件夹再打开；macOS 下载并打开新的安装盘，拖进「应用程序」替换；从源码运行的用 `git pull`。学习库和设置不受影响。
+
 需要 Python 3.11+、PySide6（含 QtWebEngine）、jupyter_client、ipykernel、httpx、PyYAML、numpy、matplotlib；运行代码和 AI 沙箱另需 [`uv`](https://github.com/astral-sh/uv) 与 `bubblewrap`。编译型语言按需安装（gcc、rustc、go、node……），缺什么运行时会直接告诉你。目前主要在 Arch Linux / Wayland 上开发和测试。
 
 ### Windows

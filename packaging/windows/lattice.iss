@@ -44,3 +44,11 @@ Name: "{autodesktop}\Lattice"; Filename: "{app}\Lattice.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\Lattice.exe"; Description: "{cm:LaunchProgram,Lattice}"; Flags: nowait postinstall skipifsilent
+; An update Lattice started itself (setup.exe /SILENT /update=1, once Lattice has closed): it opens again when done.
+Filename: "{app}\Lattice.exe"; Flags: nowait; Check: Updating
+
+[Code]
+function Updating: Boolean;
+begin
+  Result := ExpandConstant('{param:update|0}') = '1';
+end;

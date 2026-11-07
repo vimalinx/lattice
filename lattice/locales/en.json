@@ -615,5 +615,19 @@
  "，第 {0} 条消息": ", message {0}",
  "，记成薄弱点": ", noted as a weak spot",
  "：在路线第 {0} 站前补了 {1} 站，接下来先讲「{2}」": ": added {1} stops before stop {0} of the route; next comes “{2}”",
- "；": "; "
+ "；": "; ",
+ "从源码运行的 Lattice 用 git pull 更新": "A Lattice run from source updates with git pull",
+ "这个版本没有适合这台电脑的安装包，可以到发布页看看": "This release has no package for this computer; have a look at the release page",
+ "Lattice 所在的文件夹 {0} 不能写，请到发布页下载新版替换": "Lattice's folder {0} cannot be written to; download the new version from the release page and replace it",
+ "连不上 GitHub：{0}": "Could not reach GitHub: {0}",
+ "GitHub 暂时不让查了（请求太频繁），过一会儿再试": "GitHub is refusing checks for now (too many requests); try again in a while",
+ "GitHub 回答了 {0}": "GitHub answered {0}",
+ "下载已取消": "Download cancelled",
+ "下载失败：{0}": "Download failed: {0}",
+ "下载的文件和发布页上的对不上，没有用它": "The downloaded file does not match the release, so it was not used",
+ "解开安装包失败：{0}": "Could not unpack the package: {0}",
+ "安装包里没有 Lattice 程序": "The package has no Lattice program in it",
+ "这种安装方式不能自己更新": "Lattice installed this way cannot update itself",
+ "已经是最新版本": "Already up to date",
+ "新版本还没下载好": "The new version has not finished downloading"
 }

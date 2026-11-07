@@ -235,6 +235,7 @@ def main():
             conn=server.nextPendingConnection()
             if conn:conn.readyRead.connect(lambda c=conn:(c.readAll(),window.showNormal(),window.raise_(),window.activateWindow()))
         server.newConnection.connect(_raise)
+        window.bridge.start_update_checks()
     window.show()
     sys.exit(app.exec())
 

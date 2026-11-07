@@ -1,6 +1,6 @@
 import {$t,LOCALE,LANG} from "./i18n.js";
 import {Dock,panelHand,panelType} from "./state.js";
-import {S,all,ask,baseName,button,cardTypeName,el,emptyState,esc,fmtDate,iconButton,rpc,safe,stageColor,stageName,svg,toast,who} from "./core.js";
+import {S,all,ask,baseName,button,cardTypeName,el,emptyState,esc,fmtDate,iconButton,markdown,rpc,safe,stageColor,stageName,svg,toast,who} from "./core.js";
 import {themeSettings} from "./theme.js";
 import {saveLayout} from "./dock.js";
 import {spaceList} from "./spaces.js";
@@ -165,18 +165,22 @@ export function homesChanged(){clearTimeout(MapState.htimer);MapState.htimer=set
 
 /* ---- settings: everything is changeable here ------------------------------------------------------------- */
 const SETTINGS_PAGES=[["look",$t("外观与交互"),"sun"],["layout",$t("工作状态与左栏"),"layout"],["agents",$t("四个 AI"),"bot"],["apis",$t("模型连接"),"link"],["web",$t("联网"),"search"],
- ["usage",$t("用量"),"bars"],["run",$t("运行与环境"),"terminal"],["vault",$t("学习库"),"folder"],["rules",$t("学习库的规矩"),"shield"],["keys",$t("快捷键"),"cmd"]];
+ ["usage",$t("用量"),"bars"],["run",$t("运行与环境"),"terminal"],["vault",$t("学习库"),"folder"],["rules",$t("学习库的规矩"),"shield"],["keys",$t("快捷键"),"cmd"],["update",$t("更新"),"download"]];
 panelType("settings",{side:"mine",icon:"sliders",title:()=>$t("设置"),
  mount(p,node,pid){node.innerHTML='<div class="settings-shell"><nav class="settings-nav"></nav><div class="settings" data-keep-scroll></div></div>';renderSettings(node,p.page||"look");},
  screen(p){return {view:$t("设置"),page:p.page||"look"};}});
 export async function renderSettings(node,page){
  const p=Dock.panels[node.dataset.pid];if(p)p.page=page;
- node.querySelector(".settings-nav").innerHTML=SETTINGS_PAGES.map(([k,t,i])=>'<button class="'+(k===page?"on":"")+'" data-action="settings-page" data-page="'+k+'" title="'+esc(t)+'">'+svg(i,14)+'<span>'+esc(t)+'</span></button>').join("")+"<span class=\"save-state nav-save\">"+svg("check",13)+" "+$t("改了就自动保存")+"</span>"+(S.version?'<span class="nav-version">Lattice '+esc(S.version)+'</span>':"");
+ renderSettingsNav(node,page);
  const box=node.querySelector(".settings");box.dataset.page=page;
  box.innerHTML='<div class="loading">…</div>';
  S.config=await rpc("settings");
  box.innerHTML=await SETTINGS_RENDER[page](S.config,node);
  if(page==="apis")fitProviders(box);
+}
+/* The pages, what saving is doing, and this version (a dot on 「更新」 when a newer one is out). */
+function renderSettingsNav(node,page){
+ node.querySelector(".settings-nav").innerHTML=SETTINGS_PAGES.map(([k,t,i])=>'<button class="'+(k===page?"on":"")+'" data-action="settings-page" data-page="'+k+'" title="'+esc(t)+'">'+svg(i,14)+'<span>'+esc(t)+'</span>'+(k==="update"&&S.update?.newer?'<i class="nav-dot"></i>':"")+'</button>').join("")+"<span class=\"save-state nav-save\">"+svg("check",13)+" "+$t("改了就自动保存")+"</span>"+(S.version?'<span class="nav-version">Lattice '+esc(S.version)+'</span>':"");
 }
 /* The provider list and its details scroll on their own; they are as tall as the room left in the settings window
    (not the screen), so in a small or floating window their ends are not hidden below its edge. */
@@ -250,11 +254,48 @@ const SETTINGS_RENDER={
   const r=await rpc("rules");
   return "<h3>"+$t("学习库的规矩")+"</h3><p class=\"muted\">"+$t("学习库根目录的 AGENTS.md：目录约定、属性格式、谁能改什么。每个 AI 每一轮都先读它。")+"</p><textarea rows=\"26\" data-rules>"+esc(r.text)+"</textarea><div class=\"inline\">"+button($t("恢复成默认的规矩"),"rules-reset","","ghost sm")+button($t("在编辑器里打开"),"open-file",'data-path="AGENTS.md"',"ghost sm")+"</div>";
  },
+ async update(){
+  const u=S.update=await rpc("update_state"),how={"windows-setup":$t("用安装包更新：Lattice 关闭后装上新版本，装好自动重新打开。"),
+   "windows-zip":$t("新版本先解开在 Lattice 文件夹旁边，Lattice 关闭后替换旧的文件夹，再重新打开。"),"linux":$t("新版本先解开在 Lattice 文件夹旁边，Lattice 关闭后替换旧的文件夹，再重新打开。"),
+   "macos":$t("下载新的安装盘并打开它：退出 Lattice 后，把里面的 Lattice 拖进「应用程序」替换旧的。"),"source":$t("这个 Lattice 是从源码运行的：在仓库里 git pull 就是更新。")}[u.how]||"";
+  const notes=u.newer&&u.latest.notes?"<details class=\"update-notes\" open><summary>"+$t("{0} 的说明",esc(u.latest.name||"v"+u.latest.version))+"</summary><div class=\"markdown\">"+markdown(u.latest.notes)+"</div></details>":"";
+  return "<h3>"+$t("更新")+"</h3><p class=\"muted\">"+esc(how)+" "+$t("学习库和设置都不受影响。")+"</p><div class=\"update-box\" data-version=\""+esc(u.newer?u.latest.version:"")+"\">"+updateBox(u)+"</div>"+notes+
+   "<label class=\"check\"><input type=\"checkbox\" data-cfg=\"update_check\""+(u.auto?" checked":"")+"/> "+$t("每天到 GitHub 看一次有没有新版本")+" <small>"+$t("只读取发布页上的版本和说明，不发送你的任何数据；下载和安装都等你点")+"</small></label>";
+ },
  keys(){
   const send=S.ui.send_key==="ctrl"?$t("Ctrl + Enter 发送，Enter 换行"):$t("Enter 发送，Shift + Enter 换行");
   return "<h3>"+$t("快捷键")+"</h3><table class=\"keys\">"+[["Ctrl + K",$t("搜索或输入命令")],["Ctrl + N",$t("写记录")],["Ctrl + S",$t("保存")],["Ctrl + J",$t("快答")],["Ctrl + W",$t("关闭当前面板")],["Ctrl + B",$t("展开或收起左栏")],[$t("消息框"),send],["Ctrl + Enter",$t("在代码文件里：运行")],["Shift + Enter",$t("在实验笔记里：运行当前格")],["Tab",$t("在代码里缩进")],["Esc",$t("关闭弹窗")]].map(([k,t])=>'<tr><td><kbd>'+esc(k)+'</kbd></td><td>'+esc(t)+'</td></tr>').join("")+"</table><p class=\"muted\">"+$t("发送键在「外观与交互」里改。")+"</p>";
  },
 };
+/* Where the update stands: this version, the newest one, and what can be done about it now. */
+function updateBox(u){
+ const L=u.latest,mb=n=>(n/1048576).toFixed(n>=1048576*10?0:1)+" MB",page=L?.page||u.releases;
+ const state=u.checking?$t("正在检查…"):u.error&&u.phase!=="failed"?'<span class="bad">'+$t("检查失败：")+esc(u.error)+'</span>':
+  u.newer?"<span class=\"chip on\">"+$t("{0} 可以更新了",esc("v"+L.version))+"</span>"+(L.published?" <small class=\"muted\">"+$t("发布于 {0}",esc(fmtDate(L.published)))+"</small>":""):
+  u.checked?$t("已经是最新版本")+" <small class=\"muted\">"+$t("上次检查：{0}",esc(fmtDate(new Date(u.checked*1000).toISOString(),true)))+"</small>":$t("还没有检查过");
+ let act="";
+ if(u.newer&&u.blocked)act='<span class="muted small">'+esc(u.blocked)+'</span>';
+ else if(u.newer&&u.phase==="downloading")act='<span class="update-progress">'+$t("正在下载 {0}",u.total?Math.floor(u.got/u.total*100)+"%":mb(u.got))+" · "+mb(u.got)+(u.total?" / "+mb(u.total):"")+'</span>'+button($t("取消"),"update-cancel","","ghost sm");
+ else if(u.newer&&u.phase==="preparing")act='<span class="update-progress">'+$t("正在解开新版本…")+'</span>';
+ else if(u.newer&&u.phase==="ready")act=u.how==="macos"?button(svg("external",13)+" "+$t("打开安装盘"),"update-apply","","primary sm"):button(svg("refresh",13)+" "+$t("重启并更新"),"update-apply","","primary sm");
+ else if(u.newer)act=(u.phase==="failed"?'<span class="bad small">'+esc(u.error)+'</span>':"")+button(svg("download",13)+" "+(u.phase==="failed"?$t("重新下载"):$t("下载更新"))+(u.size?" · "+mb(u.size):""),"update-download","","primary sm");
+ return '<div class="update-state"><b>Lattice '+esc(u.current)+'</b> '+state+'</div><div class="inline">'+act+(u.checking?"":button(svg("refresh",13)+" "+$t("检查更新"),"update-check","","ghost sm"))+
+  "<a class=\"btn ghost sm\" data-action=\"open-url\" data-url=\""+esc(page)+"\">"+svg("external",12)+" "+$t("发布页")+"</a></div>";
+}
+/* News of the update from behind: a check done, how far a download is. The pages showing it follow. */
+export function updateEvent(evt){
+ if(evt.type==="update_progress"){if(!S.update)return;if(evt.phase)S.update.phase=evt.phase;else Object.assign(S.update,{got:evt.got,total:evt.total});}
+ else S.update=evt.update;
+ for(const pid of Object.keys(Dock.panels)){
+  const node=Dock.els[pid],page=node?.querySelector(".settings")?.dataset.page;
+  if(Dock.panels[pid].type!=="settings"||!node)continue;
+  if(evt.type==="update")renderSettingsNav(node,page);
+  const box=page==="update"&&node.querySelector(".update-box");
+  // A new release's notes come with a page of their own; how far a download is, just in the box.
+  if(box&&evt.type==="update"&&(S.update.newer?S.update.latest.version:"")!==box.dataset.version)renderSettings(node,"update");
+  else if(box)box.innerHTML=updateBox(S.update);
+ }
+}
 export const Settings={env:"default",tests:{}};
 /* Every setting saves itself shortly after it changes; text fields wait until typing pauses. */
 const Autosave={timers:{}};
@@ -367,6 +408,16 @@ export async function settingsAction(kind,a){
  case "env-create":{const n=node.querySelector("[data-env-new]").value.trim();if(!n)return;await rpc("env_save",{name:n,text:"ipykernel\nnumpy\nmatplotlib\n"});Settings.env=n;return again();}
  case "env-save":await rpc("env_save",{name:Settings.env,text:node.querySelector("[data-env-text]").value});toast($t("环境定义已保存，下次运行时环境会跟着改"));return again();
  case "env-install":{const input=node.querySelector("[data-env-install]"),pkgs=input.value.split(/\s+/).filter(Boolean);if(!pkgs.length)return;await rpc("env_install",{name:Settings.env,packages:pkgs});input.value="";return toast($t("正在安装 {0}…",pkgs.join("、")));}
+ case "update-check":S.update=await rpc("update_check");return again();
+ case "update-download":S.update=await rpc("update_download");return again();
+ case "update-cancel":return rpc("update_cancel");
+ case "update-apply":{
+  const u=S.update;
+  if(u.how!=="macos"&&!await ask($t("Lattice 会先保存你写的东西再关闭，换上新版本后自动重新打开；正在进行的回答和运行会停下。"),{title:$t("重启并更新到 {0}？","v"+u.latest.version),ok:$t("重启并更新")}))return;
+  const r=await rpc("update_apply");
+  if(!r.closing)toast($t("安装盘已经打开：退出 Lattice 后，把里面的 Lattice 拖进「应用程序」替换旧的。"));
+  return;
+ }
  case "rules-save":await rpc("rules_save",{text:node.querySelector("[data-rules]").value});return toast($t("规矩已保存，所有 AI 下一轮起照这个来"));
  case "rules-reset":{if(!await ask($t("现在的版本留在学习库的历史里。"),{title:$t("把 AGENTS.md 恢复成默认的？"),ok:$t("恢复默认")}))return;const r=await rpc("rules");await rpc("rules_save",{text:r.shipped});return again();}
  }

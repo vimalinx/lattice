@@ -36,7 +36,7 @@ def look(where, body=""):
 look("start")
 for kind in ["home", "map", "journal", "review", "library", "memory", "noteinfo", "skills", "marks", "asked"]:
     look(kind, f"openPanel({{type:{kind!r}}})")
-for page in ["look", "layout", "agents", "apis", "web", "run", "vault", "rules", "keys", "usage"]:
+for page in ["look", "layout", "agents", "apis", "web", "run", "vault", "rules", "keys", "usage", "update"]:
     look("settings:" + page, f"openPanel({{type:'settings',page:{page!r}}});const pid=findPanel({{type:'settings'}});await rpc('ui_save',{{ui:S.ui}}).catch(()=>{{}});document.querySelector('[data-action=settings-page][data-page={page}]')?.click()")
 look("file", f"openPanel({{type:'file',path:{note!r}}})")
 for space in ["write", "cards"]:
