@@ -9,7 +9,7 @@ import {CODE_EXT,snippetRuns} from "./blocks.js";
 import {Chat,SESSION_AGENTS,agentTitle,attachMenu,chatEvent,chatModel,chatMoreMenu,chatRetry,chatSend,conversationMarkdown,endPractice,escalate,fitComposer,followingChanged,followingHeard,loadChat,messageToCard,modelMenu,openPractice,renderChat,sessionAction,setChatModel,startPractice,tellFollowing,toBottomButton,toConversation,topicMenu,topicTitle,updateComposer} from "./chat.js";
 import {importAction,importChat,importEvent} from "./imports.js";
 import {openAttachment} from "./attach.js";
-import {Files,Organizer,fileAction,fileChange,fileChanged,fileIcon,fileInput,fileKey,fileScreen,flushAll,kernelEvent,openFile,renderOrganizer,runEvent,runFile,showHistory,versionAction} from "./files.js";
+import {Files,Organizer,fileAction,fileChange,fileChanged,fileIcon,fileInput,fileKey,fileScreen,flushAll,kernelEvent,openFile,renderOrganizer,Runs,runEvent,runPath,showHistory,versionAction} from "./files.js";
 import {embedsChanged,notesAction,openWiki,renderTags,showTag,switcher,switcherFilter} from "./notes.js";
 import {Reader,openWeb,readerAction,readerEvent} from "./reader.js";
 import {Books} from "./books.js";
@@ -281,7 +281,7 @@ async function onEvent(evt){
  if(evt.type==="env"){
   toast(evt.message,evt.ok?"info":"error");
   // A run that waited for the learner's install goes again.
-  for(const pid of Object.keys(Files))if(Files[pid].afterInstall&&evt.ok&&evt.message.includes(Files[pid].afterInstall)){Files[pid].afterInstall=null;safe(()=>runFile(pid));}
+  for(const [path,r] of Object.entries(Runs))if(r.afterInstall&&evt.ok&&evt.message.includes(r.afterInstall)){r.afterInstall=null;safe(()=>runPath(path));}
   return;
  }
 }
