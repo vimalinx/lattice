@@ -384,11 +384,12 @@ class Vault:
         """Committed versions of a file, newest first.
 
         A file with an id is followed by that id: a retitled note moves to a new
-        path and git cannot always tell that it is a rename."""
+        path and git cannot always tell that it is a rename. When it can, the id line
+        is unchanged across the move and -G passes over it, so renames are not looked for."""
         if not ident:
             return self._log(["--follow"], [rel], lambda c, p: True)
         folder = rel.split("/", 1)[0]
-        paths = {line for line in self.git("log", "--format=", "--name-only", "-G", f"^id: {re.escape(ident)}$", "--", folder, check=False).splitlines() if line}
+        paths = {line for line in self.git("log", "--no-renames", "--format=", "--name-only", "-G", f"^id: {re.escape(ident)}$", "--", folder, check=False).splitlines() if line}
         if not paths:
             return []
         return self._log([], sorted(paths), lambda c, p: p in paths and f"\nid: {ident}\n" in (self.at(c, p) or ""))
