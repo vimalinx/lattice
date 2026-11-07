@@ -89,6 +89,8 @@ export function svg(name,size=18){
   more:'<path d="M12 5v.01M12 12v.01M12 19v.01"/>',
   sliders:'<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
   float:'<rect x="3" y="8" width="13" height="13" rx="2"/><path d="M8 8V4h13v13h-5"/>',
+  maximize:'<path d="M4 9V4h5m6 0h5v5m0 6v5h-5m-6 0H4v-5"/>',
+  restore:'<path d="M9 4v5H4m11-5v5h5m0 6h-5v5m-6 0v-5H4"/>',
   undo:'<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
   map:'<path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15m6-12v15"/>',
   card:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 9h10M7 13h6"/>'

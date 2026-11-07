@@ -16,6 +16,8 @@ datas = [(str(ROOT / "ui"), "ui"),
          (str(ROOT / "lattice" / "rules.md"), "lattice"),
          (str(ROOT / "lattice" / "locales"), "lattice/locales"),
          (str(ROOT / "lattice" / "netfwd.py"), "lattice"),
+         # Run on the learner's own Python, for completion in the editor.
+         (str(ROOT / "lattice" / "completer.py"), "lattice"),
          # jupyter_client finds how to start a kernel through its package metadata.
          *copy_metadata("jupyter_client")]
 

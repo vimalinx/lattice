@@ -142,7 +142,7 @@ function textView(pid){
  if(isCsv&&st.mode!=="raw")return '<div class="file-tools">'+button($t("编辑原文"),"file-mode",'data-pid="'+pid+'" data-mode="raw"',"ghost xs")+'</div><div class="table-view" data-keep-scroll>'+csvTable(st.text,ext===".tsv"?"\t":",")+'</div>';
  const attrs='data-field="text" data-file-text="'+pid+'"';
  if(md)return mdBody(pid,st.text,attrs,{readonly:d.readonly});
- const editor=editorHost(st.text,'class="editor code" '+attrs,{filename:d.name,readonly:d.readonly,wrap:[".txt",".log"].includes(ext),
+ const editor=editorHost(st.text,'class="editor code" '+attrs,{filename:d.name,readonly:d.readonly,wrap:[".txt",".log"].includes(ext),complete:()=>({path:Dock.panels[pid]?.path}),
   ...editorHooks(pid,{keys:[{key:"Mod-Enter",run:()=>{if(!Files[pid]?.data?.runnable)return false;safe(()=>runFile(pid));return true;}}]})});
  const out=d.runnable?runOutput(pid):"";
  return '<div class="code-wrap" data-keep-scroll>'+editor+'</div>'+out+(isCsv?'<div class="file-tools">'+button($t("表格视图"),"file-mode",'data-pid="'+pid+'" data-mode="split"',"ghost xs")+'</div>':"");
@@ -168,16 +168,52 @@ async function tagChoices(input){
  if(document.activeElement===input)suggest(input);
 }
 document.addEventListener("focusin",e=>{if(e.target.dataset?.docField==="tags")safe(()=>tagChoices(e.target));});
+/* A run's output sits under the code like a terminal of its own: its top edge drags it taller or shorter, a button (or a
+   double click on that edge) has it fill the panel and go back, and both stay with the window. While it runs it follows
+   what is printed, unless it has been scrolled up to read. */
+const RUN_SHARE=.35;
 function runOutput(pid){
- const r=Files[pid].run;
+ const r=Files[pid].run,p=Dock.panels[pid]||{};
  if(!r)return '<div class="run-out empty" data-run-out="'+pid+'"></div>';
- const label={running:$t("运行中…"),completed:$t("完成"),error:$t("出错"),cancelled:$t("已停止"),timeout:$t("超时")}[r.state]||r.state;
- return '<div class="run-out" data-run-out="'+pid+'"><div class="run-head"><span class="run-state s-'+esc(r.state)+'">'+esc(label)+'</span>'+(r.message?'<span>'+esc(r.message)+'</span>':"")+(r.seconds!=null?"<span>"+esc(r.seconds)+" "+$t("秒")+"</span>":"")+
-  '<span class="grow"></span>'+(r.state==="running"?button(svg("stop",12)+" "+$t("停止"),"run-stop",'data-run="'+esc(r.id)+'"',"ghost xs"):iconButton("close","run-clear",$t("收起"),'data-pid="'+pid+'"'))+'</div>'+
-  '<div class="run-body">'+outputHtml(r.outputs)+(r.note?'<p class="run-note">'+esc(r.note)+'</p>':"")+
-  (r.missing?'<p class="run-note">'+button($t("装上 {0} 再运行",esc(r.missing.package)),"install-run",'data-pid="'+pid+'" data-package="'+esc(r.missing.package)+'" data-env="'+esc(r.missing.env)+'"',"primary xs")+'</p>':"")+'</div></div>';
+ return '<div class="run-out'+(p.run_max?" max":"")+'" data-run-out="'+pid+'" style="flex-basis:'+Math.round((p.run_share||RUN_SHARE)*1000)/10+'%">'+
+  '<div class="run-sash" data-run-sash="'+pid+'" title="'+$t("拖动调高度，双击放大或还原")+'"></div><div class="run-head">'+runHead(pid)+'</div><div class="run-body">'+runBody(pid)+'</div></div>';
 }
-function patchRun(pid){const box=Dock.els[pid]?.querySelector('[data-run-out="'+pid+'"]');if(box)box.outerHTML=runOutput(pid);}
+function runHead(pid){
+ const r=Files[pid].run,max=!!Dock.panels[pid]?.run_max;
+ const label={running:$t("运行中…"),completed:$t("完成"),error:$t("出错"),cancelled:$t("已停止"),timeout:$t("超时")}[r.state]||r.state;
+ return '<span class="run-state s-'+esc(r.state)+'">'+esc(label)+'</span>'+(r.message?'<span>'+esc(r.message)+'</span>':"")+(r.seconds!=null?"<span>"+esc(r.seconds)+" "+$t("秒")+"</span>":"")+
+  '<span class="grow"></span>'+(r.state==="running"?button(svg("stop",12)+" "+$t("停止"),"run-stop",'data-run="'+esc(r.id)+'"',"ghost xs"):"")+
+  iconButton(max?"restore":"maximize","run-max",max?$t("还原"):$t("放大到整个面板"),'data-pid="'+pid+'"')+(r.state==="running"?"":iconButton("close","run-clear",$t("收起"),'data-pid="'+pid+'"'));
+}
+function runBody(pid){
+ const r=Files[pid].run;
+ return outputHtml(r.outputs)+(r.note?'<p class="run-note">'+esc(r.note)+'</p>':"")+
+  (r.missing?'<p class="run-note">'+button($t("装上 {0} 再运行",esc(r.missing.package)),"install-run",'data-pid="'+pid+'" data-package="'+esc(r.missing.package)+'" data-env="'+esc(r.missing.env)+'"',"primary xs")+'</p>':"");
+}
+function patchRun(pid){
+ const box=Dock.els[pid]?.querySelector('[data-run-out="'+pid+'"]'),r=Files[pid]?.run;if(!box)return;
+ const body=box.querySelector(".run-body");
+ if(!r||!body){box.outerHTML=runOutput(pid);return;}
+ const end=body.scrollHeight-body.scrollTop-body.clientHeight<24;
+ box.querySelector(".run-head").innerHTML=runHead(pid);body.innerHTML=runBody(pid);
+ if(end)body.scrollTop=body.scrollHeight;
+}
+function runMax(pid){
+ const p=Dock.panels[pid];if(!p)return;
+ if(p.run_max)delete p.run_max;else p.run_max=true;
+ Dock.els[pid]?.querySelector('[data-run-out="'+pid+'"]')?.classList.toggle("max",!!p.run_max);patchRun(pid);saveLayout();
+}
+// Dragging the output's top edge: its share of the panel, from a strip of output up to all but a few lines of code.
+document.addEventListener("mousedown",e=>{
+ const sash=e.target.closest?.("[data-run-sash]");if(!sash||e.button!==0)return;
+ const pid=sash.dataset.runSash,p=Dock.panels[pid],box=sash.parentElement,area=box.parentElement.getBoundingClientRect();if(!p)return;
+ e.preventDefault();
+ if(e.detail===2)return runMax(pid);
+ if(p.run_max){delete p.run_max;box.classList.remove("max");patchRun(pid);}
+ const move=ev=>{p.run_share=Math.max(.08,Math.min(.9,(area.bottom-ev.clientY)/area.height));box.style.flexBasis=p.run_share*100+"%";};
+ const up=()=>{document.removeEventListener("mousemove",move);document.removeEventListener("mouseup",up);document.body.classList.remove("resizing-v");saveLayout();};
+ document.body.classList.add("resizing-v");document.addEventListener("mousemove",move);document.addEventListener("mouseup",up);
+});
 export async function runFile(pid){
  const st=Files[pid],p=Dock.panels[pid];
  await flushFile(pid);
@@ -260,8 +296,13 @@ function notebookView(pid){
 function cellHtml(pid,c,i){
  const st=Files[pid],src=st.cellDrafts.get(c.id)??c.source,stale=c.run_source!=null&&c.run_source!==src;
  return "<section class=\"cell "+c.kind+"\" data-cell=\""+esc(c.id)+"\"><div class=\"cell-bar\"><span class=\"cell-count\" data-cell-count=\""+esc(c.id)+"\">"+(c.kind==="code"?"In ["+(c.count??" ")+"]":$t("文字"))+"</span>"+(c.by?"<span class=\"chip ai\">"+esc(who(c.by))+" "+$t("写的")+"</span>":"")+"<span class=\"grow\"></span>"+(c.kind==="code"?iconButton("play","nb-run",$t("运行这一格"),'data-pid="'+pid+'" data-cell="'+esc(c.id)+'"'):"")+iconButton("arrowup","nb-move",$t("上移"),'data-pid="'+pid+'" data-cell="'+esc(c.id)+'" data-d="-1"')+"<button class=\"icon\" data-action=\"nb-move\" data-pid=\""+pid+"\" data-cell=\""+esc(c.id)+"\" data-d=\"1\" title=\""+$t("下移")+"\">↓</button>"+iconButton("trash","nb-delete",$t("删除这一格"),'data-pid="'+pid+'" data-cell="'+esc(c.id)+'"')+"</div>"+editorHost(src,'class="cell-editor '+(c.kind==="code"?"code":"prose")+'" data-field="cell-'+esc(c.id)+'" data-cell-editor="'+esc(c.id)+'" data-pid="'+pid+'"',
-  {markdown:c.kind!=="code",live:true,language:"python",filename:"cell.py",gutters:false,placeholder:c.kind==="code"?"":$t("（空的文字格，在这里写）"),
+  {markdown:c.kind!=="code",live:true,language:"python",filename:"cell.py",gutters:false,placeholder:c.kind==="code"?"":$t("（空的文字格，在这里写）"),complete:()=>cellContext(pid,c.id),
    ...editorHooks(pid,{keys:[{key:"Shift-Enter",run:()=>{safe(()=>runCells(pid,[c.id]));return true;}}]})})+"<div class=\"cell-out\" data-cell-out=\""+esc(c.id)+"\">"+outputHtml(c.outputs)+"</div><div class=\"cell-stale"+(stale?" on":"")+"\" data-cell-stale=\""+esc(c.id)+"\">"+$t("代码改过了：上面的输出属于之前那次运行")+"</div></section>";
+}
+// What completion in a cell reads besides the cell: the code cells above it, as they are typed now.
+function cellContext(pid,id){
+ const st=Files[pid],cells=st?.data?.notebook?.cells||[],at=cells.findIndex(c=>c.id===id);
+ return {path:Dock.panels[pid]?.path,before:cells.slice(0,Math.max(0,at)).filter(c=>c.kind==="code").map(c=>st.cellDrafts.get(c.id)??c.source).join("\n")};
 }
 export function kernelEvent(evt){
  for(const pid of filePanels(evt.path)){
@@ -462,6 +503,7 @@ export async function fileAction(kind,a){
  case "file-run":return runFile(pid);
  case "run-stop":return rpc("run_stop",{run:a.dataset.run});
  case "run-clear":st.run=null;return patchRun(pid);
+ case "run-max":return runMax(pid);
  case "install-run":{
   st.run.missing=null;st.run.note=$t("正在安装 {0}…",a.dataset.package);patchRun(pid);
   Files[pid].afterInstall=a.dataset.package;await rpc("env_install",{name:a.dataset.env,packages:[a.dataset.package]});return;

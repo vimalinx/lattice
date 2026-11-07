@@ -13,6 +13,7 @@ import threading
 import time
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
 from .. import agents
+from ..complete import Completers
 from ..envs import Envs
 from ..model import Lattice
 from ..providers import Config
@@ -51,6 +52,8 @@ class Bridge(VaultPart, FilesPart, SkillsPart, ImportedPart, MarksPart, WindowsP
         self.lattice = Lattice(root or (Path(chosen).expanduser() if chosen else VAULT_PATH), migrate_from=LEGACY_DB if migrate and root is None else None)
         self.root = self.lattice.root
         self.envs = Envs(self.lattice.vault)
+        # Python completion in the editor, on the environment each file runs in; editor -> its latest question.
+        self.completers, self.complete_asks = Completers(self.root), {}
         self._follow_shipped_rules()
         if not self.lattice.vault.path("envs/default.txt").exists():
             self.envs.wanted("default")
@@ -215,6 +218,7 @@ class Bridge(VaultPart, FilesPart, SkillsPart, ImportedPart, MarksPart, WindowsP
     def shutdown(self):
         self.closing = True
         self.netproxy.stop()
+        self.completers.close()
         workers = list(self.workers.values()) + self.tests + [r["worker"] for r in self.runs.values()]
         for worker in workers + list(self.kernels.values()):
             if worker.isRunning():

@@ -4,7 +4,7 @@ import {S,WINDOW,all,ask,askText,closeModal,el,emptyState,esc,fmtDate,h,kindName
 import {activeTheme,applyTheme,themeColorPick,themeOp} from "./theme.js";
 import {VIEW_KEYS,splitOut,applyView,closePanel,eachStack,float,fromWindow,initDock,letGo,loadLayout,openPanel,panelTitle,refreshTab,restoreUi,runUiOps,saveLayout,setView,setZoom,sideOf,stackNode,stepZoom,toWindow,unfloat,viewOf,windowTitleShown,zoomDefault,zoomOf} from "./dock.js";
 import {currentSpace,mainSpaces,sendToSpace,setTopicOf,spaceAction,spaceFromWindow,spaceMenu,spaceOf,spaceTabs,switchSpace,topicHere,topicOf,visibleSpaces} from "./spaces.js";
-import {gridAction} from "./editor.js";
+import {completeEvent,gridAction} from "./editor.js";
 import {CODE_EXT,snippetRuns} from "./blocks.js";
 import {Chat,SESSION_AGENTS,agentTitle,attachMenu,chatEvent,chatModel,chatMoreMenu,chatRetry,chatSend,conversationMarkdown,endPractice,escalate,fitComposer,followingChanged,followingHeard,loadChat,messageToCard,modelMenu,openPractice,renderChat,sessionAction,setChatModel,startPractice,tellFollowing,toBottomButton,toConversation,topicMenu,topicTitle,updateComposer} from "./chat.js";
 import {importAction,importChat,importEvent} from "./imports.js";
@@ -257,6 +257,7 @@ async function onEvent(evt){
  if(evt.type==="app_build")return appBuildEvent(evt);
  if(evt.type==="import")return importEvent(evt);
  if(evt.type==="tab_read")return tabRead(evt);
+ if(evt.type==="complete")return completeEvent(evt);
  if(evt.type==="app_check")return appCheck(evt);
  if(evt.type==="skill_change"){skillsChanged();return skillChangeEvent(evt);}
  if(evt.type==="annotations")return marksChanged();

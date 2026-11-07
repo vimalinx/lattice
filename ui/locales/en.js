@@ -1474,5 +1474,13 @@ export default {
  "Lattice 会先保存你写的东西再关闭，换上新版本后自动重新打开；正在进行的回答和运行会停下。": "Lattice saves what you have written, closes, and opens again on the new version; replies and runs under way will stop.",
  "重启并更新到 {0}？": "Restart and update to {0}?",
  "安装盘已经打开：退出 Lattice 后，把里面的 Lattice 拖进「应用程序」替换旧的。": "The disk image is open: quit Lattice, then drag the Lattice inside it into Applications to replace the old one.",
- "Lattice {0} 可以更新了：在设置的「更新」里下载": "Lattice {0} is available: download it in Settings › Updates"
+ "Lattice {0} 可以更新了：在设置的「更新」里下载": "Lattice {0} is available: download it in Settings › Updates",
+ "函数": "function",
+ "类": "class",
+ "模块": "module",
+ "关键字": "keyword",
+ "属性": "attribute",
+ "拖动调高度，双击放大或还原": "Drag to resize; double-click to maximize or restore",
+ "还原": "Restore",
+ "放大到整个面板": "Fill the panel"
 };

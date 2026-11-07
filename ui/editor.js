@@ -660,6 +660,65 @@ function fillComplete(opts){
    }};}),validFor:/^\{\{[^{}\n]*$/};
  };
 }
+/* ---- completion in code ------------------------------------------------------------------------------------------------
+   Only what starts with what is typed. Python asks jedi on the file's own environment (completer.py), so a module's
+   members, an object's attributes and a call's parameters come from the code and the packages really there; until it
+   answers, or where it cannot, the language's own list and the file's words stand in. After a dot the file's words are
+   those it uses after a dot. Enter on a word typed out in full starts a new line instead of taking it again. */
+const Asks=new Map();let askSeq=0;
+export function completeEvent(evt){const done=Asks.get(evt.ask);if(done){Asks.delete(evt.ask);done(evt);}}
+const KIND_NAME={function:$t("函数"),class:$t("类"),namespace:$t("模块"),keyword:$t("关键字"),property:$t("属性")};
+function wordsAfterDot(doc,typed,skip){
+ const seen=new Set(),out=[],re=/\.([A-Za-z_]\w*)/g,text=doc.length>400000?doc.sliceString(0,400000):doc.toString();
+ for(let m;(m=re.exec(text));){const w=m[1];if(seen.has(w)||!w.startsWith(typed)||w.startsWith("_")&&!typed.startsWith("_")||m.index+1===skip)continue;seen.add(w);out.push({label:w,type:"property",boost:-1});}
+ return out;
+}
+// The language's own sources and the file's words, as one list without repeats; what a language knows comes first.
+async function ownCompletion(ctx){
+ const word=ctx.matchBefore(/\w*$/),dot=ctx.state.sliceDoc(word.from-1,word.from)===".";
+ if(!dot&&!word.text&&!ctx.explicit)return null;
+ const lists=[],sources=[...ctx.state.languageDataAt("autocomplete",ctx.pos).map(s=>typeof s==="function"?s:CA.completeFromList(s)),CA.completeAnyWord];
+ for(const src of sources){const r=await src(ctx);if(r&&r.from===word.from)lists.push(...r.options.map(o=>src===CA.completeAnyWord?{...o,boost:-2}:o));}
+ if(dot)lists.push(...wordsAfterDot(ctx.state.doc,word.text,word.from));
+ const seen=new Set(),options=lists.filter(o=>!seen.has(o.label)&&seen.add(o.label));
+ return options.length?{from:word.from,options,validFor:/^\w*$/}:null;
+}
+function pythonCompletion(opts,editor){
+ let off=false;
+ return async ctx=>{
+  const word=ctx.matchBefore(/\w*$/),before=ctx.state.sliceDoc(word.from-1,word.from);
+  if(!word.text&&before!=="."&&!ctx.explicit)return null;
+  const node=CL.syntaxTree(ctx.state).resolveInner(ctx.pos,-1);
+  if(/Comment/.test(node.name))return null;
+  const where=opts.complete?.();
+  if(off||!where?.path)return ownCompletion(ctx);
+  const head=where.before?where.before+"\n":"",line=ctx.state.doc.lineAt(ctx.pos),ask="c"+(++askSeq)+"-"+Date.now();
+  const answer=new Promise(done=>{Asks.set(ask,done);setTimeout(()=>{if(Asks.delete(ask))done({error:"timeout"});},6000);});
+  const sent=await rpc("complete",{path:where.path,code:head+ctx.state.doc.toString(),line:(head.match(/\n/g)||[]).length+line.number,column:ctx.pos-line.from,typed:word.text,ask,editor}).catch(()=>null);
+  if(!sent?.asked){Asks.delete(ask);off=true;return ownCompletion(ctx);}
+  const got=await answer;
+  if(ctx.aborted||got.stale)return null;
+  if(got.error){if(got.error==="no jedi")off=true;return ownCompletion(ctx);}
+  if(!got.items?.length)return before==="."?ownCompletion(ctx):null;
+  return {from:word.from,options:got.items.map(i=>({label:i.label,type:i.type,...(KIND_NAME[i.type]?{detail:KIND_NAME[i.type]}:{})})),validFor:/^\w*$/};
+ };
+}
+// A file opened has jedi read the first package it imports, so the first dot after it does not wait for that.
+const warmed=new Set();
+function warmPython(view,opts){
+ const where=opts.complete?.();if(!where?.path||warmed.has(where.path)||!view.dom.isConnected)return;
+ const text=(where.before?where.before+"\n":"")+view.state.doc.toString(),m=/^[ \t]*(?:import\s+[\w.]+\s+as\s+(\w+)|import\s+(\w+)|from\s+(\w+))/m.exec(text);if(!m)return;
+ warmed.add(where.path);
+ const name=m[1]||m[2]||m[3],code=text+"\n"+(m[3]?"import "+name+"\n":"")+name+".";
+ rpc("complete",{path:where.path,code,line:code.split("\n").length,column:name.length+1,ask:"warm",editor:"warm"}).catch(()=>{});
+}
+function enterKeepsWord(view){
+ if(CA.completionStatus(view.state)!=="active")return false;
+ const picked=CA.selectedCompletion(view.state),head=view.state.selection.main.head,word=/\w*$/.exec(view.state.sliceDoc(Math.max(0,head-100),head))[0];
+ if(picked&&picked.label===word)CA.closeCompletion(view);
+ return false;
+}
+
 async function insertImages(view,files,opts,at=null){
  for(const f of files){
   const data=await new Promise((ok,bad)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=()=>bad(r.error);r.readAsDataURL(f);});
@@ -703,11 +762,12 @@ export function mountEditors(root){
 }
 export function destroyEditors(root){all(".cm-host",root).forEach(h=>{h.cmView?.destroy();h.cmView=null;});}
 export function refreshEditors(){all(".cm-host").forEach(h=>h.cmView?.dispatch({effects:Refresh.of(null)}));}
+const isPython=opts=>/\.pyw?$|\.pyi$/i.test(opts.filename||"")||opts.language==="python";
 function createEditor(host,text,opts){
  const md=!!opts.markdown,lang=new CS.Compartment();
  const keys=[
   ...(opts.keys||[]),
-  {key:"Tab",run:CA.acceptCompletion},{key:"Tab",run:tabOut},{key:"Tab",run:tabIndent(md),shift:CC.indentLess},
+  {key:"Tab",run:CA.acceptCompletion},{key:"Tab",run:tabOut},{key:"Tab",run:tabIndent(md),shift:CC.indentLess},{key:"Enter",run:enterKeepsWord},
   ...(md?[{key:"Mod-Shift-t",run:v=>insertTable(v)},{key:"Mod-b",run:wrapWith("**")},{key:"Mod-i",run:wrapWith("*")},{key:"Mod-Shift-x",run:wrapWith("~~")},{key:"Mod-`",run:wrapWith("`")},{key:"Mod-Enter",run:toggleTask},{key:"Enter",run:endEmptyItem}]:[]),
  ];
  // The standard keys go below the language's own: in Markdown, Enter continues a list (1. → 2., - → -, - [ ] → - [ ])
@@ -728,13 +788,11 @@ function createEditor(host,text,opts){
   if(opts.live)ext.push(livePreview(opts),tablePreview(opts),mathPreview(),propsPreview());
  }else{
   if(opts.gutters!==false)ext.push(CV.lineNumbers(),CL.foldGutter(),CV.highlightActiveLineGutter());
-  ext.push(CV.highlightActiveLine(),CA.autocompletion({icons:false}),rainbowBrackets());
+  ext.push(CV.highlightActiveLine(),CA.autocompletion({override:[isPython(opts)?pythonCompletion(opts,"e"+host.dataset.cm):ownCompletion],filterStrict:true,icons:false}),rainbowBrackets(),lang.of([]));
   if(opts.wrap)ext.push(CV.EditorView.lineWrapping);
  }
- // Words already in the file, for languages that do not complete anything themselves.
- const words=CS.EditorState.languageData.of(()=>[{autocomplete:CA.completeAnyWord}]);
- if(!md)ext.push(lang.of(words));
  const view=new CV.EditorView({state:CS.EditorState.create({doc:text,extensions:ext}),parent:host});
+ if(!md&&isPython(opts)&&opts.complete)setTimeout(()=>warmPython(view,opts),500);
  host.classList.toggle("cm-md",md);host.classList.toggle("cm-live",md&&!!opts.live);
  const language=md?CM.markdown({base:CM.markdownLanguage,codeLanguages:CM.languages,extensions:[wikiSyntax]}):null;
  if(language)view.dispatch({effects:lang.reconfigure(language)});
@@ -742,8 +800,7 @@ function createEditor(host,text,opts){
   const desc=CL.LanguageDescription.matchFilename(CM.languages,opts.filename)||CL.LanguageDescription.matchLanguageName(CM.languages,opts.language||"",true);
   if(desc)desc.load().then(sup=>{
    if(!view.dom.isConnected&&!host.cmView)return;
-   const own=CS.EditorState.create({extensions:sup}).languageDataAt("autocomplete",0).length>0;
-   view.dispatch({effects:lang.reconfigure(own?sup:[sup,words])});
+   view.dispatch({effects:lang.reconfigure(sup)});
   }).catch(()=>{});
  }
  return view;

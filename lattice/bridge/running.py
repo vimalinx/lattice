@@ -40,6 +40,35 @@ class RunningPart:
             info["worker"].stop()
         return bool(info)
 
+    def rpc_complete(self, path, code, line, column, typed="", ask="", editor=""):
+        """Python completion at the cursor, answered as a "complete" event: jedi can take a second the first time it reads
+        a big package. Only the latest question from an editor is answered; the ones typed over are dropped."""
+        absolute, rel = self.lattice.resolve(path)
+        python = self._completion_python(absolute, rel)
+        if not python:
+            return {"asked": False}
+        self.complete_asks[editor] = ask
+
+        def work():
+            if self.complete_asks.get(editor) != ask:
+                return {"stale": True}
+            return self.completers.ask(python, {"code": text(code, 400000), "line": int(line), "column": int(column), "typed": str(typed)[:80],
+                                                "path": str(absolute.with_suffix(".py"))})
+        self.background(work, lambda got: self.announce({"type": "complete", "ask": ask, **(got if isinstance(got, dict) else {"error": str(got)})}))
+        return {"asked": True}
+
+    def _completion_python(self, absolute, rel):
+        """The environment a file runs on, if it is there already: completing never sets one up."""
+        if rel is None:
+            folder = absolute.parent
+            while folder != folder.parent:
+                if host.venv_python(folder / ".venv").exists():
+                    return str(host.venv_python(folder / ".venv"))
+                folder = folder.parent
+            return None
+        python = self.envs.python(self.envs.name_for(absolute))
+        return str(python) if python.exists() else None
+
     def python_for(self, absolute, rel, progress):
         """A file in a mounted folder with its own .venv uses it; everything else uses the vault's environment."""
         if rel is None:
