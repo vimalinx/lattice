@@ -1,6 +1,6 @@
 import {$t} from "./i18n.js";
 import {S,all,esc,hydrateVault,kindName,markdown,rpc,safe,svg,texHtml,toast} from "./core.js";
-import {Embeds,fillEmbed} from "./notes.js";
+import {Embeds,fillEmbed,fillTags,isTemplate} from "./notes.js";
 import {popMenu} from "./app.js";
 /* The editor for notes and code, built on CodeMirror 6 (ui/vendor/codemirror.js).
    Markdown gets a live preview like Obsidian's: it renders in place and shows its marks only where the cursor is,
@@ -635,12 +635,30 @@ function wikiComplete(ctx){
  return {from,options,validFor:/^[^\[\]\n|#]*$/};
 }
 let tagCache={at:0,list:[]};
-async function knownTags(){if(Date.now()-tagCache.at>15000)tagCache={at:Date.now(),list:await rpc("tags").catch(()=>[])};return tagCache.list;}
+export async function knownTags(){if(Date.now()-tagCache.at>15000)tagCache={at:Date.now(),list:await rpc("tags").catch(()=>[])};return tagCache.list;}
 async function tagComplete(ctx){
  const m=ctx.matchBefore(/(?:^|\s)#[^\s#]+$/);if(!m)return null;
  const from=m.from+m.text.indexOf("#")+1;
  const tags=await knownTags();
  return {from,options:tags.map(t=>({label:t.tag,detail:t.count+" "+$t("篇"),type:"keyword"})),validFor:/^[^\s#]*$/};
+}
+/* {{ in a note offers the date, time and title as they are now; in a template it puts the tag itself, filled in when the
+   template is used. A format typed after {{ (say {{date:M月D日}}) is offered first, with what it comes to. */
+const TAG_PICKS=[["date",$t("日期")],["time",$t("时间")],["date:YYYY-MM-DD HH:mm",$t("日期和时间")],["date:"+$t("YYYY年M月D日"),$t("长日期")],
+ ["date:dddd",$t("星期")],["date-1d",$t("昨天")],["date+1d",$t("明天")],["date:GGGG-[W]WW",$t("第几周")],["title",$t("标题")]];
+function fillComplete(opts){
+ return ctx=>{
+  const m=ctx.matchBefore(/\{\{[^{}\n]*$/);if(!m)return null;
+  const template=isTemplate(opts.path),title=(S.data.docs||[]).find(d=>d.path===opts.path)?.title||"",typed=m.text.slice(2).trim();
+  const picks=[...TAG_PICKS];
+  if(typed&&!picks.some(([t])=>t===typed)&&fillTags("{{"+typed+"}}",title)!=="{{"+typed+"}}")picks.unshift([typed,$t("这个格式")]);
+  return {from:m.from,options:picks.map(([tag,name],i)=>{const shown=fillTags("{{"+tag+"}}",title);return {label:"{{"+tag+"}}",detail:name+(shown?" · "+shown:""),type:"keyword",boost:-i,
+   apply:(view,c,f,t)=>{
+    // Typing {{ has the closing }} put in already.
+    const after=/^\}{0,2}/.exec(view.state.sliceDoc(t,t+2))[0].length,text=template?c.label:fillTags(c.label,title);
+    view.dispatch({changes:{from:f,to:t+after,insert:text},selection:{anchor:f+text.length},userEvent:"input.complete"});
+   }};}),validFor:/^\{\{[^{}\n]*$/};
+ };
 }
 async function insertImages(view,files,opts,at=null){
  for(const f of files){
@@ -705,7 +723,7 @@ function createEditor(host,text,opts){
  if(opts.placeholder)ext.push(CV.placeholder(opts.placeholder));
  if(opts.readonly)ext.push(CS.EditorState.readOnly.of(true));
  if(md){
-  ext.push(CV.EditorView.lineWrapping,CA.autocompletion({override:[wikiComplete,tagComplete],icons:false}),dropAndPaste(opts),linkClicks(opts),
+  ext.push(CV.EditorView.lineWrapping,CA.autocompletion({override:[wikiComplete,tagComplete,fillComplete(opts)],icons:false}),dropAndPaste(opts),linkClicks(opts),
    CV.EditorView.contentAttributes.of({spellcheck:"false"}));
   if(opts.live)ext.push(livePreview(opts),tablePreview(opts),mathPreview(),propsPreview());
  }else{

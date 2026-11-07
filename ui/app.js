@@ -590,7 +590,7 @@ async function boot(){
     S.bridge=channel.objects.backend;
     S.bridge.event.connect(raw=>safe(()=>onEvent(JSON.parse(raw))));
     S.data=await rpc("bootstrap");S.config=S.data.config;S.ui=S.config.ui;S.version=S.data.version;S.states=S.data.states||[];
-    el("#app").innerHTML="<div id=\"shell\"><nav id=\"activity\" aria-label=\""+$t("左栏的列表")+"\"></nav><aside id=\"side\" aria-label=\""+$t("列表")+"\"></aside><div id=\"side-gutter\"></div><main id=\"dock-wrap\"><div id=\"dock\"></div><div id=\"floats\"></div></main></div><footer id=\"status\" aria-label=\""+$t("状态栏")+"\"></footer><div id=\"dock-keep\"></div><div id=\"organizer\" hidden></div><div id=\"drop-mark\"></div><datalist id=\"doc-titles\"></datalist>";
+    el("#app").innerHTML="<div id=\"shell\"><nav id=\"activity\" aria-label=\""+$t("左栏的列表")+"\"></nav><aside id=\"side\" aria-label=\""+$t("列表")+"\"></aside><div id=\"side-gutter\"></div><main id=\"dock-wrap\"><div id=\"dock\"></div><div id=\"floats\"></div></main></div><footer id=\"status\" aria-label=\""+$t("状态栏")+"\"></footer><div id=\"dock-keep\"></div><div id=\"organizer\" hidden></div><div id=\"drop-mark\"></div><datalist id=\"doc-titles\"></datalist><datalist id=\"note-tags\"></datalist>";
     applyUi();initInteractions();initSideResize();
     if(WINDOW){
      const params=await rpc("window_params",{window:WINDOW});

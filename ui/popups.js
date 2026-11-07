@@ -103,26 +103,34 @@ addEventListener("click",e=>{
  const field=e.target.closest?.("input[data-suggest]");if(field)suggest(field);
 });
 
-/* ---- suggestions while typing: <input data-suggest="id of a datalist"> ------------------------------------------ */
-function suggest(input){
+/* ---- suggestions while typing: <input data-suggest="id of a datalist"> ------------------------------------------
+   With data-suggest-many the field is a list (tags, split by commas or spaces): the suggestions are for the last one and
+   leave out those already there, and a pick adds to the list and offers the rest. */
+export function suggest(input,typing=false){
  const list=document.getElementById(input.dataset.suggest);if(!list||input.disabled||input.readOnly)return;
- const q=input.value.trim().toLowerCase(),values=[...new Set([...list.options].map(o=>o.value).filter(Boolean))];
+ const many="suggestMany" in input.dataset,parts=many?input.value.split(/[,，\s]+/).filter(Boolean):[input.value];
+ // In a list, what is being typed is the last one; going into the field adds a new one after them all.
+ const typed=!many?input.value:typing&&!/[,，\s]$/.test(input.value)?parts.pop()||"":"";
+ const have=new Set(many?parts.map(x=>x.replace(/^#/,"").toLowerCase()):[]);
+ const q=typed.trim().replace(many?/^#/:/^$/,"").toLowerCase(),values=[...new Set([...list.options].map(o=>o.value).filter(v=>v&&!have.has(v.toLowerCase())))];
  // An empty field shows everything when that is a short list; a value that is already one of them shows all to switch.
- const hits=!q?(values.length<=60?values:[]):values.some(v=>v.toLowerCase()===q)?values:values.filter(v=>v.toLowerCase().includes(q));
+ const hits=many?values.filter(v=>v.toLowerCase().includes(q)):!q?(values.length<=60?values:[]):values.some(v=>v.toLowerCase()===q)?values:values.filter(v=>v.toLowerCase().includes(q));
  if(!hits.length){if(Menus.owner===input)closeMenus();return;}
- const html=hits.slice(0,80).map(v=>'<button type="button" data-pick="'+esc(v)+'"'+(v===input.value?' class="on"':"")+'>'+svg("check",13)+'<span>'+esc(v)+'</span></button>').join("")+
+ const html=hits.slice(0,80).map(v=>'<button type="button" data-pick="'+esc(v)+'"'+(v===input.value?' class="on"':"")+'>'+svg(many?"plus":"check",13)+'<span>'+esc(v)+'</span></button>').join("")+
   (hits.length>80?"<p class=\"menu-empty\">"+$t("还有 {0} 个，接着输入缩小范围",hits.length-80)+"</p>":"");
  let menu=Menus.owner===input&&el(".menu-suggest");
- if(menu){menu.innerHTML=html;return;}
- menu=popMenu(input,html,{cls:"menu-select menu-suggest",width:input.offsetWidth});Menus.owner=input;
+ // A pick goes after the tags as they are now, not as they were when the menu opened.
+ if(menu){menu.innerHTML=html;menu.parts=parts;return;}
+ menu=popMenu(input,html,{cls:"menu-select menu-suggest",width:input.offsetWidth});Menus.owner=input;menu.parts=parts;
  menu.addEventListener("mousedown",e=>e.preventDefault());
  menu.addEventListener("click",e=>{
   const b=e.target.closest("[data-pick]");if(!b)return;closeMenus();
-  input.value=b.dataset.pick;Menus.picking=true;
+  input.value=many?[...menu.parts,b.dataset.pick].join(", ")+", ":b.dataset.pick;Menus.picking=true;
   try{input.dispatchEvent(new Event("input",{bubbles:true}));input.dispatchEvent(new Event("change",{bubbles:true}));}finally{Menus.picking=false;}
+  if(many){input.setSelectionRange(input.value.length,input.value.length);suggest(input);}
  });
 }
-document.addEventListener("input",e=>{if(e.target.dataset?.suggest&&!Menus.picking)suggest(e.target);},true);
+document.addEventListener("input",e=>{if(e.target.dataset?.suggest&&!Menus.picking)suggest(e.target,true);},true);
 document.addEventListener("focusin",e=>{if(e.target.dataset?.suggest&&Date.now()-Press.at>400)suggest(e.target);});
 document.addEventListener("focusout",e=>{
  const t=e.target;if(!t.dataset?.suggest||Menus.owner!==t)return;

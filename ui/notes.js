@@ -1,4 +1,4 @@
-import {$t} from "./i18n.js";
+import {$t,LOCALE} from "./i18n.js";
 import {Dock,panelHand,panelType} from "./state.js";
 import {S,all,ask,baseName,button,closeModal,el,emptyState,esc,fmtDate,hydrateVault,iconButton,kindName,linkName,markdown,modal,modalHead,rpc,safe,shorten,svg,toast} from "./core.js";
 import {activate,closePanel,detach,eachStack,findPanel,openPanel,renderDock,runHand,saveLayout,splitBeside,stackNode,stackOf,targetStack,tidy} from "./dock.js";
@@ -267,19 +267,59 @@ async function newNote(folder,body="",title=null){
  for(let i=0;i<30;i++){await new Promise(ok=>setTimeout(ok,80));const pid=Object.keys(Files).find(x=>Dock.panels[x]?.path===r.path);const t=Dock.els[pid]?.querySelector(".doc-title");if(t){t.focus();t.select();break;}}
  return r.path;
 }
-function fillTemplate(text,title){
- const now=new Date(),pad=n=>String(n).padStart(2,"0");
- const date=now.getFullYear()+"-"+pad(now.getMonth()+1)+"-"+pad(now.getDate()),time=pad(now.getHours())+":"+pad(now.getMinutes());
- return String(text||"").replace(/\{\{\s*title\s*\}\}/g,title).replace(/\{\{\s*date\s*\}\}/g,date).replace(/\{\{\s*time\s*\}\}/g,time);
+/* ---- {{tags}}: the date, time and title, filled in when a template is used or picked after typing {{ --------------- */
+// {{date}} {{time}} {{title}}; a format after a colon ({{date:YYYY年M月D日 dddd}}) and an offset before it ({{date-1d}} is
+// yesterday; y M w d h m, M the month and m the minute, as in Obsidian and moment). Text in [brackets] is kept as it is.
+// A tag it does not know is left alone.
+const TAG_RE=/\{\{\s*(date|time|title)\s*(?:([+-]\s*\d+)\s*([yMwdhm]))?\s*(?::([^{}\n]*))?\}\}/g;
+const DATE_RE=/\[([^\]]*)\]|YYYY|YY|GGGG|MMMM|MMM|MM|M|DD|D|dddd|ddd|d|HH|H|hh|h|mm|m|ss|s|A|Q|WW|W/g;
+function shifted(n,unit){
+ const t=new Date();if(!n)return t;
+ if(unit==="y"||unit==="M"){
+  // A month on from 31 January is the end of February, not 3 March.
+  const day=t.getDate();t.setDate(1);t.setMonth(t.getMonth()+n*(unit==="y"?12:1));
+  t.setDate(Math.min(day,new Date(t.getFullYear(),t.getMonth()+1,0).getDate()));
+ }else if(unit==="w"||unit==="d")t.setDate(t.getDate()+n*(unit==="w"?7:1));
+ else if(unit==="h")t.setHours(t.getHours()+n);
+ else t.setMinutes(t.getMinutes()+n);
+ return t;
 }
-function templates(){return (S.data.docs||[]).filter(d=>d.path.startsWith(TEMPLATE_DIR+"/"));}
-async function templateBody(path){return (await rpc("file_read",{path})).doc?.body||"";}
+// ISO 8601: weeks start on Monday, and the first week of a year is the one with its first Thursday.
+function isoWeek(t){
+ const d=new Date(t.getFullYear(),t.getMonth(),t.getDate());d.setDate(d.getDate()+3-(d.getDay()+6)%7);
+ const jan4=new Date(d.getFullYear(),0,4);
+ return {year:d.getFullYear(),week:1+Math.round(((d-jan4)/864e5-3+(jan4.getDay()+6)%7)/7)};
+}
+export function formatDate(t,format){
+ const pad=n=>String(n).padStart(2,"0"),name=o=>new Intl.DateTimeFormat(LOCALE,o).format(t),h12=t.getHours()%12||12;
+ return String(format).replace(DATE_RE,(tok,kept)=>{
+  if(kept!=null)return kept;
+  switch(tok){
+   case "YYYY":return String(t.getFullYear());case "YY":return pad(t.getFullYear()%100);case "GGGG":return String(isoWeek(t).year);
+   case "MMMM":return name({month:"long"});case "MMM":return name({month:"short"});case "MM":return pad(t.getMonth()+1);case "M":return String(t.getMonth()+1);
+   case "DD":return pad(t.getDate());case "D":return String(t.getDate());
+   case "dddd":return name({weekday:"long"});case "ddd":return name({weekday:"short"});case "d":return String(t.getDay());
+   case "HH":return pad(t.getHours());case "H":return String(t.getHours());case "hh":return pad(h12);case "h":return String(h12);
+   case "mm":return pad(t.getMinutes());case "m":return String(t.getMinutes());case "ss":return pad(t.getSeconds());case "s":return String(t.getSeconds());
+   case "A":return t.getHours()<12?$t("上午"):$t("下午");case "Q":return String(Math.floor(t.getMonth()/3)+1);
+   case "WW":return pad(isoWeek(t).week);case "W":return String(isoWeek(t).week);
+  }
+  return tok;
+ });
+}
+export function fillTags(text,title=""){
+ return String(text||"").replace(TAG_RE,(whole,name,n,unit,format)=>name==="title"?title:
+  formatDate(shifted(Number(String(n||0).replace(/\s/g,"")),unit),format?.trim()||(name==="date"?"YYYY-MM-DD":"HH:mm")));
+}
+export function isTemplate(path){return String(path||"").startsWith(TEMPLATE_DIR+"/");}
+export function templates(){return (S.data.docs||[]).filter(d=>isTemplate(d.path));}
+export async function templateBody(path){return (await rpc("file_read",{path})).doc?.body||"";}
 async function dailyNote(){
  const now=new Date(),pad=n=>String(n).padStart(2,"0"),title=now.getFullYear()+"-"+pad(now.getMonth()+1)+"-"+pad(now.getDate());
  const had=(S.data.docs||[]).find(d=>d.title===title&&d.path.startsWith("notes/"+DAILY_DIR+"/"));
  if(had)return openFile(had.path);
  const tpl=templates().find(d=>d.title===DAILY_DIR||d.title==="日记模板");
- const r=await rpc("doc_create",{kind:"note",title,folder:DAILY_DIR,body:tpl?fillTemplate(await templateBody(tpl.path),title):""});
+ const r=await rpc("doc_create",{kind:"note",title,folder:DAILY_DIR,body:tpl?fillTags(await templateBody(tpl.path),title):""});
  Side.open.add("notes/"+DAILY_DIR);await refreshState();Side.entries={};
  return openFile(r.path,{line:1,select:false});
 }
@@ -293,7 +333,7 @@ function noteMenu(path,kind,at){
   '<hr/>'+item("note-delete","trash",$t("删除"));
  else html=item("note-new","notenew",$t("新笔记"),'data-folder="'+esc(folder)+'"')+item("folder-new","folderplus",$t("新文件夹"),'data-folder="'+esc(folder)+'"')+
   (tpl.length?"<div class=\"menu-label\">"+$t("从模板新建")+"</div>"+tpl.map(t=>'<button data-action="note-template" data-folder="'+esc(folder)+'" data-template="'+esc(t.path)+'">'+svg("document",14)+'<span>'+esc(t.title)+'</span></button>').join(""):
-   "<div class=\"menu-empty\">"+$t("在 notes/模板/ 里放笔记就能当模板用（{{title}} {{date}} {{time}} 会被替换）")+"</div>")+
+   "<div class=\"menu-empty\">"+$t("在 notes/模板/ 里放笔记就能当模板用（{{title}} {{date}} {{time}} 会被替换，可以写格式，如 {{date:YYYY年M月D日 dddd}}）")+"</div>")+
   (kind==="folder"?'<hr/>'+item("note-rename","edit",$t("重命名"))+item("note-move","folder",$t("移动到…"))+item("note-delete","trash",$t("删除这个文件夹")):"");
  popMenu(at,html,{cls:"menu-wide"});
 }
@@ -314,7 +354,7 @@ export async function notesAction(kind,a){
  const path=a.dataset.path;
  switch(kind){
   case "note-new":return newNote(targetFolder(a));
-  case "note-template":{const title=uniqueTitle($t("未命名"));return newNote(targetFolder(a),fillTemplate(await templateBody(a.dataset.template),title),title);}
+  case "note-template":{const title=uniqueTitle($t("未命名"));return newNote(targetFolder(a),fillTags(await templateBody(a.dataset.template),title),title);}
   case "folder-new":{
    const parent=a.dataset.folder?"notes/"+targetFolder(a):"notes",base=$t("新文件夹"),names=new Set((await treeEntries(parent)).map(e=>e.name));
    let name=base;for(let i=2;names.has(name);i++)name=base+" "+i;

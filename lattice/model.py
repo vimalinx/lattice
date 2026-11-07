@@ -31,6 +31,7 @@ LINK_KINDS = {"prerequisite", "part_of", "related", "applies_to", "contrasts", "
 ACYCLIC = {"prerequisite", "part_of"}
 FOLDER = {kind: folder for folder, kind in MD_KINDS.items()}
 MINE = "## 我的理解"
+TEMPLATES = "notes/模板/"  # notes kept to start others from (ui/notes.js)
 # Learner-owned card attributes; agents never write them, and a shell command that does is undone.
 CARD_OWNED = ("stage", "due", "reviews")
 # Journal entries the agents may write with `record`; everything else is written by Lattice itself.
@@ -131,6 +132,7 @@ class Lattice:
             from .migrate import migrate
             self.migrated = migrate(migrate_from, self)
         self.vault.commit("我的编辑", "me")
+        self._date_tag_notes()
 
     rows = property(lambda self: self.index.rows)
 
@@ -145,6 +147,23 @@ class Lattice:
         lines.insert(len(lines) if after is None else after + 1, line)
         self.vault.write_text("AGENTS.md", "\n".join(lines) + "\n")
         self.index.reindex("AGENTS.md")
+
+    def _date_tag_notes(self):
+        """Once per vault: every note gets the day it was written as a tag, as a new one does when it is made. The notes
+        keep their time of change, and a tag taken off later stays off."""
+        if self.setting("note_date_tags"):
+            return
+        for row in self.docs("note"):
+            day = str(row["attrs"].get("created") or row["created"] or "")[:10]
+            if row["path"].startswith(TEMPLATES) or not re.fullmatch(r"\d{4}-\d\d-\d\d", day):
+                continue
+            attrs, body = self.vault.read_md(row["path"])
+            tags = [str(t) for t in attrs.get("tags") or []]
+            if day not in tags:
+                self.vault.write_md(row["path"], {**attrs, "tags": [day, *tags]}, body)
+                self.index.reindex(row["path"])
+        self.vault.commit("每篇笔记加上写下它的日期作标签", "lattice")
+        self.set_setting("note_date_tags", True)
 
     def settings(self):
         try:
@@ -487,7 +506,12 @@ class Lattice:
         """A note in a folder under notes/; an empty folder means notes/ itself."""
         clean = "/".join(p for p in re.sub(r'[\\:*?"<>|]', " ", str("随手记" if folder is None else folder)).split("/") if p.strip() and p.strip() not in (".", ".."))
         folder = "notes" + ("/" + clean.strip()[:120] if clean.strip() else "")
-        attrs = {"id": uid(), "kind": "note", "title": title_of(title), "tags": [text(str(t), 40) for t in list(tags)[:20]], "by": by, "topic": topic}
+        # Every note carries the day it was written as a tag, a template excepted.
+        tags = [text(str(t), 40) for t in list(tags)[:20]]
+        day = now()[:10]
+        if not (folder + "/").startswith(TEMPLATES) and day not in tags:
+            tags.insert(0, day)
+        attrs = {"id": uid(), "kind": "note", "title": title_of(title), "tags": tags, "by": by, "topic": topic}
         return self._write_doc(folder, attrs, text(body))
 
     def insight_add(self, topic, kind, name, detail, practice=None, by="tutor"):

@@ -2,15 +2,16 @@ import {$t} from "./i18n.js";
 import {Dock,panelHand,panelType} from "./state.js";
 import {S,all,ask,baseName,button,cardTypeName,closeModal,el,emptyState,esc,fmtDate,hydrateVault,iconButton,linkName,markdown,modal,modalHead,outputHtml,rpc,safe,stageName,svg,toast,who} from "./core.js";
 import {closePanel,openPanel,refreshTab,saveLayout} from "./dock.js";
-import {destroyEditors,editorGoto,editorHost,editorIn,editorViewport,focusEditor,insertTable,mountEditors} from "./editor.js";
+import {destroyEditors,editorGoto,editorHost,editorIn,editorViewport,focusEditor,insertTable,knownTags,mountEditors} from "./editor.js";
 import {journalRow,routeClass,routeStep,snippetRuns} from "./blocks.js";
 import {actionChips,topicTitle} from "./chat.js";
-import {Notes,embedsChanged,noteCursor,noteFollow,noteInfoChanged,openHref,openWiki,resolveWiki,showTag} from "./notes.js";
+import {Notes,embedsChanged,fillTags,formatDate,isTemplate,noteCursor,noteFollow,noteInfoChanged,openHref,openWiki,resolveWiki,showTag,templateBody,templates} from "./notes.js";
 import {bookGoto} from "./books.js";
 import {gotoAnchor,marksRefresh} from "./marks.js";
 import {SkillBook} from "./skillstore.js";
 import {sideChanged} from "./side.js";
 import {opt} from "./panels.js";
+import {suggest} from "./popups.js";
 import {Menus,popMenu,refreshState,reportScreen,viewedFlush} from "./app.js";
 /* The learner's panels: one workbench for every file in the vault or a mounted folder.
    Text autosaves; notes, cards and topics get a form over their file; notebooks run in their kernel;
@@ -155,10 +156,18 @@ function csvTable(text,sep){
 export const MD_MODES=[["live",$t("实时预览")],["source",$t("源码")],["split",$t("分屏")],["preview",$t("阅读")]];
 // How a Markdown file shows, and the raw file behind a form: in the file's ⋯ menu, not on the page.
 function fileMenu(pid,anchor){
- const st=Files[pid],d=st.data,form=d.doc||d.card||d.topic,mode=st.raw?"":st.mode;
- popMenu(anchor,"<div class=\"menu-label\">"+$t("显示方式")+" <small>"+$t("Ctrl + E 在编辑和阅读之间切换")+"</small></div>"+MD_MODES.map(([m,t])=>'<button data-action="file-mode" data-pid="'+pid+'" data-mode="'+m+'"'+(st.raw?" disabled":"")+'>'+svg(mode===m?"check":"document",14)+'<span>'+t+'</span></button>').join("")+(st.mode!=="preview"&&!st.raw?"<hr/><button data-action=\"file-table\" data-pid=\""+pid+"\">"+svg("layout",14)+"<span>"+$t("插入表格 · Ctrl Shift T")+"</span></button>":"")+(form?'<hr/><button data-action="file-raw" data-pid="'+pid+'">'+svg(st.raw?"layout":"code",14)+'<span>'+(st.raw?$t("回到表单"):$t("编辑原文（包括开头的属性）"))+'</span></button>':"")+"<hr/><div class=\"menu-row\"><span>"+$t("笔记字号")+"</span><div class=\"ctl\"><button class=\"step\" data-action=\"ui-step\" data-pid=\""+pid+"\" data-key=\"note_font_size\" data-dir=\"-1\">A−</button><b>"+(Number(S.ui.note_font_size)||16)+"</b><button class=\"step\" data-action=\"ui-step\" data-pid=\""+pid+"\" data-key=\"note_font_size\" data-dir=\"1\">A+</button></div></div><hr/><button data-action=\"open-settings\" data-page=\"look\">"+svg("sliders",14)+"<span>"+$t("笔记默认的显示方式…")+"</span></button>",{cls:"menu-wide"});
+ const st=Files[pid],d=st.data,form=d.doc||d.card||d.topic,mode=st.raw?"":st.mode,tpl=d.doc?templates().filter(t=>t.path!==Dock.panels[pid]?.path):[];
+ popMenu(anchor,"<div class=\"menu-label\">"+$t("显示方式")+" <small>"+$t("Ctrl + E 在编辑和阅读之间切换")+"</small></div>"+MD_MODES.map(([m,t])=>'<button data-action="file-mode" data-pid="'+pid+'" data-mode="'+m+'"'+(st.raw?" disabled":"")+'>'+svg(mode===m?"check":"document",14)+'<span>'+t+'</span></button>').join("")+(st.mode!=="preview"&&!st.raw?"<hr/><button data-action=\"file-table\" data-pid=\""+pid+"\">"+svg("layout",14)+"<span>"+$t("插入表格 · Ctrl Shift T")+"</span></button>"+(tpl.length?"<div class=\"menu-label\">"+$t("插入模板")+" <small>"+$t("输入 {{ 插入日期、时间")+"</small></div>"+tpl.map(t=>'<button data-action="file-template" data-pid="'+pid+'" data-template="'+esc(t.path)+'">'+svg("document",14)+'<span>'+esc(t.title)+'</span></button>').join(""):""):"")+(form?'<hr/><button data-action="file-raw" data-pid="'+pid+'">'+svg(st.raw?"layout":"code",14)+'<span>'+(st.raw?$t("回到表单"):$t("编辑原文（包括开头的属性）"))+'</span></button>':"")+"<hr/><div class=\"menu-row\"><span>"+$t("笔记字号")+"</span><div class=\"ctl\"><button class=\"step\" data-action=\"ui-step\" data-pid=\""+pid+"\" data-key=\"note_font_size\" data-dir=\"-1\">A−</button><b>"+(Number(S.ui.note_font_size)||16)+"</b><button class=\"step\" data-action=\"ui-step\" data-pid=\""+pid+"\" data-key=\"note_font_size\" data-dir=\"1\">A+</button></div></div><hr/><button data-action=\"open-settings\" data-page=\"look\">"+svg("sliders",14)+"<span>"+$t("笔记默认的显示方式…")+"</span></button>",{cls:"menu-wide"});
  Menus.reopen=()=>fileMenu(pid,anchor);
 }
+/* Going into a note's tags offers today's date first, then the tags in use, most used first, and other days' dates last. */
+async function tagChoices(input){
+ const today=formatDate(new Date(),"YYYY-MM-DD"),day=/^\d{4}-\d\d-\d\d$/,tags=(await knownTags()).map(t=>t.tag).filter(t=>t!==today);
+ const list=el("#note-tags");if(!list)return;
+ list.innerHTML=[today,...tags.filter(t=>!day.test(t)),...tags.filter(t=>day.test(t))].map(t=>'<option value="'+esc(t)+'">').join("");
+ if(document.activeElement===input)suggest(input);
+}
+document.addEventListener("focusin",e=>{if(e.target.dataset?.docField==="tags")safe(()=>tagChoices(e.target));});
 function runOutput(pid){
  const r=Files[pid].run;
  if(!r)return '<div class="run-out empty" data-run-out="'+pid+'"></div>';
@@ -201,7 +210,7 @@ export function runEvent(evt){
 function docView(pid){
  const st=Files[pid],d=st.data,a=d.doc.attrs||{},kind=d.kind;
  if(st.raw)return rawView(pid);
- const fields="<input class=\"doc-title\" data-field=\"title\" data-doc-field=\"title\" value=\""+esc(d.doc.title)+"\" placeholder=\""+$t("标题")+"\"/>"+(kind==="note"?"<input class=\"doc-meta\" data-field=\"tags\" data-doc-field=\"tags\" value=\""+esc((a.tags||[]).join(", "))+"\" placeholder=\""+$t("标签，用逗号分开")+"\"/>":"")+(kind==="lesson"?"<input class=\"doc-meta\" data-field=\"objective\" data-doc-field=\"objective\" value=\""+esc(a.objective||"")+"\" placeholder=\""+$t("这一节想弄懂什么")+"\"/>":"")+(kind==="insight"?'<div class="doc-meta">'+(a.insight==="strength"?$t("做得好的地方"):$t("薄弱点"))+' · '+(a.state==="resolved"?$t("已克服"):$t("主会话正在留意"))+(a.state!=="resolved"?button($t("已克服"),"insight-resolve",'data-id="'+esc(d.doc.id)+'"',"ghost xs"):"")+'</div>':"");
+ const fields="<input class=\"doc-title\" data-field=\"title\" data-doc-field=\"title\" value=\""+esc(d.doc.title)+"\" placeholder=\""+$t("标题")+"\"/>"+(kind==="note"?"<input class=\"doc-meta\" data-field=\"tags\" data-doc-field=\"tags\" data-suggest=\"note-tags\" data-suggest-many value=\""+esc((a.tags||[]).join(", "))+"\" placeholder=\""+$t("标签，用逗号分开")+"\"/>":"")+(kind==="lesson"?"<input class=\"doc-meta\" data-field=\"objective\" data-doc-field=\"objective\" value=\""+esc(a.objective||"")+"\" placeholder=\""+$t("这一节想弄懂什么")+"\"/>":"")+(kind==="insight"?'<div class="doc-meta">'+(a.insight==="strength"?$t("做得好的地方"):$t("薄弱点"))+' · '+(a.state==="resolved"?$t("已克服"):$t("主会话正在留意"))+(a.state!=="resolved"?button($t("已克服"),"insight-resolve",'data-id="'+esc(d.doc.id)+'"',"ghost xs"):"")+'</div>':"");
  return '<div class="doc-view" data-keep-scroll><div class="doc-head">'+fields+'</div>'+mdBody(pid,d.doc.body,'data-field="body" data-doc-field="body"',{placeholder:$t("开始写…  [[ 链接别的笔记，# 加标签，粘贴图片直接放进来")},true)+'</div>'+linksBlock(pid,d.links||[],d.doc.id);
 }
 function rawView(pid){
@@ -460,6 +469,12 @@ export async function fileAction(kind,a){
  case "file-menu":return fileMenu(pid,a);
  case "file-table":{const v=Dock.els[pid]?.querySelector(".cm-host.editor")?.cmView;if(!v)return;if(Files[pid].mode!=="live"){Files[pid].mode="live";p.mode="live";renderFile(pid);}
   const view=Dock.els[pid].querySelector(".cm-host.editor").cmView;view.focus();return insertTable(view);}
+ // A template into the open note, at the cursor, its {{tags}} filled in for this note (kept as they are in another template).
+ case "file-template":{
+  const raw=await templateBody(a.dataset.template),body=isTemplate(p.path)?raw:fillTags(raw,st.data.doc?.title||""),view=Dock.els[pid]?.querySelector(".cm-host.editor")?.cmView;if(!view)return;
+  const r=view.state.selection.main;view.focus();
+  return view.dispatch({changes:{from:r.from,to:r.to,insert:body},selection:{anchor:r.from+body.length},scrollIntoView:true,userEvent:"input"});
+ }
  case "file-mode":await flushFile(pid);st.mode=a.dataset.mode;p.mode=st.mode;saveLayout();renderFile(pid);return st.mode!=="preview"&&focusEditor(Dock.els[pid]);
  case "file-raw":await flushFile(pid);st.raw=!st.raw;return loadFile(pid);
  case "file-external":return rpc("file_external",{path:p.path});

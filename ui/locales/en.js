@@ -389,7 +389,7 @@ export default {
  "图还是空的": "The map is empty",
  "在 ChatGPT 里打开那段对话，点右上角的「分享」→「复制链接」，贴到下面。导入后它成为主会话的一段会话，接着聊；主会话知道前面是另一个 AI 说的。": "Open the conversation in ChatGPT, click “Share” → “Copy link” at the top right, and paste it below. Once imported, it becomes a Tutor conversation you can carry on; the Tutor knows the earlier part was said by another AI.",
  "在 Lattice 里读": "Read in Lattice",
- "在 notes/模板/ 里放笔记就能当模板用（{{title}} {{date}} {{time}} 会被替换）": "Put notes in notes/模板/ to use them as templates ({{title}} {{date}} {{time}} are filled in)",
+ "在 notes/模板/ 里放笔记就能当模板用（{{title}} {{date}} {{time}} 会被替换，可以写格式，如 {{date:YYYY年M月D日 dddd}}）": "Put notes in notes/模板/ to use them as templates ({{title}} {{date}} {{time}} are filled in, with a format if you like, as in {{date:MMMM D, YYYY dddd}})",
  "在 {0} 上的对比度只有 {1}（至少要": "has a contrast of only {1} on {0} (needs at least",
  "在代码文件里：运行": "In a code file: run",
  "在代码里缩进": "Indent in code",
@@ -1433,5 +1433,18 @@ export default {
  "，它本身是一个 git 仓库，可以用任何编辑器直接改。": ", which is itself a git repository you can edit directly with any editor.",
  "，有没保存的修改": ", with unsaved changes",
  "，第 {0} 格": ", cell {0}",
- "；这时": "; then"
+ "；这时": "; then",
+ "上午": "AM",
+ "下午": "PM",
+ "日期": "Date",
+ "时间": "Time",
+ "日期和时间": "Date and time",
+ "YYYY年M月D日": "MMMM D, YYYY",
+ "长日期": "Long date",
+ "星期": "Weekday",
+ "昨天": "Yesterday",
+ "第几周": "Week",
+ "这个格式": "This format",
+ "插入模板": "Insert template",
+ "输入 {{ 插入日期、时间": "Type {{ for the date or time"
 };
