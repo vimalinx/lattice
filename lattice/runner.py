@@ -109,6 +109,8 @@ class RunWorker(QThread):
                 self.argv, self.env = self.prepare(lambda message: self.emit("status", message=message))
             if self.cancelled.is_set():
                 raise InterruptedError
+            # The time limit is the program's own: installing what it needs does not use it up.
+            started = time.monotonic()
             self.figures.mkdir(parents=True, exist_ok=True)
             self.emit("status", message="")
             self.proc = subprocess.Popen(self.argv, cwd=self.cwd, env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
