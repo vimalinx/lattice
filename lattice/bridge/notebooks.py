@@ -169,7 +169,8 @@ class NotebooksPart:
         targets = [c for c in nb["cells"] if c["kind"] == "code" and (not wanted or c["id"] in wanted)]
         if not targets:
             raise ValueError(tr("没有可以运行的代码单元格"))
-        runs = [{"id": uid(), "cell_id": c["id"], "source": c["source"]} for c in targets]
+        # Cells the learner runs go on until they interrupt them; an AI's are held to the time limit in the settings.
+        runs = [{"id": uid(), "cell_id": c["id"], "source": c["source"], **({"timeout": None} if by == "me" else {})} for c in targets]
         self.batches[nb["id"]] = {"path": nb["path"], "by": by, "runs": runs, "results": {}, "waiters": [], "attempt": attempt, "mode": mode}
         try:
             self._kernel(nb, mode).submit(runs)

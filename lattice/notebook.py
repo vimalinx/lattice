@@ -123,14 +123,15 @@ class NotebookWorker(QThread):
         outputs, count, status, used = [], None, "completed", 0
         clear_wait, displays = False, {}
         output_limited = False
-        deadline, interrupted_at, needs_restart = time.monotonic() + self.timeout, None, False
+        limit = run.get("timeout", self.timeout)
+        deadline, interrupted_at, needs_restart = time.monotonic() + (limit if limit is not None else float("inf")), None, False
         while True:
             clock = time.monotonic()
             if (self.cancelled.is_set() or self.stopping.is_set() or clock >= deadline) and interrupted_at is None:
                 if status != "error":
                     status = "cancelled" if clock < deadline else "error"
                 if clock >= deadline:
-                    outputs.append({"output_type": "error", "ename": "ExecutionTimeout", "evalue": f"执行超过 {self.timeout} 秒，已发送中断。", "traceback": []})
+                    outputs.append({"output_type": "error", "ename": "ExecutionTimeout", "evalue": f"执行超过 {limit} 秒，已发送中断。", "traceback": []})
                 self.km.interrupt_kernel()
                 interrupted_at = clock
             if interrupted_at is not None and clock - interrupted_at > 4:

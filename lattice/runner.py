@@ -130,7 +130,7 @@ class RunWorker(QThread):
                 if self.cancelled.is_set():
                     state = "cancelled"
                     self._kill()
-                if time.monotonic() - started > self.timeout and state == "completed":
+                if self.timeout is not None and time.monotonic() - started > self.timeout and state == "completed":
                     state = "timeout"
                     self._kill()
                 try:

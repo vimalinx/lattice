@@ -115,7 +115,9 @@ class RunningPart:
             env = {**os.environ, **host.UTF8, **figures, "PYTHONPATH": os.pathsep.join(x for x in (str(MPL), os.environ.get("PYTHONPATH")) if x)}
             return (on_gpu(host.runner_argv(command), accelerated) if accelerated else host.runner_argv(command)), env
         scratch.mkdir(parents=True, exist_ok=True)
-        worker = RunWorker(run_id, None, str(workdir), None, max(self.config.read()["run_timeout"], int(timeout or 0)), scratch, prepare)
+        # The learner's own runs go on until they stop them; an AI's are held to the time limit in the settings.
+        limit = None if by == "me" else max(self.config.read()["run_timeout"], int(timeout or 0))
+        worker = RunWorker(run_id, None, str(workdir), None, limit, scratch, prepare)
         self.runs[run_id] = {"path": shown, "by": by, "sandbox": sandboxed, "gpu": gpu, "worker": worker, "waiters": [], "attempt": attempt, "timeout": timeout,
                              "cwd": cwd, "snippet": rel is None and str(absolute).startswith(str(self.root / ".lattice"))}
         worker.event.connect(self.run_event)
