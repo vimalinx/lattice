@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lattice</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Lattice 是一个本地的 AI 学习工作台：AI 讲解、画图、出题，你在旁边写笔记、跑代码、做卡片。免费开源，Windows、macOS、Linux。">
+<meta property="og:title" content="Lattice · 有个 AI 陪你，把东西真正学懂">
+<meta property="og:description" content="本地的 AI 学习工作台：讲解、画图、出题、跑代码、记卡片，所有东西都是你电脑上的普通文件。免费开源。">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preload" href="fonts/serif-black.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="vendor/katex/katex.min.css">
+<link rel="stylesheet" href="ui/lattice-ui.css">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+
+<header class="top" id="top-bar">
+  <div class="inner">
+    <a class="brand" href="#hero"><svg viewBox="0 0 128 128" aria-hidden="true"><rect width="128" height="128" rx="29" fill="#11171d"/><path d="M29 82 57 31 86 82M57 31 97 53M29 82l68-29M86 82 97 53" fill="none" stroke="#79dbc1" stroke-width="9" stroke-linejoin="round" stroke-linecap="round"/><circle cx="57" cy="31" r="9" fill="#e6faf3"/><circle cx="29" cy="82" r="9" fill="#e6faf3"/><circle cx="86" cy="82" r="9" fill="#e6faf3"/><circle cx="97" cy="53" r="8" fill="#e6faf3"/></svg>Lattice</a>
+    <nav aria-label="页面">
+      <a class="opt" href="#tabs">标签</a>
+      <a class="opt" href="#context">上下文</a>
+      <a class="opt" href="#hands">动手</a>
+      <a class="opt" href="#yours">文件</a>
+      <a class="opt" href="https://github.com/vimalinx/lattice">GitHub</a>
+      <a class="get" href="#download">下载</a>
+    </nav>
+  </div>
+  <div class="progress" id="progress"></div>
+</header>
+
+<main>
+<!-- ============ hero ============ -->
+<section class="hero band" id="hero" aria-labelledby="hero-title">
+  <canvas class="hero-net" id="hero-net" aria-hidden="true"></canvas>
+  <div class="inner">
+    <div class="hero-grid">
+      <div>
+        <p class="kicker" data-rise>本地的 AI 学习工作台 · 免费开源</p>
+        <h1 class="display" id="hero-title" style="margin-top:22px">
+          <span class="split-line"><span data-chars>有个 AI 陪你，</span></span>
+          <span class="split-line"><span data-chars>把东西<span class="t">真正学懂</span>。</span></span>
+        </h1>
+        <p class="lede" data-rise>它讲解、画图、出题；你在旁边写笔记、跑代码、做卡片，全在一个界面里。学过的一切，都是你电脑上一个文件夹里的普通文件。</p>
+        <div class="ctas" data-rise>
+          <a class="btn solid" id="cta" href="#download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg><span id="cta-label">下载</span></a>
+          <a class="btn line" href="https://github.com/vimalinx/lattice"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.4-1.1-1.1-1.4-1.1-1.4-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.4 1.1 3 .8.1-.6.3-1.1.6-1.3-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9V21c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg>GitHub</a>
+          <span class="meta">MIT · Windows · macOS · Linux</span>
+        </div>
+      </div>
+      <p class="hero-side" aria-hidden="true"><b>格</b>　一个点连着一个点<br>学过的东西连成一张网</p>
+    </div>
+    <p class="trail" aria-label="学习率 0.5 时，猜测 p 一步步挪到目标 1">
+      <code>p += lr * error</code><span>lr = 0.5</span><span aria-hidden="true">→</span>
+      <span class="n">0.50</span><span class="n">0.75</span><span class="n">0.88</span><span class="n">0.94</span><span class="n">0.97</span><span class="n">0.98</span><span class="n">0.99</span><span class="n hit">1.00</span>
+    </p>
+    <div class="hero-stage">
+      <div class="win zoomable" id="hero-win" data-layers="hero" role="img" aria-label="Lattice 的学习工作状态：左栏是按主题和会话排的文件，中间主会话画关系图、出小实验，右上快答回答选中的代码，右下是卡片库">
+        <div class="scale"><div class="ov" id="hero-ov"></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 壹 tabs ============ -->
+<section class="chapter band" id="tabs" aria-labelledby="tabs-title">
+  <div class="ch-head">
+    <div class="ch-num" aria-hidden="true">壹<small>TABS</small></div>
+    <div>
+      <h2 class="display" id="tabs-title"><span class="split-line"><span data-chars>什么都是一个标签，</span></span><span class="split-line"><span data-chars>摆在<span class="t">哪儿</span>都行。</span></span></h2>
+      <p class="lede" data-rise>主会话、快答、笔记、代码、卡片库、电子书，在 Lattice 里都是同一种东西：一个标签。叠在一起，拖到旁边分栏，浮出来，放进另一块屏幕。一种做事的样子存成一个工作状态，底栏一点就换。</p>
+    </div>
+  </div>
+</section>
+<section class="scene band" id="tabs-scene" aria-label="拆开一个窗口，再换几个工作状态">
+  <div class="scene-grid">
+    <div class="steps" id="tabs-steps">
+      <div class="step">
+        <span class="idx">01 / 拆开看</span>
+        <h3>一个窗口，几块积木</h3>
+        <p>左边的活动栏换左栏列表；左栏按主题、会话列出文件；中间和右边是几组标签；最下面是工作状态。</p>
+      </div>
+      <div class="step">
+        <span class="idx">02 / 换个做事的样子</span>
+        <h3>工作状态</h3>
+        <div class="wslist" id="wslist"></div>
+      </div>
+    </div>
+    <div class="win zoomable" id="tabs-win" data-layers="hero ws_write ws_cards ws_read ws_work ws_map ws_skills" role="img" aria-label="Lattice 窗口，随着滚动拆开成几块，再依次换成写作、复习、阅读、动手、梳理、定制几个工作状态">
+      <div class="scale"><div class="ov" id="tabs-ov"></div></div>
+    </div>
+  </div>
+</section>
+<section class="band" aria-labelledby="play-title">
+  <div class="play">
+    <div class="play-board lt light" id="play" aria-label="可以拖动标签的演示窗口"></div>
+    <div class="play-notes">
+      <span class="kicker">自己试试</span>
+      <h3 id="play-title">拖一个标签</h3>
+      <p>按住标签拖到另一组上合并，拖到一组的边上就分出新的一栏。真正的 Lattice 里还能拖出来浮着，或者拖进另一块屏幕上的窗口。</p>
+      <div class="keys">
+        <span><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>1…9</kbd>　切工作状态</span>
+        <span><kbd>F6</kbd>　在各块之间走</span>
+        <span><kbd>Ctrl</kbd> + <kbd>W</kbd>　关掉当前标签</span>
+      </div>
+      <button class="btn line" type="button" id="play-reset">摆回原样</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 贰 context ============ -->
+<section class="chapter band" id="context" aria-labelledby="ctx-title">
+  <div class="ch-head">
+    <div class="ch-num" aria-hidden="true">贰<small>CONTEXT</small></div>
+    <div>
+      <h2 class="display" id="ctx-title"><span class="split-line"><span data-chars>整个界面，</span></span><span class="split-line"><span data-chars>就是它的<span class="v">上下文</span>。</span></span></h2>
+      <p class="lede" data-rise>你开着什么、在看哪一块、选中了哪句话，AI 都知道。它不用你复制粘贴，要看哪个标签，自己去读：没保存的草稿、刚跑出来的输出、小应用此刻的界面，都读得到。</p>
+    </div>
+  </div>
+</section>
+<section class="scene band" id="ctx-scene" aria-label="快答拿到界面上开着的标签目录，再自己去读一个标签">
+  <div class="scene-grid flip">
+    <div class="win zoomable" id="ctx-win" data-layers="hero" role="img" aria-label="快答收到一份标签目录：每个开着的标签的编号、种类和标题，前台的、正在用的、选中的文字；然后它读了代码标签">
+      <div class="scale"><div class="ov" id="ctx-ov"></div></div>
+    </div>
+    <div class="steps" id="ctx-steps">
+      <div class="step">
+        <span class="idx">01 / 每条消息带着一份目录</span>
+        <h3>开着的每个标签，它都有数</h3>
+        <p>快答不属于哪段对话。你每问一句，它都会拿到一份界面上开着的标签目录：编号、种类、标题，哪个在前台，哪个是你正在用的。</p>
+      </div>
+      <div class="step">
+        <span class="idx">02 / 选中就是在指</span>
+        <h3>「这个」指的是哪个</h3>
+        <p>选中的那句话和它的出处一起附上。所以你说「这一行在干嘛」，它知道是哪个文件的第几行。</p>
+      </div>
+      <div class="step">
+        <span class="idx">03 / 要看就自己去读</span>
+        <h3>需要才读，不塞满上下文</h3>
+        <p>目录只是目录。答题要看哪个标签，它用 <code>tab</code> 工具按编号去读：笔记全文、代码草稿、主会话的消息、网页、应用的界面。主会话和练习教练也有这套工具。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 叁 quick answer ============ -->
+<section class="chapter band" id="flash" aria-labelledby="flash-title">
+  <div class="ch-head">
+    <div class="ch-num" aria-hidden="true">叁<small>QUICK ANSWER</small></div>
+    <div>
+      <h2 class="display" id="flash-title"><span class="split-line"><span data-chars>主线不断，</span></span><span class="split-line"><span data-chars>小问题交给<span class="v">快答</span>。</span></span></h2>
+      <p class="lede" data-rise>主会话负责把一件事讲透。路上冒出来的小疑问，选中那句话问快答，主讲不用停下来。你在快答里问过什么，主会话下一轮都看得到。</p>
+    </div>
+  </div>
+</section>
+<section class="scene band" id="flash-scene" aria-label="选中一行代码问快答，问过的地方留下下划线，点开是在那儿问过的所有问答">
+  <div class="scene-grid">
+    <div class="steps" id="flash-steps">
+      <div class="step">
+        <span class="idx">01 / 选中</span>
+        <h3>哪句不懂，选中哪句</h3>
+        <p>代码、笔记、书、网页、对话里都行。选中后点「问快答」，问题由你自己写。</p>
+      </div>
+      <div class="step">
+        <span class="idx">02 / 问</span>
+        <h3>它讲那一处在那里的作用</h3>
+        <p>不泛泛讲定义。两三句话，一个具体例子，常见的误解点出来。</p>
+      </div>
+      <div class="step">
+        <span class="idx">03 / 留下来</span>
+        <h3>问过的地方，留着下划线</h3>
+        <p>快答关了也还在。过几天点那条下划线，在那儿问过的每个问题和回答一起展开，可以接着问，或者交给主会话深入讲。</p>
+      </div>
+    </div>
+    <div class="win zoomable" id="flash-win" data-layers="ws_work asked" role="img" aria-label="动手工作状态：选中代码第 9 行问快答，快答回答；之后点那条下划线，弹出在这一行问过的两个问题">
+      <div class="scale"><div class="ov" id="flash-ov"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 肆 hands-on ============ -->
+<section class="chapter band" id="hands" aria-labelledby="hands-title">
+  <div class="ch-head">
+    <div class="ch-num" aria-hidden="true">肆<small>HANDS-ON</small></div>
+    <div>
+      <h2 class="display" id="hands-title"><span class="split-line"><span data-chars>回复里，</span></span><span class="split-line"><span data-chars>就能<span class="t">动手</span>。</span></span></h2>
+      <p class="lede" data-rise>AI 的回复不只是字：当场画的关系图能拖、能点；小实验能拖参数看曲线变；小题先让你猜，再讲。下面这块就是从主会话里搬出来的，拖一拖试试。</p>
+    </div>
+  </div>
+  <div class="lab">
+    <div class="lt light">
+      <div class="lab-card">
+        <div class="lblock block-explore live"><div class="explore"><div class="explore-head"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg><b>学习率拖到多大开始震荡</b></div><div class="explore-note markdown"><p>目标值是 1。先拖到 0.5 看单调靠近，再拖到 1.5 看两侧来回跳，最后 2.5 直接飞走。</p></div><div class="explore-params"><label class="explore-param"><span>学习率 η</span><input type="range" id="eta" min="0" max="2.5" step="0.05" value="0.5" aria-label="学习率"><b id="eta-out">0.5</b></label></div><div class="explore-chart"><div class="chart"><svg viewBox="0 0 520 260" class="chart-svg" id="chart" role="img" aria-label="参数 p 随更新次数的变化"></svg><div class="chart-legend"><span><i style="background:#1b7868"></i>参数 p</span><span><i style="background:#6b57b8"></i>目标 1</span></div></div></div><div class="explore-reads"><span><small>每步误差乘上</small><b id="read-k">0.5</b></span><span><small>行为</small><b id="read-v">单调靠近</b></span></div></div></div>
+        <div class="lblock block-quiz quiz-card live"><div class="quiz-q"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6m-5 3h4M8 15a6 6 0 1 1 8 0l-1 3H9l-1-3Z"/></svg><div class="markdown"><p>同一个损失函数、同一个起点，把学习率从 0.01 调到 0.5，第一次更新时梯度的值会怎样？</p></div></div><div class="quiz-options" id="quiz"><label><input type="radio" name="q" value="0"> 梯度变大，因为步子大了</label><label><input type="radio" name="q" value="1"> 梯度不变，只有实际走的距离变了</label><label><input type="radio" name="q" value="2"> 梯度变小，因为学习率吃掉了它</label><label><input type="radio" name="q" value="3"> 要看损失函数是不是凸的，凸函数下不变</label></div><p class="judge" id="judge" aria-live="polite">先选一个。在 Lattice 里，你的回答交给快答当场判，主会话接着讲。</p></div>
+      </div>
+    </div>
+    <div class="lab-big">
+      <div class="eta" aria-hidden="true"><small>η =</small><span id="eta-big">0.50</span></div>
+      <div class="verdict ok" id="verdict">单调靠近</div>
+      <p>每一步，误差都乘上 <code>1 − η</code>。η 在 0 到 1 之间，一步步挨近；1 到 2 之间，在目标两边来回跳着收拢；过了 2，每一步都比上一步跳得远。</p>
+      <p>在 Lattice 里，调好的参数可以一键带着问 AI：「η 为什么在 1.8 时还能收敛？」</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 伍 route ============ -->
+<section class="chapter band" id="route" aria-labelledby="route-title">
+  <div class="ch-head">
+    <div class="ch-num" aria-hidden="true">伍<small>ROUTE</small></div>
+    <div>
+      <h2 class="display" id="route-title"><span class="split-line"><span data-chars>哪块不熟，</span></span><span class="split-line"><span data-chars>路线上就<span class="t">补一站</span>。</span></span></h2>
+      <p class="lede" data-rise>不用先建课程，想到什么就问。值得长期学的，主会话自己建成主题，排一条主干路线。你在快答里问的基础问题、答错的小题、卡住的练习，它都看得到，缺哪块就在路线上补一两站，补完接回主干。</p>
+    </div>
+  </div>
+  <div class="route-wrap" id="route-wrap">
+    <svg class="route" id="route-svg" viewBox="0 0 1360 360" role="img" aria-label="主干路线：损失函数、梯度方向、参数更新、学习率、学习曲线；在参数更新之后补了一站过冲震荡"></svg>
+    <div class="route-notes">
+      <div><b>主干</b><p>从你说的那句话出发，排出一条路线。开始前两分钟摸底，已经会的站直接标上。</p></div>
+      <div><b>薄弱点</b><p>快答里问了「η 为什么大于 2 就停不下来」，小题又选错了一次：记下「过冲震荡」这个薄弱点。</p></div>
+      <div><b>补站</b><p>下一轮先讲这一站，回复开头说一句改了什么；补完你会了，再接回主干。</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 陆 cards ============ -->
+<section class="chapter band" id="cards" aria-labelledby="cards-title">
+  <div class="ch-head">
+    <div class="ch-num" aria-hidden="true">陆<small>CARDS</small></div>
+    <div>
+      <h2 class="display" id="cards-title"><span class="split-line"><span data-chars>讲过的，</span></span><span class="split-line"><span data-chars>自己会<span class="t">留下来</span>。</span></span></h2>
+      <p class="lede" data-rise>主会话每讲完一段，整理助手在后台把讲到的概念、原理、方法记成知识卡，分好类型和领域，连上已有的卡。到期了，它们会回来找你。</p>
+    </div>
+  </div>
+  <div class="deck" id="deck" aria-label="知识卡从一摞散开，按类型排好"><div class="lt light" id="deck-lt"></div></div>
+  <div class="turn">
+    <div class="flipcard" id="flipcard" tabindex="0" role="button" aria-pressed="false" aria-label="翻面">
+      <div class="faces">
+        <div class="face front"><small>自测题 · 到期回顾</small><b>学习率太大，参数为什么会来回震荡？</b><p>先自己说一遍，再点卡片翻面。</p></div>
+        <div class="face back"><small>我的理解</small><b>一步跨过谷底，落到对面更高处</b><p>误差每步乘上 1 − η；η &gt; 1 就会跨过目标，η &gt; 2 跨得越来越远。</p><div class="rate"><span>忘了</span><span>模糊</span><span>记得</span></div></div>
+      </div>
+    </div>
+    <div class="flip-copy">
+      <h3>「我的理解」由你来写</h3>
+      <p>AI 只记讲过、你接触过的东西，不替你写理解。回顾时先答再翻面，按记得多少排下一次；卡片按理解阶段走：待探索、接触过、能解释、能应用。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 柒 run ============ -->
+<section class="chapter band" id="run" aria-labelledby="run-title">
+  <div class="ch-head">
+    <div class="ch-num" aria-hidden="true">柒<small>RUN</small></div>
+    <div>
+      <h2 class="display" id="run-title"><span class="split-line"><span data-chars>任何语言，</span></span><span class="split-line"><span data-chars><span class="t">放心地</span>跑。</span></span></h2>
+      <p class="lede" data-rise>Python、C、Rust、Go、Shell，什么文件都能一点就跑，输出实时出来，matplotlib 的图直接显示。Python 环境由 uv 管着，缺包自动装上。AI 跑的命令关在沙箱里。</p>
+    </div>
+  </div>
+</section>
+<section class="scene band" id="run-scene" aria-label="运行代码，输出一行行出来；AI 的命令在沙箱里">
+  <div class="scene-grid flip">
+    <div class="win zoomable" id="run-win" data-layers="ws_work" role="img" aria-label="代码和它的运行输出，旁边是快答">
+      <div class="scale"><div class="ov" id="run-ov"></div></div>
+    </div>
+    <div class="steps" id="run-steps">
+      <div class="step">
+        <span class="idx">01 / 运行</span>
+        <h3>输出在代码下面</h3>
+        <p>每个文件的输出有自己的标签，第一次在代码下面，之后你放哪儿就在哪儿。你自己点的运行一直跑到你停；AI 发起的有时间限制。</p>
+      </div>
+      <div class="step">
+        <span class="idx">02 / 沙箱</span>
+        <h3>AI 看不见你的家目录</h3>
+        <div class="rings" aria-label="沙箱：最里面是 AI 的命令；中间一层是学习库，可写；外层是这台电脑，看不到">
+          <div class="r1">这台电脑 · 家目录 · 凭据</div>
+          <div class="r2">学习库　可写</div>
+          <div class="r3"><b>AI 的命令</b>bubblewrap</div>
+          <span class="x" style="left:2%;top:46%">✕ ~/.ssh</span>
+          <span class="x" style="right:2%;top:58%">✕ 192.168.x.x</span>
+          <span class="ok" style="right:4%;top:20%">✓ pip install</span>
+          <span class="ok" style="left:4%;bottom:6%">✓ 联网经过代理，记进轨迹</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 捌 files ============ -->
+<section class="chapter band" id="yours" aria-labelledby="yours-title">
+  <div class="ch-head">
+    <div class="ch-num" aria-hidden="true">捌<small>YOURS</small></div>
+    <div>
+      <h2 class="display" id="yours-title"><span class="split-line"><span data-chars>东西，</span></span><span class="split-line"><span data-chars>都是<span class="t">你的</span>文件。</span></span></h2>
+      <p class="lede" data-rise>笔记、卡片、对话、实验、轨迹，都是普通的 Markdown、JSON 和 ipynb，放在一个文件夹里。它是一个 git 仓库：AI 的每个动作单独提交、写明是哪个 AI，能一步步撤销。</p>
+    </div>
+  </div>
+  <div class="files">
+    <div class="tree" aria-label="学习库的文件夹"><b>~/Lattice/</b>
+├─ <b>notes/</b>       <i>笔记，像 Obsidian</i>
+├─ <b>cards/</b>       <i>知识卡</i>
+├─ <b>threads/</b>     <i>每段对话一个 jsonl</i>
+├─ <b>topics/</b>      <i>主题档案和路线</i>
+├─ <b>code/</b>        <i>你写的代码</i>
+├─ <b>notebooks/</b>   <i>Jupyter 实验笔记</i>
+├─ <b>annotations/</b> <i>高亮和批注</i>
+├─ <b>skills/</b>      <i>装上的技能，能改</i>
+├─ <b>states/</b>      <i>工作状态，一个一个文件</i>
+├─ AGENTS.md    <i>学习库的规矩</i>
+└─ me.md        <i>AI 记下的关于你的事</i></div>
+    <div class="log" aria-label="学习库的历史：谁在什么时候改了什么">
+      <div class="head"><span>git log · 学习库</span><span>每一步都能撤销</span></div>
+      <ol id="log"></ol>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 玖 models ============ -->
+<section class="chapter band" id="models" aria-labelledby="models-title">
+  <div class="ch-head">
+    <div class="ch-num" aria-hidden="true">玖<small>MODELS</small></div>
+    <div>
+      <h2 class="display" id="models-title"><span class="split-line"><span data-chars>模型，</span></span><span class="split-line"><span data-chars><span class="t">随便接</span>。</span></span></h2>
+      <p class="lede" data-rise>二十多家预设，本机的模型也行，还能完全自定义。每个窗口能单独选模型和思考强度，主会话用强的，快答用快的。token 用量按天、按模型记着。</p>
+    </div>
+  </div>
+  <div class="marquee" aria-hidden="true">
+    <div class="row" id="mq1"></div>
+    <div class="row" id="mq2"></div>
+  </div>
+  <div class="facts band" style="padding:0">
+    <div><b data-count="27">27</b><p>个技能：费曼讲解、苏格拉底追问、论文精读、实验复现……AI 照着做，你能装、能改。</p></div>
+    <div><b data-count="5">5</b><p>个 AI 分工：主会话、快答、练习教练、整理助手、应用助手。每个的规则你都能看、能改。</p></div>
+    <div><b>中 / En</b><p>界面、AI 的规则和技能都有中文和英文两套。</p></div>
+  </div>
+</section>
+
+<!-- ============ 拾 theme ============ -->
+<section class="chapter band" id="theme" aria-labelledby="theme-title">
+  <div class="ch-head">
+    <div class="ch-num" aria-hidden="true">拾<small>LOOK</small></div>
+    <div>
+      <h2 class="display" id="theme-title"><span class="split-line"><span data-chars>白天，</span></span><span class="split-line"><span data-chars>和<span class="t">夜里</span>。</span></span></h2>
+      <p class="lede" data-rise>颜色、字体、圆角、每个窗口的大小和行距都能改；也可以跟 AI 说一句「做个护眼主题」。</p>
+    </div>
+  </div>
+  <div class="theme-stage">
+    <button class="moon" type="button" id="moon" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/></svg><span>换成夜里</span></button>
+    <div class="win" id="theme-win" data-layers="hero hero_dark" role="img" aria-label="同一个界面的浅色和深色">
+      <div class="scale"></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<!-- ============ download ============ -->
+<section class="get-band band" id="download" aria-labelledby="dl-title">
+  <canvas class="get-net" id="get-net" aria-hidden="true"></canvas>
+  <div class="inner" style="position:relative">
+    <span class="kicker" style="color:var(--mint)">下载 · <span id="version">0.3.3</span></span>
+    <h2 class="display" id="dl-title" style="margin-top:18px"><span class="split-line"><span data-chars>现在就开始，</span></span><span class="split-line"><span data-chars>学一样<span class="t">你想学的</span>。</span></span></h2>
+    <p class="lede" style="margin-top:20px">免费，开源，数据在你自己电脑上。准备一个模型的 API Key，或者本机的 Ollama。</p>
+    <div class="get-grid" id="oses">
+      <div class="os" id="os-windows">
+        <h3>Windows <span class="here" hidden>你的系统</span></h3>
+        <a data-asset="setup.exe" href="https://github.com/vimalinx/lattice/releases/download/v0.3.3/Lattice-0.3.3-setup.exe"><span>安装包</span><small>.exe</small></a>
+        <a data-asset="windows-x64.zip" href="https://github.com/vimalinx/lattice/releases/download/v0.3.3/Lattice-0.3.3-windows-x64.zip"><span>免安装版</span><small>.zip</small></a>
+        <p>还没有代码签名：第一次运行 SmartScreen 会拦一下，点「更多信息」→「仍要运行」。</p>
+      </div>
+      <div class="os" id="os-mac">
+        <h3>macOS <span class="here" hidden>你的系统</span></h3>
+        <a data-asset="macos-arm64-preview.dmg" href="https://github.com/vimalinx/lattice/releases/download/v0.3.3/Lattice-0.3.3-macos-arm64-preview.dmg"><span>Apple Silicon 预览版</span><small>.dmg</small></a>
+        <p>预览版。macOS 上默认关闭 AI 运行代码和命令。</p>
+      </div>
+      <div class="os" id="os-linux">
+        <h3>Linux <span class="here" hidden>你的系统</span></h3>
+        <a data-asset="linux-x64.tar.gz" href="https://github.com/vimalinx/lattice/releases/download/v0.3.3/Lattice-0.3.3-linux-x64.tar.gz"><span>x86-64</span><small>.tar.gz</small></a>
+        <p>需要 glibc 2.39 以上（Ubuntu 24.04 起）和 git；沙箱和运行代码还要 uv 和 bubblewrap。</p>
+      </div>
+    </div>
+    <p class="src">也可以从源码运行：<a href="https://github.com/vimalinx/lattice#快速开始">README 的快速开始</a> · <a href="https://github.com/vimalinx/lattice/releases">所有版本和发布说明</a></p>
+  </div>
+</section>
+<footer class="band">
+  <div class="inner">
+    <span>Lattice · MIT</span>
+    <a href="https://github.com/vimalinx/lattice">GitHub</a>
+    <a href="https://github.com/vimalinx/lattice/blob/main/docs/PHILOSOPHY.md">设计理念</a>
+    <a href="https://github.com/vimalinx/lattice/issues">反馈问题</a>
+  </div>
+</footer>
+
+<dialog class="zoom" id="zoom" aria-label="放大的界面"></dialog>
+
+<script src="vendor/gsap/gsap.min.js"></script>
+<script src="vendor/gsap/ScrollTrigger.min.js"></script>
+<script src="site.js"></script>
+</body>
+</html>
