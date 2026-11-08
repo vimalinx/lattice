@@ -215,7 +215,7 @@
     if (still) { tl.progress(1); return tl; }
     const mm = gsap.matchMedia();
     mm.add("(min-width: 900px)", () => {
-      ScrollTrigger.create({ trigger: section, start: "top top", end: "+=" + length, pin: true, scrub: .7, animation: tl, anticipatePin: 1 });
+      ScrollTrigger.create({ trigger: section, start: "top top", end: "+=" + length, pin: true, scrub: 1.1, animation: tl, anticipatePin: 1 });
       return () => tl.progress(0);
     });
     mm.add("(max-width: 899px)", () => {
@@ -266,7 +266,7 @@
         tl.fromTo(ly, { opacity: 0, scale: 1.015 }, { opacity: 1, scale: 1, duration: .3, ease: "power1.inOut" }, T0 + i * STEP);
       });
       tl.to({}, { duration: .5 }, T0 + 6 * STEP);
-    }, "+=" + 420 + "%");
+    }, "+=" + 630 + "%");
     // which workspace is showing, for the list beside it
     const btns = $$("button", list);
     const sync = () => {
@@ -450,7 +450,7 @@
         tl.to(tool, { opacity: 1, duration: .15 }, t2 + 1.7);
       }
       tl.to({}, { duration: .4 }, t2 + 1.9);
-    }, "+=" + 360 + "%");
+    }, "+=" + 540 + "%");
   }
 
   /* ---------------- 叁: select, ask, and what stays ---------------- */
@@ -481,7 +481,7 @@
       tl.to(ring, { scale: 1.08, opacity: 0, duration: .3 }, 2.65);
       tl.to(A, { opacity: 1, duration: .35 }, 2.8);
       tl.to({}, { duration: .5 }, 3.2);
-    }, "+=" + 300 + "%");
+    }, "+=" + 450 + "%");
   }
 
   /* ---------------- 肆: an experiment that works ---------------- */
@@ -559,7 +559,7 @@
     mask.id = "detour-mask";
     Object.entries({ d: det.getAttribute("d"), stroke: "#fff", "stroke-width": 12, fill: "none", "stroke-dasharray": dn, "stroke-dashoffset": dn }).forEach(([k, v]) => mp.setAttribute(k, v));
     mask.appendChild(mp); svg.insertBefore(mask, svg.firstChild); det.setAttribute("mask", "url(#detour-mask)");
-    const tl = gsap.timeline({ scrollTrigger: { trigger: "#route-wrap", start: "top 78%", end: "bottom 55%", scrub: .6 } });
+    const tl = gsap.timeline({ scrollTrigger: { trigger: "#route-wrap", start: "top 85%", end: "bottom 30%", scrub: 1 } });
     tl.to(done, { strokeDashoffset: 0, duration: 1, ease: "none" }, 0)
       .from(dots.slice(0, 3), { opacity: 0, scale: .4, transformOrigin: "center", stagger: .3, duration: .3 }, 0)
       .to(rest, { strokeDashoffset: 0, duration: 1, ease: "none" }, 1)
@@ -588,7 +588,7 @@
     const rot = cards.map(() => (Math.random() - .5) * 14);
     if (!hasGsap || still) { const p = pos(); cards.forEach((c, i) => (c.style.transform = `translate(${p[i].x}px,${p[i].y}px) scale(${p[i].s})`)); return; }
     cards.forEach((c, i) => gsap.set(c, { x: (Math.random() - .5) * 30, y: (Math.random() - .5) * 20 - i * 2, rotation: rot[i], scale: .9 }));
-    const tl = gsap.timeline({ scrollTrigger: { trigger: "#deck", start: "top 80%", end: "center 45%", scrub: .8, invalidateOnRefresh: true } });
+    const tl = gsap.timeline({ scrollTrigger: { trigger: "#deck", start: "top 85%", end: "center 25%", scrub: 1, invalidateOnRefresh: true } });
     cards.forEach((c, i) => tl.to(c, { x: () => pos()[i].x, y: () => pos()[i].y, scale: () => pos()[i].s, rotation: 0, duration: 1, ease: "power3.inOut" }, i * .04));
     const fc = $("#flipcard");
     const flip = () => { fc.classList.toggle("on"); fc.setAttribute("aria-pressed", fc.classList.contains("on")); };
@@ -620,7 +620,7 @@
       tl.to({}, { duration: .4 }, 3.0);
       // a state reached by scrolling back up
       tl.eventCallback("onReverseComplete", () => state && (state.textContent = done));
-    }, "+=" + 260 + "%");
+    }, "+=" + 390 + "%");
   }
 
   /* ---------------- 捌: the history, ticking by ---------------- */
@@ -674,7 +674,7 @@
     const label = () => { btn.querySelector("span").textContent = isDark ? "换回白天" : "换成夜里"; btn.setAttribute("aria-pressed", isDark); };
     if (hasGsap && !still) {
       const o = { r: 0 };
-      st = ScrollTrigger.create({ trigger: win, start: "top 55%", end: "bottom 60%", scrub: .8, onUpdate: (s) => {
+      st = ScrollTrigger.create({ trigger: win, start: "top 70%", end: "bottom 35%", scrub: 1, onUpdate: (s) => {
         o.r = s.progress * 150; dark.style.clipPath = clip(o.r); isDark = s.progress > .5; label();
       } });
     }
