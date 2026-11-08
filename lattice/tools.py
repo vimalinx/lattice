@@ -880,7 +880,7 @@ def skill_edit(ctx, name, why, file="SKILL.md", content=None, edits=None, new=Fa
     return {"change": change, "note": tr("已经在学习者那边打开了左右对照，等 TA 审；批准之前技能还是原来的样子，不要当成已经改好了")}
 
 
-@tool("rules_edit", {"tutor", "coach"}, tr("提出修改一个 AI 的规则（tutor 主会话、flash 快答、coach 练习教练、organizer 整理）：规则是它每一轮都读的工作方式，开头的属性里有它能用的工具。"
+@tool("rules_edit", {"tutor", "flash", "coach"}, tr("提出修改一个 AI 的规则（tutor 主会话、flash 快答、coach 练习教练、organizer 整理）：规则是它每一轮都读的工作方式，开头的属性里有它能用的工具。"
       "只给 agent 就返回它现在的规则全文，先读再改。和改技能一样不会直接生效：学习者在左右对照里审、可以接着改，批准了才生效，每次修改都留历史，"
       "还能用改前改后两版规则接着同一段对话各回答一次来对比。content 是改后的全文，或者给 edits（[{old, new}]，每个 old 必须在原文里恰好出现一次）；"
       "why 用一句话说为什么这样改；questions 给两三个最能看出效果的问题。规则宁短勿长：写清要做到什么，别罗列条条框框。"),
