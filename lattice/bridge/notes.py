@@ -45,11 +45,11 @@ class MarksPart:
         self.changed([card["path"]])
         return {"id": card["id"], "path": card["path"]}
 
-    def rpc_annotation_unmount(self, id):
-        return self._annotated(annotations.unmount(self.lattice, id))
+    def rpc_annotation_unmount(self, id, also=()):
+        return self._annotated(annotations.unmount(self.lattice, id, also))
 
-    def rpc_annotation_asked(self, id):
-        got = annotations.asked(self.lattice, id)
+    def rpc_annotation_asked(self, id, also=()):
+        got = annotations.asked(self.lattice, id, also)
         return {**got, "answering": got.get("thread") in self.busy}
 
     def rpc_anchor_place(self, source, message=None):

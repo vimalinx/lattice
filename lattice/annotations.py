@@ -225,16 +225,29 @@ def remove(l, ident):
     return True
 
 
-def asked(l, ident):
+def _around(l, item, also=()):
+    """The other questions standing where one does: on the same words, and on words that overlap them where it was clicked (`also`)."""
+    rows = l.index.rows("SELECT id FROM annotations WHERE source=? AND text=? AND ask!='' AND id!=?", (item["source"], item["text"], item["id"]))
+    found = {}
+    for ident in [r["id"] for r in rows] + [str(x).removeprefix("ann:") for x in also or ()]:
+        try:
+            other = get(l, ident)
+        except ValueError:
+            continue
+        if other.get("ask") and other["id"] != item["id"] and other["source"] == item["source"]:
+            found[other["id"]] = other
+    return sorted(found.values(), key=lambda x: x["created"], reverse=True)
+
+
+def asked(l, ident, also=()):
     """The question an annotation stands for and what was answered, from the conversation as it is now."""
     item = get(l, ident)
     if not item.get("ask"):
         raise ValueError(tr("这条批注不是一个问题"))
-    # The same words can be asked about again: those questions stand on the same place, and open together.
-    same = [json.loads(r["ask"]) for r in l.index.rows("SELECT ask FROM annotations WHERE source=? AND text=? AND ask!='' AND id!=? ORDER BY created DESC",
-                                                       (item["source"], item["text"], item["id"]))]
+    # The same words can be asked about again, and words inside them too: those questions open together.
+    more = [{**_answered(l, x["ask"]), **({"quote": x["text"]} if x["text"] != item["text"] else {})} for x in _around(l, item, also)]
     return {"id": item["id"], "quote": item["text"], "label": item["label"], "place": item["place"], "source": item["source"], "anchor": item["anchor"],
-            "created": item["created"], **_answered(l, item["ask"]), "also": [_answered(l, x) for x in same]}
+            "created": item["created"], **_answered(l, item["ask"]), "also": more}
 
 
 def _answered(l, ask):
@@ -252,11 +265,11 @@ def _answered(l, ask):
     return {**out, "thread": row["thread"], "agent": head["agent"] if head else "flash"}
 
 
-def unmount(l, ident):
+def unmount(l, ident, also=()):
     """Take a place's questions off it; the conversations they were asked in stay."""
     item = get(l, ident)
-    for row in l.index.rows("SELECT id FROM annotations WHERE source=? AND text=? AND ask!=''", (item["source"], item["text"])):
-        remove(l, row["id"])
+    for other in [item, *_around(l, item, also)]:
+        remove(l, other["id"])
     return True
 
 

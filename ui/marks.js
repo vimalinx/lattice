@@ -147,18 +147,23 @@ function markFlash(range){
  (range.startContainer.nodeType===1?range.startContainer:range.startContainer.parentElement)?.scrollIntoView({block:"center"});
  if(!window.Highlight)return;CSS.highlights.set("lmark-flash",new Highlight(range));setTimeout(()=>CSS.highlights.delete("lmark-flash"),1800);
 }
-export function markAtPoint(e){
- const cm=e.target.closest?.("[data-mark]");if(cm)return cm.dataset.mark;
- const hits=Marks.ranges.get(e.target.closest?.(".panel")?.dataset.pid);if(!hits?.length)return null;
- const c=document.caretRangeFromPoint(e.clientX,e.clientY);
- return c?hits.find(x=>x.range.isPointInRange(c.startContainer,c.startOffset))?.item.id||null:null;
+/* Everything marked where the pointer is, questions first: words can be asked about more than once, and a question can
+   stand on words another one covers too. An editor nests overlapping marks, one element in another. */
+export function marksAtPoint(e){
+ const pid=e.target.closest?.(".panel")?.dataset.pid,items=Marks.items[markWhere(pid)]||[],ids=[];
+ for(let n=e.target.closest?.("[data-mark]");n;n=n.parentElement?.closest("[data-mark]"))ids.push(n.dataset.mark);
+ const hits=!ids.length&&Marks.ranges.get(pid),c=hits?.length&&document.caretRangeFromPoint(e.clientX,e.clientY);
+ if(c)for(const x of hits)if(x.range.isPointInRange(c.startContainer,c.startOffset))ids.push(x.item.id);
+ const found=[...new Set(ids)].map(id=>items.find(m=>m.id===id)||{id});
+ return [...found.filter(m=>m.ask),...found.filter(m=>!m.ask)];
 }
+export function markAtPoint(e){return marksAtPoint(e)[0]?.id||null;}
 // Text that is only read opens its annotation on a click; in an editor a click places the cursor (the right button has it).
 document.addEventListener("click",e=>{
  if(e.target.closest?.("a,button,input,textarea,select,.menu")||!getSelection()?.isCollapsed)return;
  if(e.target.closest?.(".cm-editor")&&!e.target.closest(".lmark-ask"))return;
- const id=markAtPoint(e),at={x:e.clientX,y:e.clientY};
- if(id)setTimeout(()=>safe(()=>markOpen(id,at)),0);
+ const [first,...rest]=marksAtPoint(e),at={x:e.clientX,y:e.clientY};
+ if(first)setTimeout(()=>safe(()=>markOpen(first.id,at,rest.filter(m=>m.ask).map(m=>m.id))),0);
 });
 
 /* ---- one annotation ----------------------------------------------------------------------------------------------- */
@@ -172,31 +177,34 @@ async function markCreate(withNote){
  clearSelection();
 }
 function markWho(m){return (m.by==="me"?"":who(m.by)+" · ")+fmtDate(m.created,true);}
-export async function markOpen(id,at){
+// `also`: the other questions under the same spot, shown with this one.
+export async function markOpen(id,at,also=[]){
  const m=await rpc("annotation_get",{id}),mine=m.by==="me";
- if(m.ask)return askedOpen(id,at);
+ if(m.ask)return askedOpen(id,at,also);
  popMenu(at,"<div class=\"mark-pop\"><small>"+esc((m.label?m.label+" · ":"")+markWho(m))+(m.lost==="changed"?" "+$t("· 原文已改"):"")+"</small><blockquote>"+esc(shorten(m.text,160))+"</blockquote>"+(m.note?'<div class="mark-note">'+esc(m.note)+'</div>':"")+(mine?'<div class="mark-colors">'+Object.entries(MARK_COLORS).map(([c,t])=>'<button class="dot lmark-c-'+c+(m.color===c?" on":"")+'" data-action="mark-color" data-id="'+esc(id)+'" data-color="'+c+'" title="'+t+'"></button>').join("")+'</div>':"")+"</div><hr/><button data-action=\"mark-edit\" data-id=\""+esc(id)+"\">"+svg("edit",14)+"<span>"+(m.note?$t("改批注"):$t("写批注"))+"</span></button><button data-action=\"mark-ask\" data-id=\""+esc(id)+"\" data-agent=\"flash\">"+svg("spark",14)+"<span>"+$t("问快答")+"</span></button><button data-action=\"mark-ask\" data-id=\""+esc(id)+"\" data-agent=\"tutor\">"+svg("bot",14)+"<span>"+$t("问主会话")+"</span></button><button data-action=\"mark-card\" data-id=\""+esc(id)+"\">"+svg("card",14)+"<span>"+$t("做成知识卡")+"</span></button><button data-action=\"mark-link\" data-id=\""+esc(id)+"\">"+svg("link",14)+"<span>"+$t("复制链接，贴进笔记")+"</span></button><hr/><button data-action=\"mark-delete\" data-id=\""+esc(id)+"\">"+svg("trash",14)+"<span>"+$t("删除")+"</span></button>",{cls:"menu-mark",width:260});
 }
 /* ---- a question left where it was asked: a small window on the spot, or the 问答 window at the side once that is open ---- */
 function askedBody(a){
- const said=x=>'<div class="asked-q">'+esc(x.question)+'</div>'+
+ // A question on other words than the first shows them above it.
+ const said=x=>(x.quote?'<blockquote>'+esc(shorten(x.quote,200))+'</blockquote>':"")+'<div class="asked-q">'+esc(x.question)+'</div>'+
   (x.gone?"<p class=\"muted\">"+$t("这段对话已经删除了。")+"</p>":x.answer?'<div class="markdown asked-a">'+markdown(x.answer)+'</div>':'<p class="muted">'+(a.answering&&x===a?$t("快答正在回答…"):$t("还没有回答。"))+'</p>');
  return '<blockquote>'+esc(shorten(a.quote,200))+'</blockquote>'+said(a)+(a.also||[]).map(x=>'<div class="asked-more">'+said(x)+'</div>').join("");
 }
-async function askedOpen(id,at){
+const alsoAttr=also=>also?.length?' data-also="'+esc(also.join(" "))+'"':"";
+async function askedOpen(id,at,also=[]){
  const side=findPanel({type:"asked"});
- if(side){Dock.panels[side].ann=id;saveLayout();activate(side);return renderAsked(side);}
- const a=await rpc("annotation_asked",{id}),row=(action,icon,text)=>'<button data-action="'+action+'" data-id="'+esc(id)+'">'+svg(icon,14)+'<span>'+text+'</span></button>';
+ if(side){Object.assign(Dock.panels[side],{ann:id,also});saveLayout();activate(side);return renderAsked(side);}
+ const a=await rpc("annotation_asked",{id,also}),row=(action,icon,text)=>'<button data-action="'+action+'" data-id="'+esc(id)+'"'+alsoAttr(also)+'>'+svg(icon,14)+'<span>'+text+'</span></button>';
  const menu=popMenu(at,'<div class="mark-pop asked-pop">'+askedBody(a)+'</div><hr/>'+row("mark-side","layout",$t("放到右侧"))+(a.gone?"":row("mark-thread","spark",$t("接着问")))+row("mark-deeper","bot",$t("交给主会话深入讲"))+row("mark-card","card",$t("做成知识卡"))+row("mark-go","marker",$t("回到原处"))+row("mark-delete","trash",$t("去掉挂载点")),{cls:"menu-mark menu-asked",width:340});
  hydrateVault(menu,null);
 }
-export function openAsked(id){
+export function openAsked(id,also=[]){
  const had=findPanel({type:"asked"});
- if(had){Dock.panels[had].ann=id;saveLayout();activate(had);renderAsked(had);return had;}
+ if(had){Object.assign(Dock.panels[had],{ann:id,also});saveLayout();activate(had);renderAsked(had);return had;}
  const stack=stackOf(Dock.focus);
- if(onePanel()||!stack||Dock.layout.floats.some(f=>f.stack===stack))return openPanel({type:"asked",ann:id});
+ if(onePanel()||!stack||Dock.layout.floats.some(f=>f.stack===stack))return openPanel({type:"asked",ann:id,also});
  const beside=stackNode([]);splitBeside(stack,"right",beside);
- return openPanel({type:"asked",ann:id},{stack:beside.id});
+ return openPanel({type:"asked",ann:id,also},{stack:beside.id});
 }
 panelType("asked",{side:"mine",icon:"spark",title:()=>$t("问答"),
  mount(p,node,pid){node.innerHTML='<div class="asked" data-keep-scroll></div>';renderAsked(pid);},
@@ -204,11 +212,11 @@ panelType("asked",{side:"mine",icon:"spark",title:()=>$t("问答"),
 async function renderAsked(pid){
  const p=Dock.panels[pid],box=Dock.els[pid]?.querySelector(".asked");if(!box)return;
  if(!p.ann){box.innerHTML=emptyState("spark",$t("点一处问过的话"),$t("带下划线的文字是你问过快答的地方，内容会显示在这里。"));return;}
- const a=await rpc("annotation_asked",{id:p.ann}).catch(()=>null);
+ const a=await rpc("annotation_asked",{id:p.ann,also:p.also||[]}).catch(()=>null);
  if(!Dock.els[pid])return;
  if(!a){box.innerHTML=emptyState("spark",$t("这条问答的挂载点已经去掉了"),$t("点别处带下划线的文字，内容会显示在这里。"));return;}
  box.innerHTML='<small>'+esc(a.place.title+(a.label?" · "+a.label:"")+" · "+fmtDate(a.created,true))+'</small>'+askedBody(a)+'<div class="asked-tools">'+
-  (a.gone?"":button(svg("spark",12)+" "+$t("接着问"),"mark-thread",'data-id="'+esc(p.ann)+'"',"ghost xs"))+button(svg("bot",12)+" "+$t("交给主会话深入讲"),"mark-deeper",'data-id="'+esc(p.ann)+'"',"ghost xs")+button(svg("marker",12)+" "+$t("回到原处"),"mark-go",'data-id="'+esc(p.ann)+'"',"ghost xs")+button(svg("card",12)+" "+$t("做成知识卡"),"mark-card",'data-id="'+esc(p.ann)+'"',"ghost xs")+'</div>';
+  (a.gone?"":button(svg("spark",12)+" "+$t("接着问"),"mark-thread",'data-id="'+esc(p.ann)+'"',"ghost xs"))+button(svg("bot",12)+" "+$t("交给主会话深入讲"),"mark-deeper",'data-id="'+esc(p.ann)+'"'+alsoAttr(p.also),"ghost xs")+button(svg("marker",12)+" "+$t("回到原处"),"mark-go",'data-id="'+esc(p.ann)+'"',"ghost xs")+button(svg("card",12)+" "+$t("做成知识卡"),"mark-card",'data-id="'+esc(p.ann)+'"',"ghost xs")+'</div>';
  hydrateVault(box,null);
 }
 // An answer that was still on its way when the window opened.
@@ -259,16 +267,16 @@ export function gotoAnchor(pid,a){
  return false;
 }
 export async function markAction(kind,a){
- const id=a.dataset.id;
+ const id=a.dataset.id,also=(a.dataset.also||"").split(" ").filter(Boolean);
  switch(kind){
- case "mark-side":return openAsked(id);
+ case "mark-side":return openAsked(id,also);
  case "mark-thread":{
   const q=await rpc("annotation_asked",{id});
   return openPanel({type:"chat",agent:q.agent,thread:q.thread},{hand:{do:"message",message:q.message}});
  }
  case "mark-deeper":{
   // The question comes along with what the quick answer said, for the main conversation to take further.
-  const q=await rpc("annotation_asked",{id});
+  const q=await rpc("annotation_asked",{id,also});
   return askAbout("tutor",q.quote+"\n\n"+$t("我在快答里问过：")+"\n"+[q,...(q.also||[])].map(x=>$t("问：{0}\n答：",x.question)+x.answer).join("\n\n"),{source:q.source,...q.anchor});
  }
  case "mark-add":return markCreate(false);
@@ -277,7 +285,7 @@ export async function markAction(kind,a){
  case "mark-more":return markOpen(id,a);
  case "mark-color":Marks.color=a.dataset.color;return rpc("annotation_update",{id,color:a.dataset.color});
  case "mark-edit":{const m=await rpc("annotation_get",{id}),note=await noteDialog(m.note?$t("改批注"):$t("写批注"),m.note);if(note!=null)await rpc("annotation_update",{id,note});return;}
- case "mark-delete":{const m=await rpc("annotation_get",{id});if(m.ask)return rpc("annotation_unmount",{id});if(m.note&&!await ask(shorten(m.note,120),{title:$t("删除这条批注？"),danger:true,ok:$t("删除")}))return;return rpc("annotation_delete",{id});}
+ case "mark-delete":{const m=await rpc("annotation_get",{id});if(m.ask)return rpc("annotation_unmount",{id,also});if(m.note&&!await ask(shorten(m.note,120),{title:$t("删除这条批注？"),danger:true,ok:$t("删除")}))return;return rpc("annotation_delete",{id});}
  case "mark-ask":{const m=await rpc("annotation_get",{id});return askAbout(a.dataset.agent,m.text,{source:m.source,...m.anchor});}
  case "mark-card":{
   const m=await rpc("annotation_get",{id}),title=await askText($t("知识卡的标题"),shorten(m.text.replace(/\s+/g," "),30),{ok:$t("做成卡片"),hint:$t("出处会记在卡上，复习时能回到这里")});if(!title)return;
