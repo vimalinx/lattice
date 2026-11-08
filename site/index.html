@@ -6,6 +6,8 @@
 <title>Lattice</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="description" content="Lattice 是一个本地的 AI 学习工作台：AI 讲解、画图、出题，你在旁边写笔记、跑代码、做卡片。免费开源，Windows、macOS、Linux。">
+<link rel="canonical" href="https://vimalinx.com/lattice/">
+<meta property="og:url" content="https://vimalinx.com/lattice/">
 <meta property="og:title" content="Lattice · 有个 AI 陪你，把东西真正学懂">
 <meta property="og:description" content="本地的 AI 学习工作台：讲解、画图、出题、跑代码、记卡片，所有东西都是你电脑上的普通文件。免费开源。">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -36,14 +38,11 @@
 <section class="hero band" id="hero" aria-labelledby="hero-title">
   <canvas class="hero-net" id="hero-net" aria-hidden="true"></canvas>
   <div class="inner">
-    <div class="hero-grid">
+    <div class="hero-head"><div class="hero-grid">
       <div>
         <p class="kicker" data-rise>本地的 AI 学习工作台 · 免费开源</p>
-        <h1 class="display" id="hero-title" style="margin-top:22px">
-          <span class="split-line"><span data-chars>有个 AI 陪你，</span></span>
-          <span class="split-line"><span data-chars>把东西<span class="t">真正学懂</span>。</span></span>
-        </h1>
-        <p class="lede" data-rise>它讲解、画图、出题；你在旁边写笔记、跑代码、做卡片，全在一个界面里。学过的一切，都是你电脑上一个文件夹里的普通文件。</p>
+        <h1 class="display wordmark" id="hero-title"><span class="split-line"><span data-chars>Lattice</span></span></h1>
+        <p class="display slogan"><span class="split-line"><span data-chars>有个 AI 陪你，把东西<span class="t">真正学懂</span>。</span></span></p>
         <div class="ctas" data-rise>
           <a class="btn solid" id="cta" href="#download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg><span id="cta-label">下载</span></a>
           <a class="btn line" href="https://github.com/vimalinx/lattice"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.4-1.1-1.1-1.4-1.1-1.4-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.4 1.1 3 .8.1-.6.3-1.1.6-1.3-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9V21c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg>GitHub</a>
@@ -56,6 +55,7 @@
       <code>p += lr * error</code><span>lr = 0.5</span><span aria-hidden="true">→</span>
       <span class="n">0.50</span><span class="n">0.75</span><span class="n">0.88</span><span class="n">0.94</span><span class="n">0.97</span><span class="n">0.98</span><span class="n">0.99</span><span class="n hit">1.00</span>
     </p>
+    </div>
     <div class="hero-stage">
       <div class="win zoomable" id="hero-win" data-layers="hero" role="img" aria-label="Lattice 的学习工作状态：左栏是按主题和会话排的文件，中间主会话画关系图、出小实验，右上快答回答选中的代码，右下是卡片库">
         <div class="scale"><div class="ov" id="hero-ov"></div></div>
@@ -193,7 +193,7 @@
     <div class="lt light">
       <div class="lab-card">
         <div class="lblock block-explore live"><div class="explore"><div class="explore-head"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg><b>学习率拖到多大开始震荡</b></div><div class="explore-note markdown"><p>目标值是 1。先拖到 0.5 看单调靠近，再拖到 1.5 看两侧来回跳，最后 2.5 直接飞走。</p></div><div class="explore-params"><label class="explore-param"><span>学习率 η</span><input type="range" id="eta" min="0" max="2.5" step="0.05" value="0.5" aria-label="学习率"><b id="eta-out">0.5</b></label></div><div class="explore-chart"><div class="chart"><svg viewBox="0 0 520 260" class="chart-svg" id="chart" role="img" aria-label="参数 p 随更新次数的变化"></svg><div class="chart-legend"><span><i style="background:#1b7868"></i>参数 p</span><span><i style="background:#6b57b8"></i>目标 1</span></div></div></div><div class="explore-reads"><span><small>每步误差乘上</small><b id="read-k">0.5</b></span><span><small>行为</small><b id="read-v">单调靠近</b></span></div></div></div>
-        <div class="lblock block-quiz quiz-card live"><div class="quiz-q"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6m-5 3h4M8 15a6 6 0 1 1 8 0l-1 3H9l-1-3Z"/></svg><div class="markdown"><p>同一个损失函数、同一个起点，把学习率从 0.01 调到 0.5，第一次更新时梯度的值会怎样？</p></div></div><div class="quiz-options" id="quiz"><label><input type="radio" name="q" value="0"> 梯度变大，因为步子大了</label><label><input type="radio" name="q" value="1"> 梯度不变，只有实际走的距离变了</label><label><input type="radio" name="q" value="2"> 梯度变小，因为学习率吃掉了它</label><label><input type="radio" name="q" value="3"> 要看损失函数是不是凸的，凸函数下不变</label></div><p class="judge" id="judge" aria-live="polite">先选一个。在 Lattice 里，你的回答交给快答当场判，主会话接着讲。</p></div>
+        <div class="lblock block-quiz quiz-card live"><div class="quiz-q"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6m-5 3h4M8 15a6 6 0 1 1 8 0l-1 3H9l-1-3Z"/></svg><div class="markdown"><p>同一个损失函数、同一个起点，把学习率从 0.01 调到 0.5，第一次更新时梯度的值会怎样？</p></div></div><div class="quiz-options" id="quiz"><label for="q0"><input type="radio" name="q" value="0" id="q0"> 梯度变大，因为步子大了</label><label for="q1"><input type="radio" name="q" value="1" id="q1"> 梯度不变，只有实际走的距离变了</label><label for="q2"><input type="radio" name="q" value="2" id="q2"> 梯度变小，因为学习率吃掉了它</label><label for="q3"><input type="radio" name="q" value="3" id="q3"> 要看损失函数是不是凸的，凸函数下不变</label></div><p class="judge" id="judge" aria-live="polite">先选一个。在 Lattice 里，你的回答交给快答当场判，主会话接着讲。</p></div>
       </div>
     </div>
     <div class="lab-big">

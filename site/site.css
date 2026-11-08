@@ -74,14 +74,16 @@ h1,h2,h3,p{margin:0}
 .split-line>span{display:inline-block}
 
 /* ---------- hero ---------- */
-.hero{position:relative;padding-top:clamp(120px,15vh,170px);padding-bottom:40px}
+.hero{position:relative;padding-bottom:40px}
+/* The words fill the top two thirds of the first screen; the window starts lying back in the bottom third. */
+.hero-head{min-height:66.6svh;display:flex;flex-direction:column;justify-content:flex-end;padding-top:96px;padding-bottom:clamp(28px,5svh,56px)}
 .hero-net{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:-1}
 .hero-grid{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:48px;align-items:end}
-.hero h1{font-size:clamp(46px,8.6vw,138px)}
-.hero .lede{margin-top:30px}
+.hero .wordmark{font-size:clamp(64px,12.5vw,200px);line-height:.9;letter-spacing:-.035em;margin-top:18px}
+.hero .slogan{font-size:clamp(24px,3.3vw,52px);line-height:1.25;margin-top:clamp(14px,2.4svh,26px);letter-spacing:.02em}
 .hero-side{writing-mode:vertical-rl;font:400 15px/1.9 var(--sans);color:var(--muted);letter-spacing:.32em;border-right:1px solid var(--rule);padding-right:14px;height:fit-content;align-self:start;margin-top:12px}
 .hero-side b{color:var(--ink);font-weight:900}
-.ctas{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:36px}
+.ctas{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:clamp(20px,3.6svh,36px)}
 .btn{display:inline-flex;align-items:center;gap:10px;padding:14px 22px;border-radius:12px;font:600 16px/1 var(--sans);text-decoration:none;border:1px solid transparent;cursor:pointer;transition:transform .2s,background .2s,border-color .2s}
 .btn:hover{transform:translateY(-1px)}
 .btn svg{width:18px;height:18px;flex:none}
@@ -90,7 +92,7 @@ h1,h2,h3,p{margin:0}
 .btn.line{border-color:var(--rule);background:var(--sheet);color:var(--ink)}
 .btn.line:hover{border-color:var(--ink)}
 .meta{font:400 13px/1.5 var(--mono);color:var(--faint);margin-left:6px}
-.hero-stage{perspective:1800px;margin-top:clamp(56px,8vh,96px)}
+.hero-stage{perspective:1600px}
 .hero-stage .win{transform-origin:50% 0}
 .trail{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline;font:400 13.5px/1.6 var(--mono);color:var(--faint);margin-top:28px;font-variant-numeric:tabular-nums}
 .trail code{font:inherit;color:var(--ink)}

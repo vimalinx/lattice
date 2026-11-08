@@ -1,4 +1,4 @@
-/* Lattice's site: the app itself (ui/*.html, real DOM) in frames, driven by the scroll. */
+/* Lattice's site: the app itself (ui/*.htm, real DOM) in frames, driven by the scroll. */
 (() => {
   "use strict";
   const $ = (s, r = document) => r.querySelector(s);
@@ -9,7 +9,7 @@
 
   /* ---------------- the app in frames ---------------- */
   const cache = {};
-  const fragment = (name) => (cache[name] ||= fetch("ui/" + name + ".html").then((r) => (r.ok ? r.text() : "")).catch(() => ""));
+  const fragment = (name) => (cache[name] ||= fetch("ui/" + name + ".htm").then((r) => (r.ok ? r.text() : "")).catch(() => ""));
   const fit = (win) => win.style.setProperty("--k", win.clientWidth / 1600);
   const ro = new ResizeObserver((es) => es.forEach((e) => fit(e.target)));
   async function mount(win) {
@@ -199,10 +199,11 @@
     ].filter(Boolean);
     $$(".n", $(".trail")).forEach((n, i) => hasGsap && !still && gsap.from(n, { opacity: .1, y: 6, duration: .4, delay: 1.1 + i * .2 }));
     if (!hasGsap || still) { tags.forEach((t) => (t.style.opacity = 1)); return; }
-    gsap.set(win, { rotateX: 26, y: 40, scale: .94, transformOrigin: "50% 0%" });
-    const tl = gsap.timeline({ scrollTrigger: { trigger: win, start: "top 92%", end: "top 18%", scrub: .8 } });
-    tl.to(win, { rotateX: 0, y: 0, scale: 1, ease: "none", duration: 1 })
-      .to(tags, { opacity: 1, y: -8, stagger: .08, duration: .3 }, .7);
+    // It lies back in the bottom third of the first screen and comes upright as that screen scrolls away.
+    gsap.set(win, { rotateX: 38, scale: .9, transformOrigin: "50% 0%" });
+    const tl = gsap.timeline({ scrollTrigger: { trigger: win, start: 0, end: "top 9%", scrub: .8 } });
+    tl.to(win, { rotateX: 0, scale: 1, ease: "none", duration: 1 })
+      .to(tags, { opacity: 1, y: -8, stagger: .08, duration: .25 }, .78);
   }
 
   /* ---------------- 壹: take the window apart, then change what it is for ---------------- */
