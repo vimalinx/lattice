@@ -186,7 +186,7 @@ export async function markOpen(id,at,also=[]){
 /* ---- a question left where it was asked: a small window on the spot, or the 问答 window at the side once that is open ---- */
 function askedBody(a){
  // A question on other words than the first shows them above it.
- const said=x=>(x.quote?'<blockquote>'+esc(shorten(x.quote,200))+'</blockquote>':"")+'<div class="asked-q">'+esc(x.question)+'</div>'+
+ const said=x=>(x!==a&&x.quote?'<blockquote>'+esc(shorten(x.quote,200))+'</blockquote>':"")+'<div class="asked-q">'+esc(x.question)+'</div>'+
   (x.gone?"<p class=\"muted\">"+$t("这段对话已经删除了。")+"</p>":x.answer?'<div class="markdown asked-a">'+markdown(x.answer)+'</div>':'<p class="muted">'+(a.answering&&x===a?$t("快答正在回答…"):$t("还没有回答。"))+'</p>');
  return '<blockquote>'+esc(shorten(a.quote,200))+'</blockquote>'+said(a)+(a.also||[]).map(x=>'<div class="asked-more">'+said(x)+'</div>').join("");
 }
