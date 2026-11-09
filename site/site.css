@@ -18,6 +18,7 @@
 }
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
+html.lenis,html.lenis body{height:auto}
 body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.75 var(--sans);overflow-x:hidden;
   background-image:radial-gradient(circle at 1px 1px,rgba(22,38,43,.11) 1px,transparent 1.4px);background-size:28px 28px}
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:60;background:var(--paper)}

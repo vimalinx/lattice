@@ -7,6 +7,16 @@
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (hasGsap) gsap.registerPlugin(ScrollTrigger);
 
+  // the wheel glides instead of stepping; touch keeps the phone's own scrolling, and panels inside the app scroll as usual
+  const lenis = hasGsap && !still && typeof Lenis !== "undefined"
+    ? new Lenis({ lerp: .08, wheelMultiplier: .85, anchors: true, allowNestedScroll: true, autoRaf: false })
+    : null;
+  if (lenis) {
+    lenis.on("scroll", ScrollTrigger.update);
+    gsap.ticker.add((t) => lenis.raf(t * 1000));
+    gsap.ticker.lagSmoothing(0);
+  }
+
   /* ---------------- the app in frames ---------------- */
   const cache = {};
   const fragment = (name) => (cache[name] ||= fetch("ui/" + name + ".htm").then((r) => (r.ok ? r.text() : "")).catch(() => ""));
@@ -277,7 +287,8 @@
     btns.forEach((b, i) => b.addEventListener("click", () => {
       const st = ScrollTrigger.getAll().find((s) => s.animation === tl);
       const t = i ? T0 + (i - 1) * STEP + .35 : 1.9;
-      if (st) scrollTo({ top: st.start + (st.end - st.start) * (t / tl.duration()), behavior: "smooth" });
+      const top = st && st.start + (st.end - st.start) * (t / tl.duration());
+      if (st) lenis ? lenis.scrollTo(top, { duration: 1.4 }) : scrollTo({ top, behavior: "smooth" });
       else { tl.time(t); sync(); }
     }));
   }
