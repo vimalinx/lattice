@@ -115,28 +115,50 @@
   net($("#get-net"), "rgba(139,220,197,.5)", "rgba(139,220,197,A)", 60);
 
   /* ---------------- the relations graph, drawn here (the dumps can't carry cytoscape's canvas) ---------------- */
+  // x is a share of the width, y a row in a 340-high frame; the loop runs L → G → S → U → P → R → L
   const GRAPH = {
-    nodes: [["L", "损失函数 L(p)", 790, 280, "#1b7868", true], ["G", "梯度 ∂L/∂p", 520, 175, "#6b57b8"], ["E", "学习率 η", 150, 90, "#8a6a1f"],
-      ["S", "实际步长 η·∂L/∂p", 230, 270, "#8a6a1f"], ["U", "更新 p←p−η·∂L/∂p", 470, 60, "#1f5fa8"], ["P", "新参数 p", 760, 70, "#b05855"], ["R", "重算损失和梯度", 860, 175, "#1b7868"]],
+    nodes: [["L", "损失函数 L(p)", .7, 290, "#1b7868", true], ["G", "梯度 ∂L/∂p", .3, 290, "#6b57b8"], ["E", "学习率 η", .12, 50, "#8a6a1f"],
+      ["S", "实际步长 η·∂L/∂p", .45, 170, "#8a6a1f"], ["U", "更新 p←p−η·∂L/∂p", .52, 50, "#1f5fa8"], ["P", "新参数 p", .87, 50, "#b05855"], ["R", "重算损失和梯度", .85, 170, "#1b7868"]],
+    // [from, to, label, colour, dash, where along the edge the label sits]
     edges: [["L", "G", "求导得到", "#a87e00"], ["G", "S", "提供方向", "#1b7868"], ["E", "S", "提供幅度", "#1b7868"], ["S", "U", "", "#5b6b70", "2 5"], ["U", "P", "变成", "#5b6b70"],
-      ["P", "R", "", "#a87e00"], ["R", "L", "下一轮", "#5b6b70", "6 5"], ["E", "G", "算出来的 vs 定好的", "#b05855", "6 5"]],
+      ["P", "R", "", "#a87e00"], ["R", "L", "下一轮", "#5b6b70", "6 5"], ["E", "G", "算出来的 vs 定好的", "#b05855", "6 5", .42]],
   };
+  const measure = document.createElement("canvas").getContext("2d");
+  // the colour behind the canvas, so a box can hide the lines under it
+  const ground = (e) => {
+    for (; e; e = e.parentElement) { const c = getComputedStyle(e).backgroundColor; if (c && c !== "transparent" && !/,\s*0\)$/.test(c)) return c; }
+    return "#fff";
+  };
+  let graphs = 0;
   function drawGraph(host) {
     host.innerHTML = "";
-    const W = host.clientWidth || 940, H = host.clientHeight || 340;
-    const sx = W / 960, sy = H / 340;
-    const at = Object.fromEntries(GRAPH.nodes.map((n) => [n[0], [n[2] * sx, n[3] * sy]]));
-    let svg = `<svg class="relg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="position:absolute;inset:0"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#5b6b70"/></marker></defs>`;
-    for (const [a, b, label, c, dash] of GRAPH.edges) {
-      const [x1, y1] = at[a], [x2, y2] = at[b], mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-      svg += `<g class="ge"><path d="M${x1} ${y1} L${x2} ${y2}" stroke="${c}" stroke-width="1.8" fill="none" ${dash ? `stroke-dasharray="${dash}"` : ""} marker-end="url(#ah)"/>` +
-        (label ? `<text x="${mx}" y="${my - 6}" text-anchor="middle" font-size="12" fill="#5b6b70">${label}</text>` : "") + "</g>";
+    const tag = "ah" + graphs++ + "-";
+    const W = host.clientWidth || 940, H = host.clientHeight || 340, sy = H / 340, HH = 17, bg = ground(host);
+    measure.font = `600 13.5px ${getComputedStyle(host).fontFamily}`;
+    const at = Object.fromEntries(GRAPH.nodes.map(([id, label, fx, y]) => {
+      const w = Math.ceil(measure.measureText(label).width) + 28;
+      return [id, { x: Math.min(W - w / 2 - 6, Math.max(w / 2 + 6, fx * W)), y: y * sy, w }];
+    }));
+    // where the line from a box's centre toward (tx, ty) leaves the box, a few px out
+    const rim = (n, tx, ty, gap) => {
+      const dx = tx - n.x, dy = ty - n.y, len = Math.hypot(dx, dy) || 1;
+      const t = Math.min((n.w / 2) / (Math.abs(dx) || 1e-9), HH / (Math.abs(dy) || 1e-9));
+      return [n.x + dx * t + (dx / len) * gap, n.y + dy * t + (dy / len) * gap];
+    };
+    const colours = [...new Set(GRAPH.edges.map((e) => e[3]))];
+    let svg = `<svg class="relg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="position:absolute;inset:0"><defs>` +
+      colours.map((c, i) => `<marker id="${tag}${i}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="${c}"/></marker>`).join("") + "</defs>";
+    const labels = [];
+    for (const [a, b, label, c, dash, along = .5] of GRAPH.edges) {
+      const A = at[a], B = at[b], [x1, y1] = rim(A, B.x, B.y, 3), [x2, y2] = rim(B, A.x, A.y, 4);
+      svg += `<g class="ge"><path d="M${x1} ${y1} L${x2} ${y2}" stroke="${c}" stroke-width="1.8" fill="none" ${dash ? `stroke-dasharray="${dash}"` : ""} marker-end="url(#${tag}${colours.indexOf(c)})"/></g>`;
+      if (label) labels.push(`<text x="${x1 + (x2 - x1) * along}" y="${y1 + (y2 - y1) * along + 4}" text-anchor="middle" font-size="12" fill="#5b6b70" stroke="${bg}" stroke-width="5" stroke-linejoin="round" paint-order="stroke">${label}</text>`);
     }
     for (const [id, label, , , c, main] of GRAPH.nodes) {
-      const [x, y] = at[id], w = label.length * 13 + 26;
-      svg += `<g class="gn" style="transform-origin:${x}px ${y}px"><rect x="${x - w / 2}" y="${y - 17}" width="${w}" height="34" rx="8" fill="${c}1c" stroke="${c}" stroke-width="${main ? 3 : 1.6}"/><text x="${x}" y="${y + 5}" text-anchor="middle" font-size="13.5" font-weight="600" fill="#16262b">${label}</text></g>`;
+      const { x, y, w } = at[id];
+      svg += `<g class="gn" style="transform-origin:${x}px ${y}px"><rect x="${x - w / 2}" y="${y - HH}" width="${w}" height="${HH * 2}" rx="8" fill="${bg}"/><rect x="${x - w / 2}" y="${y - HH}" width="${w}" height="${HH * 2}" rx="8" fill="${c}1c" stroke="${c}" stroke-width="${main ? 3 : 1.6}"/><text x="${x}" y="${y + 5}" text-anchor="middle" font-size="13.5" font-weight="600" fill="#16262b">${label}</text></g>`;
     }
-    host.insertAdjacentHTML("beforeend", svg + "</svg>");
+    host.insertAdjacentHTML("beforeend", svg + labels.join("") + "</svg>");
     return $("svg", host);
   }
   const mountGraphs = (root) => $$(".rel-canvas", root).map((c) => { c.style.position = "relative"; return drawGraph(c); });
@@ -202,8 +224,8 @@
     const s = stacks.map((st) => box(st, win));
     const tags = [
       tag("文件", "按主题和会话找", 120, 560),
-      s[0] && tag("主会话", "讲解、画图、出小实验", s[0].x + s[0].w - 330, s[0].y + 640),
-      s[1] && tag("快答", "小问题，不打断主讲", s[1].x + 60, s[1].y + 470, true),
+      s[0] && tag("主会话", "讲解、画图、出小实验", s[0].x + s[0].w - 280, s[0].y + 150),
+      s[1] && tag("快答", "小问题，不打断主讲", s[1].x + 95, s[1].y + 340, true),
       s[2] && tag("卡片库", "讲过的自动记成卡", s[2].x + 40, s[2].y + 190),
       tag("工作状态", "底栏一点，换整套窗口", 40, 905),
     ].filter(Boolean);
@@ -337,24 +359,28 @@
     render();
     let drag = null;
     board.addEventListener("pointerdown", (e) => {
+      stopDemo();
       const t = e.target.closest(".pl-tab");
       if (!t) return;
       drag = { k: t.dataset.k, from: t.closest(".pl-stack").dataset.s, x: e.clientX, y: e.clientY, moving: false, ghost: null, hit: null };
       t.setPointerCapture(e.pointerId);
     });
-    board.addEventListener("pointermove", (e) => {
-      if (!drag) return;
-      if (!drag.moving && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return;
+    const over = (x, y) => {
       if (!drag.moving) { drag.moving = true; drag.ghost = el("div", "pl-ghost lt light", ICON[PTABS[drag.k][1]] + PTABS[drag.k][0], document.body); }
-      Object.assign(drag.ghost.style, { left: e.clientX + 12 + "px", top: e.clientY + 10 + "px" });
-      const under = document.elementsFromPoint(e.clientX, e.clientY).find((n) => n.classList && n.classList.contains("pl-stack"));
+      Object.assign(drag.ghost.style, { left: x + 12 + "px", top: y + 10 + "px" });
+      const under = document.elementsFromPoint(x, y).find((n) => n.classList && n.classList.contains("pl-stack"));
       const mark = $(".pl-drop", board);
       if (!under) { drag.hit = null; mark.style.opacity = 0; return; }
-      const r = under.getBoundingClientRect(), b = board.getBoundingClientRect(), fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+      const r = under.getBoundingClientRect(), b = board.getBoundingClientRect(), fx = (x - r.left) / r.width, fy = (y - r.top) / r.height;
       const zone = fx < .24 ? "left" : fx > .76 ? "right" : fy < .3 && fy > .12 ? "top" : fy > .74 ? "bottom" : "center";
       drag.hit = { s: under.dataset.s, zone };
       const half = { left: [0, 0, .5, 1], right: [.5, 0, .5, 1], top: [0, 0, 1, .5], bottom: [0, .5, 1, .5], center: [0, 0, 1, 1] }[zone];
       Object.assign(mark.style, { opacity: 1, left: r.left - b.left + r.width * half[0] + 4 + "px", top: r.top - b.top + r.height * half[1] + 4 + "px", width: r.width * half[2] - 8 + "px", height: r.height * half[3] - 8 + "px" });
+    };
+    board.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      if (!drag.moving && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return;
+      over(e.clientX, e.clientY);
     });
     const end = () => {
       if (!drag) return;
@@ -387,7 +413,39 @@
     };
     board.addEventListener("pointerup", end);
     board.addEventListener("pointercancel", end);
-    $("#play-reset").addEventListener("click", () => { root = start(); fresh = null; render(); if (hasGsap) gsap.from(".pl-stack", { opacity: 0, y: 10, stagger: .06, duration: .35 }); });
+
+    // the first time it comes into view, a pointer shows what to do: it drags the code tab to the main session's right edge, which splits off a column
+    let show = null;
+    const cursor = el("div", "pl-cursor", '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3l14 8.5-6.2 1.3 3.6 6.6-2.6 1.4-3.6-6.6L5 18.5z"/></svg>', document.body);
+    function stopDemo() {
+      if (!show) return;
+      show.kill(); show = null;
+      gsap.set(cursor, { opacity: 0 });
+      if (drag && drag.demo) { drag.ghost && drag.ghost.remove(); drag = null; render(); }
+    }
+    function demo() {
+      const tab = $('.pl-tab[data-k="code"]', board), from = tab && tab.closest(".pl-stack");
+      if (!from || drag) return;
+      // points kept relative to the board, so they hold while the page is still gliding
+      const b0 = board.getBoundingClientRect(), t = tab.getBoundingClientRect(), f = from.getBoundingClientRect();
+      const rel = (x, y) => [x - b0.left, y - b0.top];
+      const P = { x: 0, y: 0 }, A = rel(b0.left + b0.width * .5, b0.top + b0.height * .8), B = rel(t.left + t.width / 2, t.top + t.height / 2), C = rel(f.right - f.width * .1, f.top + f.height * .55);
+      const put = () => { const b = board.getBoundingClientRect(); gsap.set(cursor, { x: b.left + P.x, y: b.top + P.y }); if (drag && drag.demo) over(b.left + P.x, b.top + P.y); };
+      [P.x, P.y] = A; put();
+      show = gsap.timeline({ onComplete: () => { show = null; } })
+        .to(cursor, { opacity: 1, duration: .3 })
+        .to(P, { x: B[0], y: B[1], duration: .8, ease: "power2.inOut", onUpdate: put })
+        .to(cursor, { scale: .82, duration: .12 })
+        .add(() => { drag = { k: "code", from: from.dataset.s, demo: true, moving: false, ghost: null, hit: null }; })
+        .to(P, { x: C[0], y: C[1], duration: 1.1, ease: "power2.inOut", onUpdate: put })
+        .to({}, { duration: .35 })
+        .add(() => { end(); })
+        .to(cursor, { scale: 1, duration: .12 })
+        .to(cursor, { opacity: 0, duration: .4 }, "+=.7");
+    }
+    if (hasGsap && !still) ScrollTrigger.create({ trigger: board, start: "top 60%", once: true, onEnter: demo });
+
+    $("#play-reset").addEventListener("click", () => { stopDemo(); root = start(); fresh = null; render(); if (hasGsap) gsap.from(".pl-stack", { opacity: 0, y: 10, stagger: .06, duration: .35 }); });
   }
   playground();
 
@@ -569,7 +627,8 @@
     mask.id = "detour-mask";
     Object.entries({ d: det.getAttribute("d"), stroke: "#fff", "stroke-width": 12, fill: "none", "stroke-dasharray": dn, "stroke-dashoffset": dn }).forEach(([k, v]) => mp.setAttribute(k, v));
     mask.appendChild(mp); svg.insertBefore(mask, svg.firstChild); det.setAttribute("mask", "url(#detour-mask)");
-    const tl = gsap.timeline({ scrollTrigger: { trigger: "#route-wrap", start: "top 85%", end: "bottom 30%", scrub: 1 } });
+    // it plays by itself once it is in view, quick enough to finish before the reader scrolls on
+    const tl = gsap.timeline({ scrollTrigger: { trigger: "#route-wrap", start: "top 70%", toggleActions: "play none none none" } });
     tl.to(done, { strokeDashoffset: 0, duration: 1, ease: "none" }, 0)
       .from(dots.slice(0, 3), { opacity: 0, scale: .4, transformOrigin: "center", stagger: .3, duration: .3 }, 0)
       .to(rest, { strokeDashoffset: 0, duration: 1, ease: "none" }, 1)
@@ -577,6 +636,7 @@
       .to(mp, { attr: { "stroke-dashoffset": 0 }, duration: 1.1, ease: "power1.inOut" }, 2.1)
       .from(fg, { opacity: 0, y: 26, duration: .5, ease: "back.out(2)" }, 2.7)
       .from(".route-notes div", { opacity: 0, y: 20, stagger: .3, duration: .4 }, 1.6);
+    tl.timeScale(1.35);
     gsap.to(pulse, { attr: { r: 34 }, opacity: 0, duration: 1.6, repeat: -1, ease: "power1.out" });
   }
 
