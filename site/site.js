@@ -453,7 +453,8 @@
         .to(cursor, { scale: 1, duration: .12 })
         .to(cursor, { opacity: 0, duration: .4 }, "+=.7");
     }
-    if (hasGsap && !still) ScrollTrigger.create({ trigger: board, start: "top 60%", once: true, onEnter: demo });
+    // made before the pinned scenes above it, so it measures after them (their pins move it down the page)
+    if (hasGsap && !still) ScrollTrigger.create({ trigger: board, start: "top 60%", once: true, onEnter: demo, refreshPriority: -1 });
 
     $("#play-reset").addEventListener("click", () => { stopDemo(); root = start(); fresh = null; render(); if (hasGsap) gsap.from(".pl-stack", { opacity: 0, y: 10, stagger: .06, duration: .35 }); });
   }
