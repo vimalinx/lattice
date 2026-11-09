@@ -47,15 +47,12 @@ h1,h2,h3,p{margin:0}
 /* ---------- the app in a frame ---------- */
 .win{position:relative;width:100%;aspect-ratio:16/10;border-radius:14px;overflow:hidden;background:var(--sheet);box-shadow:var(--shadow-win);isolation:isolate}
 .win .scale{position:absolute;left:0;top:0;width:1600px;height:1000px;transform-origin:0 0;transform:scale(var(--k,.5))}
-.win .layer{position:absolute;inset:0}
-/* the real interface, over the picture of it once the window is at rest */
-.win iframe.live-app{position:absolute;left:0;top:0;width:1600px;height:1000px;border:0;z-index:20;opacity:0;pointer-events:none;transition:opacity .35s;background:transparent}
-.win.is-live iframe.live-app,.win.zoom-live iframe.live-app{opacity:1;pointer-events:auto}
-.win.is-live .layer{visibility:hidden;transition:visibility 0s .35s}
-/* a scene's marks belong to the picture; the first window's labels stay until it is clicked into */
+/* the window is Lattice itself (app/), over which the scenes draw; a window clicked into keeps its marks out of the way */
+.win iframe.live-app{position:absolute;left:0;top:0;width:1600px;height:1000px;border:0;background:transparent;color-scheme:normal}
 .win .ov{transition:opacity .35s}
-.win.is-live:not(#hero-win) .ov,.win.is-live.engaged .ov{opacity:0}
-.win .layer+.layer{opacity:0}
+.win.engaged .ov{opacity:0}
+/* on a touch screen the page scrolls over the windows; the corner piece opens one to use */
+@media (pointer:coarse){.win:not(.zoom-live) iframe.live-app{pointer-events:none}}
 .lt{--sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei UI","Noto Sans CJK SC",system-ui,sans-serif;--mono:"Lattice Mono","JetBrains Mono","Noto Sans Mono CJK SC",monospace;font-family:var(--sans)}
 .app-frame{position:absolute;left:0;top:0;width:1600px;height:1000px;overflow:hidden}
 .app-frame .app-overlays>*{position:absolute}
@@ -312,7 +309,7 @@ h1,h2,h3,p{margin:0}
 
 /* ---------- light and dark ---------- */
 .theme-stage{position:relative;margin-top:clamp(36px,5vh,60px);max-width:1360px;margin-left:auto;margin-right:auto}
-.theme-stage .win .layer.dark-layer{opacity:1;clip-path:circle(0% at 2.2% 90.5%)}
+.theme-stage .win iframe.dark-app{clip-path:circle(0% at 2.2% 90.5%)}
 .moon{position:absolute;right:clamp(12px,2vw,28px);top:clamp(12px,2vw,28px);z-index:5;display:flex;align-items:center;gap:10px;padding:12px 18px;border-radius:999px;border:0;cursor:pointer;
   background:var(--ink);color:var(--paper);font:600 15px/1 var(--sans);box-shadow:0 12px 30px -10px rgba(22,38,43,.5)}
 .moon svg{width:18px;height:18px}

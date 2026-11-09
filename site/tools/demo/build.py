@@ -15,7 +15,12 @@ vault = str(home / "vault")
 # answered by the demo itself, or just told to the backend; one answer kept for its shape
 SHAPE_ONLY = {"window_held", "screen", "topic_here", "states_save", "viewed", "skill_install", "run"}
 
+# demo data that would read oddly on the page
+WORDING = {"The learner keeps mixing step size and direction.": "学习者总把步长和方向混在一起，先把两者拆开。"}
+
 def scrub(text):
+    for a, b in WORDING.items():
+        text = text.replace(a, b)
     text = text.replace(vault, "~/Lattice").replace(str(home), "~/.lattice-demo")
     return re.sub(r"/home/[^/\"]+", "~", text)
 

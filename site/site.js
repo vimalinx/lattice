@@ -26,32 +26,53 @@
     gsap.ticker.lagSmoothing(0);
   }
 
-  /* ---------------- the app in frames ---------------- */
+  /* ---------------- the windows: Lattice itself ---------------- */
+  // Every window is the real Lattice (app/), on the demo backend in app/demo that all of them share. The scenes below
+  // play on it: what they draw sits over it, and what they move inside it they put back.
   const cache = {};
   const fragment = (name) => (cache[name] ||= fetch("ui/" + name + ".htm").then((r) => (r.ok ? r.text() : "")).catch(() => ""));
   const fit = (win) => win.style.setProperty("--k", win.clientWidth / 1600);
   const ro = new ResizeObserver((es) => es.forEach((e) => fit(e.target)));
-  async function mount(win) {
-    const names = win.dataset.layers.split(/\s+/), scale = $(".scale", win), ov = $(".ov", scale);
-    const htmls = await Promise.all(names.map(fragment));
-    names.forEach((name, i) => {
-      const layer = document.createElement("div");
-      layer.className = "layer";
-      layer.dataset.layer = name;
-      layer.innerHTML = htmls[i];
-      scale.insertBefore(layer, ov || null);
-    });
-    fit(win);
-    ro.observe(win);
-    restoreScroll(win);
+  const appUrl = (space, o = {}) => "app/index.html?space=" + encodeURIComponent(space) + (o.dark ? "&theme=dark" : "") + (o.run ? "&run=" + encodeURIComponent(o.run) : "");
+  function liveApp(win, space, o = {}) {
+    const frame = el("iframe", "live-app" + (o.cls ? " " + o.cls : ""));
+    $(".scale", win).insertBefore(frame, $(".ov", win));
+    frame.title = "Lattice（可以直接用的演示）";
+    const a = { win, frame, space, doc: null };
+    a.ready = new Promise((done) => frame.addEventListener("load", () => {
+      // booted: its states along the bottom and its panels in place, and a moment for them to fill
+      const t = setInterval(() => {
+        const d = frame.contentDocument;
+        if (!d?.querySelector("#status .st-tab") || !d.querySelector("#dock .stack")) return;
+        clearInterval(t);
+        setTimeout(() => { a.doc = d; done(a); }, 900);
+      }, 100);
+    }, { once: true }));
+    a.load = () => { if (!frame.src) frame.src = appUrl(space, o); };
+    a.$ = (sel) => a.doc?.querySelector(sel) || null;
+    a.$$ = (sel) => (a.doc ? [...a.doc.querySelectorAll(sel)] : []);
+    // the app's own modules, the very ones running in it
+    a.mod = (name) => frame.contentWindow.latticeModule(name);
+    return a;
   }
-  // The dumps keep each panel's scroll offset in data-st / data-sl.
-  const restoreScroll = (root) => $$("[data-st],[data-sl]", root).forEach((e) => { e.scrollTop = +(e.dataset.st || 0); e.scrollLeft = +(e.dataset.sl || 0); });
-  const layer = (win, name) => $(`.layer[data-layer="${name}"]`, win);
-  // An element's box in the frame's own 1600x1000 coordinates (measured before anything tilts the frame).
+  // a box inside an app, in its 1600x1000 frame; one on this page, in the frame of the window it sits over
   function box(el, win) {
-    const r = el.getBoundingClientRect(), s = $(".scale", win).getBoundingClientRect(), k = s.width / 1600;
+    const r = el.getBoundingClientRect();
+    if (el.ownerDocument !== document) return { x: r.left, y: r.top, w: r.width, h: r.height };
+    const s = $(".scale", win).getBoundingClientRect(), k = s.width / 1600;
     return { x: (r.left - s.left) / k, y: (r.top - s.top) / k, w: r.width / k, h: r.height / k };
+  }
+  // a chat panel scrolled so this message sits at its top
+  function scrollToMsg(msg, off = 16) {
+    const sc = msg?.closest(".chat-scroll");
+    if (sc) sc.scrollTop += msg.getBoundingClientRect().top - sc.getBoundingClientRect().top - off;
+  }
+  const findMsg = (a, cls, text) => a.$$(".msg." + cls).find((m) => m.textContent.includes(text));
+  // where the learning windows start: the main session at the question that drew the graph, the quick answer from the top
+  function pose(a) {
+    scrollToMsg(findMsg(a, "from-me", "给我画个图"));
+    const q = findMsg(a, "from-me", "这一行在干嘛");
+    if (q) q.closest(".chat-scroll").scrollTop = 0;
   }
   const visible = (el) => el && el.getClientRects().length && el.getBoundingClientRect().width > 4;
   function el(tag, cls, html, parent) {
@@ -123,63 +144,19 @@
   net($("#hero-net"), "rgba(22,38,43,.28)", "rgba(27,120,104,A)", 70);
   net($("#get-net"), "rgba(139,220,197,.5)", "rgba(139,220,197,A)", 60);
 
-  /* ---------------- the relations graph, drawn here (the dumps can't carry cytoscape's canvas) ---------------- */
-  // x is a share of the width, y a row in a 340-high frame; the loop runs L → G → S → U → P → R → L
-  const GRAPH = {
-    nodes: [["L", "损失函数 L(p)", .7, 290, "#1b7868", true], ["G", "梯度 ∂L/∂p", .3, 290, "#6b57b8"], ["E", "学习率 η", .12, 50, "#8a6a1f"],
-      ["S", "实际步长 η·∂L/∂p", .45, 170, "#8a6a1f"], ["U", "更新 p←p−η·∂L/∂p", .52, 50, "#1f5fa8"], ["P", "新参数 p", .87, 50, "#b05855"], ["R", "重算损失和梯度", .85, 170, "#1b7868"]],
-    // [from, to, label, colour, dash, where along the edge the label sits]
-    edges: [["L", "G", "求导得到", "#a87e00"], ["G", "S", "提供方向", "#1b7868"], ["E", "S", "提供幅度", "#1b7868"], ["S", "U", "", "#5b6b70", "2 5"], ["U", "P", "变成", "#5b6b70"],
-      ["P", "R", "", "#a87e00"], ["R", "L", "下一轮", "#5b6b70", "6 5"], ["E", "G", "算出来的 vs 定好的", "#b05855", "6 5", .42]],
-  };
-  const measure = document.createElement("canvas").getContext("2d");
-  // the colour behind the canvas, so a box can hide the lines under it
-  const ground = (e) => {
-    for (; e; e = e.parentElement) { const c = getComputedStyle(e).backgroundColor; if (c && c !== "transparent" && !/,\s*0\)$/.test(c)) return c; }
-    return "#fff";
-  };
-  let graphs = 0;
-  function drawGraph(host) {
-    host.innerHTML = "";
-    const tag = "ah" + graphs++ + "-";
-    const W = host.clientWidth || 940, H = host.clientHeight || 340, sy = H / 340, HH = 17, bg = ground(host);
-    measure.font = `600 13.5px ${getComputedStyle(host).fontFamily}`;
-    const at = Object.fromEntries(GRAPH.nodes.map(([id, label, fx, y]) => {
-      const w = Math.ceil(measure.measureText(label).width) + 28;
-      return [id, { x: Math.min(W - w / 2 - 6, Math.max(w / 2 + 6, fx * W)), y: y * sy, w }];
-    }));
-    // where the line from a box's centre toward (tx, ty) leaves the box, a few px out
-    const rim = (n, tx, ty, gap) => {
-      const dx = tx - n.x, dy = ty - n.y, len = Math.hypot(dx, dy) || 1;
-      const t = Math.min((n.w / 2) / (Math.abs(dx) || 1e-9), HH / (Math.abs(dy) || 1e-9));
-      return [n.x + dx * t + (dx / len) * gap, n.y + dy * t + (dy / len) * gap];
-    };
-    const colours = [...new Set(GRAPH.edges.map((e) => e[3]))];
-    let svg = `<svg class="relg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="position:absolute;inset:0"><defs>` +
-      colours.map((c, i) => `<marker id="${tag}${i}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="${c}"/></marker>`).join("") + "</defs>";
-    const labels = [];
-    for (const [a, b, label, c, dash, along = .5] of GRAPH.edges) {
-      const A = at[a], B = at[b], [x1, y1] = rim(A, B.x, B.y, 3), [x2, y2] = rim(B, A.x, A.y, 4);
-      svg += `<g class="ge"><path d="M${x1} ${y1} L${x2} ${y2}" stroke="${c}" stroke-width="1.8" fill="none" ${dash ? `stroke-dasharray="${dash}"` : ""} marker-end="url(#${tag}${colours.indexOf(c)})"/></g>`;
-      if (label) labels.push(`<text x="${x1 + (x2 - x1) * along}" y="${y1 + (y2 - y1) * along + 4}" text-anchor="middle" font-size="12" fill="#5b6b70" stroke="${bg}" stroke-width="5" stroke-linejoin="round" paint-order="stroke">${label}</text>`);
-    }
-    for (const [id, label, , , c, main] of GRAPH.nodes) {
-      const { x, y, w } = at[id];
-      svg += `<g class="gn" style="transform-origin:${x}px ${y}px"><rect x="${x - w / 2}" y="${y - HH}" width="${w}" height="${HH * 2}" rx="8" fill="${bg}"/><rect x="${x - w / 2}" y="${y - HH}" width="${w}" height="${HH * 2}" rx="8" fill="${c}1c" stroke="${c}" stroke-width="${main ? 3 : 1.6}"/><text x="${x}" y="${y + 5}" text-anchor="middle" font-size="13.5" font-weight="600" fill="#16262b">${label}</text></g>`;
-    }
-    host.insertAdjacentHTML("beforeend", svg + labels.join("") + "</svg>");
-    return $("svg", host);
-  }
-  const mountGraphs = (root) => $$(".rel-canvas", root).map((c) => { c.style.position = "relative"; return drawGraph(c); });
-
-  /* ---------------- frames mounted, then everything that moves ---------------- */
-  const wins = $$(".win[data-layers]");
-  Promise.all(wins.map(mount)).then(() => document.fonts.ready).then(() => {
-    wins.forEach((w) => mountGraphs(w));
-    // the dark copy's graph reads on dark
-    $$('.layer[data-layer="hero_dark"] .relg text').forEach((t) => t.setAttribute("fill", "#e7edf2"));
-    setup();
+  /* ---------------- the windows' apps, then everything that moves ---------------- */
+  const wins = $$(".win[data-space]");
+  const APPS = {};
+  wins.forEach((win) => {
+    fit(win); ro.observe(win);
+    APPS[win.id] = liveApp(win, win.dataset.space, { run: win.dataset.run });
+    if (win.id === "theme-win") APPS["theme-dark"] = liveApp(win, win.dataset.space, { dark: true, cls: "dark-app" });
   });
+  const apps = Object.values(APPS);
+  apps.forEach((a) => a.ready.then(() => pose(a)));
+  // the first window at once; the others as the page nears them (live())
+  APPS["hero-win"].load();
+  document.fonts.ready.then(setup);
 
   function setup() {
     words();
@@ -201,8 +178,6 @@
       ScrollTrigger.refresh();
     }
     live();
-    // pinning moves sections into a wrapper, and a moved node forgets where its panels were scrolled
-    wins.forEach(restoreScroll);
   }
 
   /* big words come up out of their lines; paragraphs rise */
@@ -223,22 +198,15 @@
 
   /* ---------------- hero: the window lands, then says what its parts are ---------------- */
   function hero() {
-    const win = $("#hero-win"), L = layer(win, "hero"), ov = $("#hero-ov");
-    if (!L) return;
-    const stacks = $$(".stack", L).filter(visible);
-    const tag = (title, sub, x, y, ai) => {
-      const t = el("div", "tagline" + (ai ? " ai" : ""), `<i></i>${title}<small>${sub}</small>`, ov);
-      Object.assign(t.style, { left: x + "px", top: y + "px" });
-      return t;
-    };
-    const s = stacks.map((st) => box(st, win));
-    const tags = [
-      tag("文件", "按主题和会话找", 120, 560),
-      s[0] && tag("主会话", "讲解、画图、出小实验", s[0].x + s[0].w - 280, s[0].y + 150),
-      s[1] && tag("快答", "小问题，不打断主讲", s[1].x + 95, s[1].y + 340, true),
-      s[2] && tag("卡片库", "讲过的自动记成卡", s[2].x + 40, s[2].y + 190),
-      tag("工作状态", "底栏一点，换整套窗口", 40, 905),
-    ].filter(Boolean);
+    const win = $("#hero-win"), ov = $("#hero-ov"), a = APPS["hero-win"];
+    const tags = [["文件", "按主题和会话找"], ["主会话", "讲解、画图、出小实验"], ["快答", "小问题，不打断主讲", true], ["卡片库", "讲过的自动记成卡"], ["工作状态", "底栏一点，换整套窗口"]]
+      .map(([title, sub, ai]) => el("div", "tagline" + (ai ? " ai" : ""), `<i></i>${title}<small>${sub}</small>`, ov));
+    // placed by the panels they name, once the app has them
+    a.ready.then(() => {
+      const s = a.$$("#dock .stack").filter(visible).map((e) => box(e));
+      const at = [[120, 560], s[0] && [s[0].x + s[0].w - 280, s[0].y + 150], s[1] && [s[1].x + 95, s[1].y + 340], s[2] && [s[2].x + 40, s[2].y + 190], [40, 905]];
+      tags.forEach((t, i) => (at[i] ? Object.assign(t.style, { left: at[i][0] + "px", top: at[i][1] + "px" }) : t.remove()));
+    });
     if (!hasGsap || still) { win.style.transform = "none"; tags.forEach((t) => (t.style.opacity = 1)); return; }
     // It lies back in the bottom of the first screen (site.css tilts it before anything loads) and comes upright as that screen scrolls away.
     gsap.set(win, { rotateX: 38, scale: .9, transformOrigin: "50% 0%" });
@@ -272,47 +240,75 @@
     });
   }
 
+  // a colour with its alpha scaled, for a background going clear and coming back
+  const fade = (c, k) => { const m = String(c).match(/[\d.]+/g) || [0, 0, 0, 0]; return `rgba(${m[0]},${m[1]},${m[2]},${(m[3] == null ? 1 : +m[3]) * k})`; };
   function tabsScene() {
-    const win = $("#tabs-win"), L = layer(win, "hero"), ov = $("#tabs-ov"), list = $("#wslist");
-    if (!L || !hasGsap) return;
+    const win = $("#tabs-win"), ov = $("#tabs-ov"), list = $("#wslist"), a = APPS["tabs-win"];
+    if (!a || !hasGsap) return;
     WORKSPACES.forEach(([name, , desc], i) => el("button", i ? "" : "on", `<span>0${i + 1}</span><b>${name}</b><small>${desc}</small>`, list).type = "button");
-    const pieces = [[$('[data-id="activity"]', L), -46, 0, ""], [$('[data-id="side"]', L), -22, 0, "活动栏和左栏"], ...$$(".stack", L).filter(visible).map((s, i) => [s, i ? 34 : 0, i === 1 ? -26 : i === 2 ? 26 : -10, ["一组标签：主会话 · 代码 · 笔记", "快答", "卡片库 · 记忆"][i]]),
-      [$('[data-id="status"]', L), 0, 34, "底栏：工作状态"]].filter((p) => p[0]);
     const K = .82, C = { x: 800, y: 500 };
-    // the pieces may leave the boxes that held them
-    [$('[data-id="app"]', L), $('[data-id="shell"]', L), $('[data-id="dock-wrap"]', L), $('[data-id="dock"]', L), ...$$(".split", L)].filter(Boolean).forEach((e) => (e.style.overflow = "visible"));
-    const labels = pieces.filter((p) => p[3]).map(([e, dx, dy, name]) => {
-      const b = box(e, win), t = el("div", "tagline", `<i></i>${name}`, ov);
-      const x = C.x + (b.x + dx - C.x) * K, y = C.y + (b.y + dy - C.y) * K;
+    // the pieces as the app has them when they move: [element, dx, dy, what it is]
+    const pieces = () => {
+      const st = a.$$("#dock .stack").filter(visible);
+      return [[a.$("#activity"), -46, 0, ""], [a.$("#side"), -22, 0, "活动栏和左栏"], [st[0], 0, -10, "一组标签：主会话 · 代码 · 笔记"], [st[1], 34, -26, "快答"], [st[2], 34, 26, "卡片库 · 记忆"],
+        [a.$("#status"), 0, 34, "底栏：工作状态"]].filter((p) => p[0]);
+    };
+    const NAMES = ["活动栏和左栏", "一组标签：主会话 · 代码 · 笔记", "快答", "卡片库 · 记忆", "底栏：工作状态"];
+    const labels = NAMES.map((name) => el("div", "tagline", `<i></i>${name}`, ov));
+    a.ready.then(() => pieces().forEach(([e, dx, dy, name]) => {
+      const t = labels[NAMES.indexOf(name)];
+      if (!t) return;
+      const b = box(e), x = C.x + (b.x + dx - C.x) * K, y = C.y + (b.y + dy - C.y) * K;
       Object.assign(t.style, { left: x + 14 + "px", top: y + (/底栏/.test(name) ? -58 : 14) + "px" });
-      return t;
-    });
-    const layers = WORKSPACES.map(([, n]) => layer(win, n));
-    // what the pieces stand on goes clear while they are apart, then comes back as it was
-    const grounds = [$(".app-frame", L), $('[data-id="app"]', L), $('[data-id="shell"]', L), $('[data-id="dock-wrap"]', L), $('[data-id="dock"]', L)].filter(Boolean).map((e) => [e, getComputedStyle(e).backgroundColor]);
-    const T0 = 2.0, STEP = .62;
+    }));
+    // apart (v 0..1): the whole app a little smaller, what it stands on clear, its pieces pulled out and outlined
+    const GROUNDS = ["body", "#app", "#shell", "#dock-wrap", "#dock"];
+    let bgs = null;
+    const apart = (v) => {
+      const root = a.$("#app");
+      if (!root) return;
+      const cs = a.frame.contentWindow.getComputedStyle;
+      bgs ||= GROUNDS.map((q) => a.$(q) && cs(a.$(q)).backgroundColor);
+      Object.assign(root.style, { transformOrigin: "50% 50%", transform: v ? `scale(${1 - (1 - K) * v})` : "" });
+      GROUNDS.forEach((q, i) => { const e = a.$(q); if (e) e.style.backgroundColor = v ? fade(bgs[i], 1 - v) : ""; });
+      [root, a.$("#shell"), a.$("#dock-wrap"), a.$("#dock"), ...a.$$("#dock .split")].forEach((e) => e && (e.style.overflow = v ? "visible" : ""));
+      pieces().forEach(([e, dx, dy]) => Object.assign(e.style, v
+        ? { transform: `translate(${dx * v}px,${dy * v}px)`, borderRadius: 12 * v + "px", boxShadow: `0 0 0 2px rgba(27,120,104,${v}), 0 30px 60px -26px rgba(22,38,43,${.55 * v})` }
+        : { transform: "", borderRadius: "", boxShadow: "" }));
+    };
+    const P = { v: 0 }, T0 = 2.0, STEP = .62;
     const tl = scene($("#tabs-scene"), (tl) => {
-      tl.to(L, { scale: K, duration: .5, ease: "power2.inOut", transformOrigin: "50% 50%" }, .1);
       tl.to(win, { backgroundColor: "rgba(253,253,249,0)", boxShadow: "0 0 0 0 rgba(22,38,43,0)", duration: .4 }, .1);
-      grounds.forEach(([e]) => tl.to(e, { backgroundColor: "rgba(0,0,0,0)", duration: .4 }, .1));
-      pieces.forEach(([e, dx, dy], i) => tl.to(e, { x: dx, y: dy, borderRadius: 12, boxShadow: "0 0 0 2px rgba(27,120,104,1), 0 30px 60px -26px rgba(22,38,43,.55)", duration: .5, ease: "power2.out" }, .2 + i * .05));
+      tl.to(P, { v: 1, duration: .5, ease: "power2.out", onUpdate: () => apart(P.v) }, .2);
       tl.to(labels, { opacity: 1, y: -6, stagger: .05, duration: .25 }, .65);
       tl.to(labels, { opacity: 0, duration: .2 }, 1.3);
-      pieces.forEach(([e]) => tl.to(e, { x: 0, y: 0, borderRadius: 0, boxShadow: "0 0 0 0px rgba(27,120,104,0), 0 0px 0px 0px rgba(22,38,43,0)", duration: .4, ease: "power2.inOut" }, 1.35));
-      tl.to(L, { scale: 1, duration: .4, ease: "power2.inOut" }, 1.35);
+      tl.to(P, { v: 0, duration: .4, ease: "power2.inOut", onUpdate: () => apart(P.v) }, 1.35);
       tl.to(win, { backgroundColor: "rgba(253,253,249,1)", boxShadow: "0 30px 80px -30px rgba(22,38,43,.38)", duration: .4 }, 1.35);
-      grounds.forEach(([e, bg]) => tl.to(e, { backgroundColor: bg, duration: .4 }, 1.35));
       steps(tl, $("#tabs-steps"), [1.5]);
-      layers.slice(1).forEach((ly, i) => {
-        tl.fromTo(ly, { opacity: 0, scale: 1.015 }, { opacity: 1, scale: 1, duration: .3, ease: "power1.inOut" }, T0 + i * STEP);
-      });
       tl.to({}, { duration: .5 }, T0 + 6 * STEP);
     }, "+=" + 630 + "%");
-    // which workspace is showing, for the list beside it
+    // the working state the scroll has reached, switched in the app itself (the list beside it says which)
+    let want = 0;
+    const show = (i) => {
+      want = i;
+      if (!a.doc) return;
+      const name = WORKSPACES[i][0];
+      if (a.$("#status .st-tab.on")?.textContent.trim() === name) return;
+      Promise.all([a.mod("spaces"), a.mod("core")]).then(([SP, CO]) => {
+        if (want !== i) return;
+        const sp = CO.S.states.find((x) => x.name === name);
+        if (!sp) return;
+        SP.switchSpace(sp.id);
+        const dw = a.$("#dock-wrap");
+        if (dw) gsap.fromTo(dw, { opacity: .15 }, { opacity: 1, duration: .3, ease: "power1.out" });
+      });
+    };
+    a.ready.then(() => show(want));
     const btns = $$("button", list);
     const sync = () => {
       const t = tl.time(), i = t < T0 + .15 ? 0 : Math.min(6, Math.floor((t - T0 - .15) / STEP) + 1);
       btns.forEach((b, j) => b.classList.toggle("on", j === i));
+      if (i !== want) show(i);
     };
     tl.eventCallback("onUpdate", sync);
     btns.forEach((b, i) => b.addEventListener("click", () => {
@@ -470,133 +466,158 @@
     return "笔记";
   }
   function contextScene() {
-    const win = $("#ctx-win"), L = layer(win, "hero"), ov = $("#ctx-ov");
-    if (!L || !hasGsap) return;
-    const tabs = $$(".tab", L).filter(visible).filter((t) => !t.classList.contains("tab-add"));
-    const flash = $$(".stack", L).filter(visible)[1];
-    const fb = flash ? box(flash, win) : { x: 1086, y: 0, w: 500, h: 600 };
+    const win = $("#ctx-win"), ov = $("#ctx-ov"), a = APPS["ctx-win"];
+    if (!a || !hasGsap) return;
+    const N = 6, NS = "http://www.w3.org/2000/svg";
+    // drawn now, filled from the app once it is there: the catalog, a mark and a beam for each tab, the selection, the read
     const cat = el("div", "catalog", `<div class="head">${ICON.spark.replace("<svg", '<svg width="16" height="16"')}这一问附带的标签目录</div>`, ov);
-    Object.assign(cat.style, { left: fb.x + fb.w - 700 + "px", top: fb.y + 70 + "px", width: "680px" });
-    const rows = tabs.map((t, i) => {
-      const title = ($(".tab-title", t) || t).textContent.trim().replace(/\s+/g, " ");
-      const r = el("div", "row" + (/主会话/.test(title) ? " using" : t.classList.contains("active") ? " front" : ""), `<span class="k">t${i + 1}</span><span>${kindOf(title)}</span><span>${title}</span>`, cat);
-      return r;
-    });
-    const strong = $$(".msg-body strong", L).find((s) => /梯度管方向/.test(s.textContent));
+    const rows = Array.from({ length: N }, () => el("div", "row", "", cat));
     const sel = el("div", "sel", `<span class="k">选中 </span><b>“梯度管方向，学习率管步长。”</b> <span class="k">· t1 主会话</span>`, cat);
-    const code = tabs.find((t) => /\.py/.test(t.textContent));
-    const tool = el("div", "tool", ICON.doc + `读了 <b style="color:#16262b">t${tabs.indexOf(code) + 1} · 学习率扫描.py</b>　全文 12 行`, cat);
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const tool = el("div", "tool", "", cat);
+    const svg = document.createElementNS(NS, "svg");
     svg.setAttribute("class", "beams"); svg.setAttribute("viewBox", "0 0 1600 1000");
     ov.insertBefore(svg, cat);
-    const beam = (from, to) => {
-      const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      p.setAttribute("d", `M${from.x} ${from.y} C${from.x} ${from.y + 160}, ${to.x - 200} ${to.y}, ${to.x} ${to.y}`);
-      svg.appendChild(p);
-      return p;
+    const beam = () => { const p = document.createElementNS(NS, "path"); p.setAttribute("pathLength", "1"); p.style.strokeDasharray = 1; p.style.strokeDashoffset = 1; svg.appendChild(p); return p; };
+    const hls = rows.map(() => el("div", "hl", "", ov)), beams = rows.map(beam);
+    const selBox = el("div", "selbox", "", ov), selBeam = beam(), codeHl = el("div", "hl", "", ov), toolBeam = beam();
+    const flyer = el("div", "tool-fly", "", ov), paneRing = el("div", "hl ai", "", ov);
+    const curve = (p, f, t) => p.setAttribute("d", `M${f.x} ${f.y} C${f.x} ${f.y + 160}, ${t.x - 200} ${t.y}, ${t.x} ${t.y}`);
+    let flash = null, from = null, codeAt = 2;
+    a.ready.then(() => {
+      const tabs = a.$$("#dock .tab").filter(visible).slice(0, N), stacks = a.$$("#dock .stack").filter(visible);
+      flash = stacks[1];
+      const fb = flash ? box(flash) : { x: 1086, y: 0, w: 500, h: 600 };
+      Object.assign(cat.style, { left: fb.x + fb.w - 700 + "px", top: fb.y + 70 + "px", width: "680px" });
+      rows.forEach((r, i) => {
+        const t = tabs[i];
+        if (!t) { r.remove(); return; }
+        const title = (t.querySelector(".tab-title") || t).textContent.trim().replace(/\s+/g, " ");
+        r.className = "row" + (/主会话/.test(title) ? " using" : t.classList.contains("active") ? " front" : "");
+        r.innerHTML = `<span class="k">t${i + 1}</span><span>${kindOf(title)}</span><span>${title}</span>`;
+        hls[i].className = "hl" + (/快答/.test(title) ? " ai" : "");
+      });
+      codeAt = Math.max(0, tabs.findIndex((t) => /\.py/.test(t.textContent)));
+      tool.innerHTML = ICON.doc + `读了 <b style="color:#16262b">t${codeAt + 1} · 学习率扫描.py</b>　全文 12 行`;
+      const rowAt = (r) => ({ x: cat.offsetLeft, y: cat.offsetTop + r.offsetTop + r.offsetHeight / 2 });
+      tabs.forEach((t, i) => { const b = box(t); place(hls[i], { x: b.x - 2, y: b.y - 2, w: b.w + 4, h: b.h + 4 }); curve(beams[i], { x: b.x + b.w / 2, y: b.y + b.h }, rowAt(rows[i])); });
+      const strong = a.$$(".msg-body strong").find((e) => /梯度管方向/.test(e.textContent));
+      if (strong) { const b = box(strong); place(selBox, { x: b.x - 2, y: b.y - 2, w: b.w + 4, h: b.h + 4 }); curve(selBeam, { x: b.x + b.w / 2, y: b.y + b.h + 4 }, rowAt(sel)); }
+      const code = tabs[codeAt];
+      if (code) { const b = box(code); place(codeHl, { x: b.x - 2, y: b.y - 2, w: b.w + 4, h: b.h + 4 }); curve(toolBeam, { x: b.x + b.w / 2, y: b.y + b.h }, rowAt(tool)); }
+      flyer.innerHTML = tool.innerHTML;
+      from = { x: cat.offsetLeft + tool.offsetLeft, y: cat.offsetTop - 6 + tool.offsetTop };
+      Object.assign(flyer.style, { left: from.x + "px", top: from.y + "px", width: tool.offsetWidth + "px" });
+      place(paneRing, { x: fb.x + 4, y: fb.y + 4, w: fb.w - 8, h: fb.h - 8 });
+      apply();
+    });
+    // The end, played in the app: question, then the read, then the answer. The quick answer scrolls up to make room,
+    // the line flies in and becomes a line of that conversation, under the question, and the answer comes in below it.
+    let geo = null, chip = null;
+    const parts = () => {
+      const q = findMsg(a, "from-me", "lr 为什么大于 2");
+      let ans = q?.nextElementSibling;
+      if (ans?.classList.contains("demo-read")) ans = ans.nextElementSibling;
+      return { q, ans: ans?.classList.contains("from-ai") ? ans : null, sc: q?.closest(".chat-scroll") };
     };
-    const rowAt = (r) => ({ x: cat.offsetLeft, y: cat.offsetTop + r.offsetTop + r.offsetHeight / 2 });
-    const hls = tabs.map((t) => { const b = box(t, win), h = el("div", "hl" + (/快答/.test(t.textContent) ? " ai" : ""), "", ov); place(h, { x: b.x - 2, y: b.y - 2, w: b.w + 4, h: b.h + 4 }); return h; });
-    const beams = tabs.map((t, i) => { const b = box(t, win); return beam({ x: b.x + b.w / 2, y: b.y + b.h }, rowAt(rows[i])); });
-    let selBox = null, selBeam = null;
-    if (strong) {
-      const b = box(strong, win);
-      selBox = el("div", "selbox", "", ov); place(selBox, { x: b.x - 2, y: b.y - 2, w: b.w + 4, h: b.h + 4 });
-      selBeam = beam({ x: b.x + b.w / 2, y: b.y + b.h + 4 }, rowAt(sel));
-    }
-    const codeHl = code && hls[tabs.indexOf(code)], toolBeam = code && beam((() => { const b = box(code, win); return { x: b.x + b.w / 2, y: b.y + b.h }; })(), rowAt(tool));
-    [...beams, selBeam, toolBeam].filter(Boolean).forEach((p) => { const n = p.getTotalLength(); p.style.strokeDasharray = n; p.style.strokeDashoffset = n; });
-    // at the end the "read" line leaves the catalog and lands in the quick answer, as the step it shows there
-    const composer = flash && $(".composer", flash), cb = composer ? box(composer, win) : { x: fb.x + 20, y: fb.y + fb.h - 120, w: fb.w - 40, h: 90 };
-    const flyer = el("div", "tool-fly", tool.innerHTML, ov);
-    const from = { x: cat.offsetLeft + tool.offsetLeft, y: cat.offsetTop - 6 + tool.offsetTop };
-    Object.assign(flyer.style, { left: from.x + "px", top: from.y + "px", width: tool.offsetWidth + "px" });
-    // question, then the read, then the answer: the conversation moves up, the line lands under the last question,
-    // and the answer comes in below it. Measured when it plays, after the panels' scroll is restored.
-    const scroller = flash && $(".chat-scroll", flash), lastQ = flash && $$(".msg.from-me", flash).pop();
-    const answer = lastQ && lastQ.nextElementSibling;
-    // measured when it first plays, not while the page refreshes (pinning lays things out oddly then), less any lift already applied
-    let geo = null;
-    const measure = () => {
-      const q = lastQ ? box(lastQ, win) : { y: cb.y - 140, h: 40 }, qy = q.y - (lastQ ? +gsap.getProperty(lastQ, "y") : 0);
-      // enough room for the answer to come in under the line, above the composer
-      const a = answer && box(answer, win), ay = a ? a.y - +gsap.getProperty(answer, "y") : 0;
-      const lift = Math.max(0, a ? ay + a.h + 46 - cb.y + 10 : qy + q.h + 110 - cb.y);
-      geo = { lift, x: fb.x + 22 - from.x, y: qy + q.h - lift + 14 - from.y };
+    const measure = (p) => {
+      const q = box(p.q), sc = p.sc, scb = box(sc), comp = flash && $(".composer", flash) || flash?.querySelector(".composer");
+      const cb = comp ? box(comp) : { y: scb.y + scb.h };
+      const ab = p.ans ? box(p.ans) : { y: q.y + q.h, h: 0 };
+      const room = Math.max(0, ab.y + ab.h + 56 - Math.min(cb.y, scb.y + scb.h));
+      const lift = Math.min(room, sc.scrollHeight - sc.clientHeight - sc.scrollTop + 56);
+      geo = { base: sc.scrollTop, lift, x: box(flash).x + 22 - from.x, y: q.y + q.h - lift + 10 - from.y };
     };
-    ScrollTrigger.addEventListener("refresh", () => { geo = null; });
     const fly = { p: 0, lift: 0, a: 0 };
-    const apply = () => {
-      if (ScrollTrigger.isRefreshing) return;
-      if (!geo) measure();
-      if (scroller) gsap.set([...scroller.children].filter((c) => c !== answer), { y: -geo.lift * fly.lift });
-      if (answer) gsap.set(answer, { y: -geo.lift * fly.lift + 16 + 30 * fly.a, opacity: fly.a });
+    function apply() {
+      if (ScrollTrigger.isRefreshing || !a.doc || !from) return;
+      const p = parts();
+      if (!p.q || !p.sc) return;
+      if (!geo || !p.q.isConnected) measure(p);
+      if (!chip || !chip.isConnected) {
+        chip = a.doc.createElement("div");
+        chip.className = "demo-read";
+        chip.innerHTML = tool.innerHTML;
+        Object.assign(chip.style, { display: "none", alignItems: "center", gap: "7px", margin: "4px 0 14px", padding: "8px 11px", borderRadius: "8px", font: "500 14.7px/1.3 var(--sans, sans-serif)", color: "var(--muted, #5b6b70)", background: "var(--hover, rgba(22,38,43,.05))", boxShadow: "0 0 0 1.5px #6b57b8", width: "fit-content" });
+        chip.querySelector("svg")?.setAttribute("style", "width:15px;height:15px;flex:none");
+        p.q.after(chip);
+      }
+      p.sc.scrollTop = geo.base + geo.lift * fly.lift;
+      const landed = fly.p > .999;
+      chip.style.display = landed ? "flex" : "none";
+      flyer.style.visibility = landed ? "hidden" : "";
       gsap.set(flyer, { x: geo.x * fly.p, y: geo.y * fly.p, scale: 1 - .3 * fly.p });
-    };
-    if (answer) gsap.set(answer, { opacity: 0 });
-    const paneRing = el("div", "hl ai", "", ov); place(paneRing, { x: fb.x + 4, y: fb.y + 4, w: fb.w - 8, h: fb.h - 8 });
+      if (p.ans) Object.assign(p.ans.style, { opacity: fly.a, transform: fly.a < 1 ? `translateY(${(1 - fly.a) * 16}px)` : "" });
+    }
     scene($("#ctx-scene"), (tl) => {
       tl.to(cat, { opacity: 1, y: -6, duration: .3 }, .1);
-      tabs.forEach((t, i) => {
+      rows.forEach((r, i) => {
         const at = .35 + i * .3;
         tl.to(hls[i], { opacity: 1, duration: .12 }, at);
         tl.to(beams[i], { opacity: .9, strokeDashoffset: 0, duration: .25, ease: "power1.inOut" }, at + .02);
-        tl.to(rows[i], { opacity: 1, duration: .12 }, at + .2);
+        tl.to(r, { opacity: 1, duration: .12 }, at + .2);
         tl.to([hls[i], beams[i]], { opacity: 0, duration: .15 }, at + .4);
       });
-      const t2 = .5 + tabs.length * .3;
+      const t2 = .5 + N * .3;
       steps(tl, $("#ctx-steps"), [t2 - .1, t2 + 1.1]);
-      if (selBox) {
-        tl.to(selBox, { scaleX: 1, duration: .45, ease: "power2.inOut" }, t2 + .1);
-        tl.to(selBeam, { opacity: .9, strokeDashoffset: 0, duration: .3 }, t2 + .5);
-        tl.to(sel, { opacity: 1, duration: .15 }, t2 + .75);
-        tl.to(selBeam, { opacity: 0, duration: .2 }, t2 + 1.05);
-      }
-      if (code) {
-        tl.to(codeHl, { opacity: 1, duration: .12 }, t2 + 1.35);
-        tl.to(toolBeam, { opacity: .9, strokeDashoffset: 0, duration: .3 }, t2 + 1.4);
-        tl.to(tool, { opacity: 1, duration: .15 }, t2 + 1.7);
-      }
+      tl.to(selBox, { scaleX: 1, duration: .45, ease: "power2.inOut" }, t2 + .1);
+      tl.to(selBeam, { opacity: .9, strokeDashoffset: 0, duration: .3 }, t2 + .5);
+      tl.to(sel, { opacity: 1, duration: .15 }, t2 + .75);
+      tl.to(selBeam, { opacity: 0, duration: .2 }, t2 + 1.05);
+      tl.to(codeHl, { opacity: 1, duration: .12 }, t2 + 1.35);
+      tl.to(toolBeam, { opacity: .9, strokeDashoffset: 0, duration: .3 }, t2 + 1.4);
+      tl.to(tool, { opacity: 1, duration: .15 }, t2 + 1.7);
       const t3 = t2 + 2.1;
       tl.to(flyer, { opacity: 1, duration: .01 }, t3).to(tool, { opacity: 0, duration: .01 }, t3);
-      tl.to([cat, codeHl].filter(Boolean), { opacity: 0, scale: .97, duration: .35, ease: "power1.in" }, t3 + .05);
-      if (toolBeam) tl.to(toolBeam, { opacity: 0, duration: .2 }, t3 + .05);
+      tl.to([cat, codeHl, selBox], { opacity: 0, scale: .97, duration: .35, ease: "power1.in" }, t3 + .05);
+      tl.to(toolBeam, { opacity: 0, duration: .2 }, t3 + .05);
       tl.to(fly, { lift: 1, duration: .6, ease: "power2.inOut", onUpdate: apply }, t3 + .2);
       tl.to(fly, { p: 1, duration: .75, ease: "power2.inOut", onUpdate: apply }, t3 + .1);
-      tl.to(fly, { a: 1, duration: .35, onUpdate: apply }, t3 + 1.05);
       tl.to(flyer, { boxShadow: "0 0 0 2px #6b57b8", duration: .2 }, t3 + .8);
       tl.to(paneRing, { opacity: 1, duration: .15 }, t3 + .8).to(paneRing, { opacity: 0, duration: .4 }, t3 + 1.15);
+      tl.to(fly, { a: 1, duration: .35, onUpdate: apply }, t3 + 1.05);
       tl.to({}, { duration: .4 }, t3 + 1.55);
     }, "+=" + 660 + "%");
   }
 
   /* ---------------- 叁: select, ask, and what stays ---------------- */
   function flashScene() {
-    const win = $("#flash-win"), L = layer(win, "ws_work"), A = layer(win, "asked"), ov = $("#flash-ov");
-    if (!L || !hasGsap) return;
-    const mark = $$(".lmark-ask", L).find(visible);
-    const flashPanel = $$(".panel-chat", L).find(visible);
-    const msgs = flashPanel ? $$(".msg", flashPanel) : [];
-    const [qMsg, aMsg] = msgs.slice(-2);
-    const mb = mark ? box(mark, win) : { x: 300, y: 520, w: 150, h: 26 };
-    const selBox = el("div", "selbox", "", ov); place(selBox, { x: mb.x - 3, y: mb.y - 3, w: mb.w + 6, h: mb.h + 6 });
+    const win = $("#flash-win"), ov = $("#flash-ov"), a = APPS["flash-win"];
+    if (!a || !hasGsap) return;
+    const selBox = el("div", "selbox", "", ov), ring = el("div", "hl ai", "", ov);
     const pop = el("div", "selpop", `<span>${ICON.spark}问快答</span><span>${ICON.bot}问主会话</span>`, ov);
-    Object.assign(pop.style, { left: mb.x + "px", top: mb.y - 62 + "px" });
-    const ring = el("div", "hl ai", "", ov); place(ring, { x: mb.x - 8, y: mb.y - 6, w: mb.w + 16, h: mb.h + 12 });
-    if (qMsg) gsap.set([qMsg, aMsg], { opacity: 0 });
+    const mark = () => a.$$(".lmark-ask").find(visible);
+    a.ready.then(() => {
+      const m = mark(), mb = m ? box(m) : { x: 300, y: 520, w: 150, h: 26 };
+      place(selBox, { x: mb.x - 3, y: mb.y - 3, w: mb.w + 6, h: mb.h + 6 });
+      Object.assign(pop.style, { left: mb.x + "px", top: mb.y - 62 + "px" });
+      place(ring, { x: mb.x - 8, y: mb.y - 6, w: mb.w + 16, h: mb.h + 12 });
+      reveal();
+    });
+    // the question asked about that line comes in, then its answer unrolls; at the end the underline is clicked, in the
+    // app, and it lists what was asked there
+    const R = { q: 0, a: 0, open: 0 };
+    function reveal() {
+      if (ScrollTrigger.isRefreshing || !a.doc) return;
+      const q = findMsg(a, "from-me", "lr 为什么大于 2"), ans = q?.nextElementSibling;
+      if (q) Object.assign(q.style, { opacity: R.q, transformOrigin: "100% 100%", transform: R.q < 1 ? `translateY(${(1 - R.q) * 24}px) scale(${.96 + .04 * R.q})` : "" });
+      if (ans) ans.style.clipPath = R.a < 1 ? `inset(0 0 ${(1 - R.a) * 100}% 0)` : "";
+      const open = !!a.$(".menu");
+      if (R.open > .5 && !open) {
+        const m = mark();
+        if (m) { const r = m.getBoundingClientRect(); m.dispatchEvent(new a.frame.contentWindow.MouseEvent("click", { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 })); }
+      } else if (R.open <= .5 && open) a.mod("app").then((A) => A.closeMenus());
+    }
     scene($("#flash-scene"), (tl) => {
       tl.to(selBox, { scaleX: 1, duration: .45, ease: "power2.inOut" }, .1);
       tl.fromTo(pop, { opacity: 0, y: 10, scale: .96 }, { opacity: 1, y: 0, scale: 1, duration: .2 }, .55);
       tl.to(pop.firstChild, { scale: 1.06, duration: .1, yoyo: true, repeat: 1 }, .85);
       steps(tl, $("#flash-steps"), [1.0, 2.3]);
       tl.to([pop, selBox], { opacity: 0, duration: .15 }, 1.05);
-      if (qMsg) {
-        tl.fromTo(qMsg, { opacity: 0, y: 24, scale: .96 }, { opacity: 1, y: 0, scale: 1, duration: .25, transformOrigin: "100% 100%" }, 1.15);
-        tl.fromTo(aMsg, { opacity: 1, clipPath: "inset(0 0 100% 0)" }, { clipPath: "inset(0 0 0% 0)", duration: .8, ease: "none" }, 1.45);
-      }
+      tl.to(R, { q: 1, duration: .25, onUpdate: reveal }, 1.15);
+      tl.to(R, { a: 1, duration: .8, ease: "none", onUpdate: reveal }, 1.45);
       tl.to(ring, { opacity: 1, duration: .15 }, 2.45);
       tl.to(ring, { scale: 1.08, opacity: 0, duration: .3 }, 2.65);
-      tl.to(A, { opacity: 1, duration: .35 }, 2.8);
+      tl.to(R, { open: 1, duration: .05, onUpdate: reveal }, 2.8);
       tl.to({}, { duration: .5 }, 3.2);
     }, "+=" + 450 + "%");
   }
@@ -715,28 +736,38 @@
 
   /* ---------------- 柒: output line by line, and the sandbox ---------------- */
   function runScene() {
-    const win = $("#run-win"), L = layer(win, "ws_work"), ov = $("#run-ov");
-    if (!L || !hasGsap) return;
-    const pre = $(".out-text", L), state = $(".run-state", L), runBtn = $$("button", L).find((b) => /运行/.test(b.textContent) && visible(b));
-    let lines = [];
-    if (pre) {
-      const text = pre.textContent.replace(/\n$/, "");
-      pre.innerHTML = text.split("\n").map((l) => `<span class="ol" style="display:block">${l.replace(/&/g, "&amp;").replace(/</g, "&lt;") || "&nbsp;"}</span>`).join("");
-      lines = $$(".ol", pre);
+    const win = $("#run-win"), ov = $("#run-ov"), a = APPS["run-win"];
+    if (!a || !hasGsap) return;
+    const ring = el("div", "hl", "", ov);
+    const runBtn = () => a.$$("button").find((b) => /^\s*运行\s*$/.test(b.textContent) && visible(b));
+    a.ready.then(() => { const b = runBtn(); if (b) { const r = box(b); place(ring, { x: r.x - 6, y: r.y - 6, w: r.w + 12, h: r.h + 12 }); } show(); });
+    // the output, line by line, and the state saying it runs meanwhile; in the app's own run panel
+    const R = { lines: 0, run: 0 };
+    function show() {
+      if (ScrollTrigger.isRefreshing || !a.doc) return;
+      const pre = a.$(".out-text"), state = a.$(".run-state");
+      if (pre && !pre.querySelector(".ol")) {
+        const text = pre.textContent.replace(/\n$/, "");
+        pre.innerHTML = text.split("\n").map((l) => `<span class="ol" style="display:block">${l.replace(/&/g, "&amp;").replace(/</g, "&lt;") || "&nbsp;"}</span>`).join("");
+      }
+      const ls = pre ? [...pre.querySelectorAll(".ol")] : [], t = R.lines * (.2 + .25 * Math.max(0, ls.length - 1));
+      ls.forEach((l, i) => { const o = Math.min(1, Math.max(0, (t - .25 * i) / .2)); Object.assign(l.style, { opacity: o, transform: o < 1 ? `translateX(${(o - 1) * 10}px)` : "" }); });
+      if (state) {
+        state.dataset.done ||= state.textContent;
+        const text = R.run > 0 && R.run < 1 ? "运行中…" : state.dataset.done;
+        if (state.textContent !== text) state.textContent = text;
+      }
     }
-    const ring = runBtn ? (() => { const b = box(runBtn, win), h = el("div", "hl", "", ov); place(h, { x: b.x - 6, y: b.y - 6, w: b.w + 12, h: b.h + 12 }); return h; })() : null;
-    const done = state ? state.textContent : "";
-    gsap.set(lines, { opacity: 0, x: -10 });
+    // the output may come after the app is up
+    a.ready.then(() => new MutationObserver(() => { const pre = a.$(".out-text"); if (pre && !pre.querySelector(".ol")) show(); }).observe(a.doc.body, { childList: true, subtree: true }));
     scene($("#run-scene"), (tl) => {
-      if (ring) tl.to(ring, { opacity: 1, duration: .12 }, .05).to(ring, { opacity: 0, scale: 1.1, duration: .25 }, .3);
-      if (state) tl.call(() => { state.textContent = "运行中…"; }, null, .2).call(() => { state.textContent = done; }, null, 1.35);
-      tl.to(lines, { opacity: 1, x: 0, stagger: .25, duration: .2 }, .35);
+      tl.to(ring, { opacity: 1, duration: .12 }, .05).to(ring, { opacity: 0, scale: 1.1, duration: .25 }, .3);
+      tl.to(R, { run: 1, duration: 1.15, ease: "none", onUpdate: show }, .2);
+      tl.to(R, { lines: 1, duration: .95, ease: "none", onUpdate: show }, .35);
       steps(tl, $("#run-steps"), [1.8]);
       tl.from(".rings > div", { opacity: 0, scale: .86, stagger: .15, duration: .35, ease: "back.out(1.6)" }, 2.0);
       tl.from(".rings > span", { opacity: 0, y: 8, stagger: .1, duration: .2 }, 2.5);
       tl.to({}, { duration: .4 }, 3.0);
-      // a state reached by scrolling back up
-      tl.eventCallback("onReverseComplete", () => state && (state.textContent = done));
     }, "+=" + 390 + "%");
   }
 
@@ -780,69 +811,38 @@
 
   /* ---------------- 拾: night spreads from the moon ---------------- */
   function theme() {
-    const win = $("#theme-win"), dark = layer(win, "hero_dark"), light = layer(win, "hero"), btn = $("#moon");
-    if (!dark) return;
-    dark.classList.add("dark-layer");
-    const moon = $$('[data-action="theme"]', light).find(visible);
-    const at = moon ? (() => { const b = box(moon, win); return `${((b.x + b.w / 2) / 16).toFixed(2)}% ${((b.y + b.h / 2) / 10).toFixed(2)}%`; })() : "2.2% 90.5%";
-    const clip = (r) => `circle(${r}% at ${at})`;
-    dark.style.clipPath = clip(0);
-    let isDark = false, st = null;
+    const win = $("#theme-win"), btn = $("#moon"), light = APPS["theme-win"], dark = APPS["theme-dark"];
+    if (!light || !dark) return;
+    // the night spreads from the app's own moon button, over the light app, as the dark one
+    let at = "2.2% 90.5%", r = 0, isDark = false, st = null;
+    const clip = () => { dark.frame.style.clipPath = `circle(${r}% at ${at})`; win.classList.toggle("is-dark", isDark); };
+    light.ready.then(() => {
+      const m = light.$$('[data-action="theme"]').find(visible);
+      if (m) { const b = box(m); at = `${((b.x + b.w / 2) / 16).toFixed(2)}% ${((b.y + b.h / 2) / 10).toFixed(2)}%`; clip(); }
+    });
+    clip();
     const label = () => { btn.querySelector("span").textContent = isDark ? "换回白天" : "换成夜里"; btn.setAttribute("aria-pressed", isDark); };
     if (hasGsap && !still) {
-      const o = { r: 0 };
       st = ScrollTrigger.create({ trigger: win, start: "top 70%", end: "center 50%", scrub: 1, onUpdate: (s) => {
-        o.r = s.progress * 150; dark.style.clipPath = clip(o.r); isDark = s.progress > .5; label();
+        r = s.progress * 150; isDark = s.progress > .5; clip(); label();
       } });
     }
     btn.addEventListener("click", () => {
-      const app = win.classList.contains("is-live") && $("iframe.live-app", win);
-      if (app) {
-        try { app.contentDocument.querySelector('[data-action="theme"]')?.click(); } catch (_) {}
-        isDark = !isDark; label();
-        return;
-      }
       if (st) { st.kill(); st = null; }
       isDark = !isDark; label();
-      const from = parseFloat((dark.style.clipPath.match(/circle\(([\d.]+)%/) || [0, 0])[1]);
-      if (hasGsap) { const o = { r: from }; gsap.to(o, { r: isDark ? 150 : 0, duration: 1.1, ease: "power3.inOut", onUpdate: () => (dark.style.clipPath = clip(o.r)) }); }
-      else dark.style.clipPath = clip(isDark ? 150 : 0);
+      if (hasGsap) { const o = { r }; gsap.to(o, { r: isDark ? 150 : 0, duration: 1.1, ease: "power3.inOut", onUpdate: () => { r = o.r; clip(); } }); }
+      else { r = isDark ? 150 : 0; clip(); }
     });
   }
 
-  /* ---------------- the windows, live: the real interface on the demo's backend ---------------- */
-  // Each window plays its part of the story as a picture; once that is done and it is at rest, the real Lattice takes
-  // its place (app/, answering from app/demo), in the working state it showed. All of them share one backend.
-  const LIVE = { "hero-win": "学习", "tabs-win": "定制", "ctx-win": "学习", "flash-win": "动手", "run-win": "动手", "theme-win": "学习" };
-  const liveUrl = (space, dark) => "app/index.html?space=" + encodeURIComponent(space) + (dark ? "&theme=dark" : "") + (space === "动手" ? "&run=" + encodeURIComponent("code/学习率扫描.py") : "");
+  /* ---------------- the windows' apps: loaded as the page nears them, and the wheel ---------------- */
   function live() {
-    if (!window.LatticeDemo || !matchMedia("(min-width: 900px) and (pointer: fine)").matches) return;
+    if (!window.LatticeDemo) return;
+    // over a window the wheel still moves the page, until the window is clicked into
     LatticeDemo.wheel = (dy) => (lenis ? lenis.scrollTo(lenis.targetScroll + dy * .85) : scrollBy(0, dy));
-    LatticeDemo.engaged = (inner, on) => { const w = all.find((x) => x.frame && x.frame.contentWindow === inner); if (w) w.win.classList.toggle("engaged", on); };
-    const all = wins.filter((w) => LIVE[w.id]).map((win) => {
-      // what has to be finished first: the scroll animations this window is part of
-      const sts = hasGsap ? ScrollTrigger.getAll().filter((s) => s.trigger && (s.trigger === win || (s.pin && s.trigger.contains(win)))) : [];
-      return { win, sts, frame: null };
-    });
-    const load = (w) => {
-      if (w.frame) return;
-      w.frame = el("iframe", "live-app", "", $(".scale", w.win));
-      Object.assign(w.frame, { title: "Lattice（可以直接用的演示）", loading: "eager", src: liveUrl(LIVE[w.win.id], w.win.id === "theme-win") });
-      w.frame.addEventListener("load", () => { w.ready = true; check(); });
-    };
-    const io = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && load(all.find((w) => w.win === e.target))), { rootMargin: "120% 0px" });
-    // the page's own pictures and scripts first; the windows' programs after
-    const watch = () => setTimeout(() => all.forEach((w) => io.observe(w.win)), 1200);
-    if (document.readyState === "complete") watch(); else addEventListener("load", watch, { once: true });
-    const rest = (w) => w.sts.every((s) => s.progress > .995 && (!s.animation || s.animation.progress() > .995));
-    let queued = false;
-    function check() {
-      queued = false;
-      all.forEach((w) => w.win.classList.toggle("is-live", !!w.ready && rest(w)));
-    }
-    const soon = () => { if (!queued) { queued = true; requestAnimationFrame(check); } };
-    addEventListener("scroll", soon, { passive: true });
-    if (hasGsap) gsap.ticker.add(soon);
+    LatticeDemo.engaged = (inner, on) => apps.filter((x) => x.frame.contentWindow === inner).forEach((x) => x.win.classList.toggle("engaged", on));
+    const io = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && apps.filter((x) => x.win === e.target).forEach((x) => x.load())), { rootMargin: "150% 0px" });
+    wins.forEach((w) => io.observe(w));
   }
 
   /* ---------------- download ---------------- */
@@ -871,31 +871,24 @@
   }
 
   /* ---------------- any app frame opens large ---------------- */
-  // A click inside a window stays in it; the corner piece at its top right is what enlarges it.
+  // The corner piece at a window's top right opens it big: the same app, in the working state it is in.
   function zoom() {
     const dlg = $("#zoom");
-    $$(".win[data-layers]").forEach((w) => {
+    wins.forEach((w) => {
       const b = el("button", "win-max", '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>', w);
       b.type = "button"; b.title = "放大看"; b.setAttribute("aria-label", "放大看");
       b.addEventListener("click", (e) => {
         e.stopPropagation();
-        if (w.classList.contains("is-live") && LIVE[w.id]) {
-          const c = el("div", "win zoom-live", '<div class="scale"></div>');
-          const f = el("iframe", "live-app", "", $(".scale", c));
-          f.title = "Lattice（可以直接用的演示）"; f.src = liveUrl(LIVE[w.id], w.id === "theme-win");
-          dlg.replaceChildren(c);
-          dlg.showModal && dlg.showModal();
-          requestAnimationFrame(() => fit(c));
-          return;
-        }
-        const c = w.cloneNode(true);
-        c.removeAttribute("id"); c.style.transform = "none";
-        $(".win-max", c)?.remove();
+        const a = APPS[w.id], space = a?.$("#status .st-tab.on")?.textContent.trim() || w.dataset.space;
+        const c = el("div", "win zoom-live", '<div class="scale"></div>');
+        const f = el("iframe", "live-app", "", $(".scale", c));
+        f.title = "Lattice（可以直接用的演示）";
+        f.src = appUrl(space, { dark: w.classList.contains("is-dark") });
         dlg.replaceChildren(c);
         dlg.showModal && dlg.showModal();
-        requestAnimationFrame(() => { fit(c); restoreScroll(c); });
+        requestAnimationFrame(() => fit(c));
       });
     });
-    dlg.addEventListener("click", (e) => { if (e.target === dlg || !e.target.closest(".zoom-live")) dlg.close(); });
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
   }
 })();

@@ -15,6 +15,8 @@
     s.onload = () => go(window);
     document.head.appendChild(s);
   };
+  // the app's modules as it runs them, for the page around it (its scroll scenes play on this app)
+  window.latticeModule = (name) => import(new URL(name + ".js", location.href).href);
   // ?run=<path>: run that file once it is open, so its run panel shows the output, as the window showed it before
   const runPath = q.get("run");
   if (runPath) {
