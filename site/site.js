@@ -504,6 +504,35 @@
     }
     const codeHl = code && hls[tabs.indexOf(code)], toolBeam = code && beam((() => { const b = box(code, win); return { x: b.x + b.w / 2, y: b.y + b.h }; })(), rowAt(tool));
     [...beams, selBeam, toolBeam].filter(Boolean).forEach((p) => { const n = p.getTotalLength(); p.style.strokeDasharray = n; p.style.strokeDashoffset = n; });
+    // at the end the "read" line leaves the catalog and lands in the quick answer, as the step it shows there
+    const composer = flash && $(".composer", flash), cb = composer ? box(composer, win) : { x: fb.x + 20, y: fb.y + fb.h - 120, w: fb.w - 40, h: 90 };
+    const flyer = el("div", "tool-fly", tool.innerHTML, ov);
+    const from = { x: cat.offsetLeft + tool.offsetLeft, y: cat.offsetTop - 6 + tool.offsetTop };
+    Object.assign(flyer.style, { left: from.x + "px", top: from.y + "px", width: tool.offsetWidth + "px" });
+    // question, then the read, then the answer: the conversation moves up, the line lands under the last question,
+    // and the answer comes in below it. Measured when it plays, after the panels' scroll is restored.
+    const scroller = flash && $(".chat-scroll", flash), lastQ = flash && $$(".msg.from-me", flash).pop();
+    const answer = lastQ && lastQ.nextElementSibling;
+    // measured when it first plays, not while the page refreshes (pinning lays things out oddly then), less any lift already applied
+    let geo = null;
+    const measure = () => {
+      const q = lastQ ? box(lastQ, win) : { y: cb.y - 140, h: 40 }, qy = q.y - (lastQ ? +gsap.getProperty(lastQ, "y") : 0);
+      // enough room for the answer to come in under the line, above the composer
+      const a = answer && box(answer, win), ay = a ? a.y - +gsap.getProperty(answer, "y") : 0;
+      const lift = Math.max(0, a ? ay + a.h + 46 - cb.y + 10 : qy + q.h + 110 - cb.y);
+      geo = { lift, x: fb.x + 22 - from.x, y: qy + q.h - lift + 14 - from.y };
+    };
+    ScrollTrigger.addEventListener("refresh", () => { geo = null; });
+    const fly = { p: 0, lift: 0, a: 0 };
+    const apply = () => {
+      if (ScrollTrigger.isRefreshing) return;
+      if (!geo) measure();
+      if (scroller) gsap.set([...scroller.children].filter((c) => c !== answer), { y: -geo.lift * fly.lift });
+      if (answer) gsap.set(answer, { y: -geo.lift * fly.lift + 16 + 30 * fly.a, opacity: fly.a });
+      gsap.set(flyer, { x: geo.x * fly.p, y: geo.y * fly.p, scale: 1 - .3 * fly.p });
+    };
+    if (answer) gsap.set(answer, { opacity: 0 });
+    const paneRing = el("div", "hl ai", "", ov); place(paneRing, { x: fb.x + 4, y: fb.y + 4, w: fb.w - 8, h: fb.h - 8 });
     scene($("#ctx-scene"), (tl) => {
       tl.to(cat, { opacity: 1, y: -6, duration: .3 }, .1);
       tabs.forEach((t, i) => {
@@ -526,8 +555,17 @@
         tl.to(toolBeam, { opacity: .9, strokeDashoffset: 0, duration: .3 }, t2 + 1.4);
         tl.to(tool, { opacity: 1, duration: .15 }, t2 + 1.7);
       }
-      tl.to({}, { duration: .4 }, t2 + 1.9);
-    }, "+=" + 540 + "%");
+      const t3 = t2 + 2.1;
+      tl.to(flyer, { opacity: 1, duration: .01 }, t3).to(tool, { opacity: 0, duration: .01 }, t3);
+      tl.to([cat, codeHl].filter(Boolean), { opacity: 0, scale: .97, duration: .35, ease: "power1.in" }, t3 + .05);
+      if (toolBeam) tl.to(toolBeam, { opacity: 0, duration: .2 }, t3 + .05);
+      tl.to(fly, { lift: 1, duration: .6, ease: "power2.inOut", onUpdate: apply }, t3 + .2);
+      tl.to(fly, { p: 1, duration: .75, ease: "power2.inOut", onUpdate: apply }, t3 + .1);
+      tl.to(fly, { a: 1, duration: .35, onUpdate: apply }, t3 + 1.05);
+      tl.to(flyer, { boxShadow: "0 0 0 2px #6b57b8", duration: .2 }, t3 + .8);
+      tl.to(paneRing, { opacity: 1, duration: .15 }, t3 + .8).to(paneRing, { opacity: 0, duration: .4 }, t3 + 1.15);
+      tl.to({}, { duration: .4 }, t3 + 1.55);
+    }, "+=" + 660 + "%");
   }
 
   /* ---------------- 叁: select, ask, and what stays ---------------- */

@@ -177,6 +177,8 @@ h1,h2,h3,p{margin:0}
 .catalog .row.using span:last-child::after{content:"  正在用";color:var(--violet);font-weight:500}
 .catalog .sel{margin-top:14px;padding-top:14px;border-top:2px dashed var(--rule);opacity:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .catalog .sel b{color:var(--violet);font-weight:500}
+.tool-fly{position:absolute;z-index:6;font:500 21px/1.3 var(--sans);color:var(--muted);display:flex;gap:10px;align-items:center;padding:12px 16px;background:var(--paper-2);border-radius:12px;white-space:nowrap;opacity:0;transform-origin:0 0;box-sizing:border-box}
+.tool-fly svg{width:22px;height:22px;flex:none}
 .catalog .tool{margin-top:16px;font:500 21px/1.3 var(--sans);color:var(--muted);display:flex;gap:10px;align-items:center;opacity:0;padding:12px 16px;background:var(--paper-2);border-radius:12px}
 .catalog .tool svg{width:22px;height:22px;color:var(--teal)}
 .beams{position:absolute;inset:0;width:1600px;height:1000px;pointer-events:none;overflow:visible}
