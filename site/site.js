@@ -207,9 +207,8 @@
       s[2] && tag("卡片库", "讲过的自动记成卡", s[2].x + 40, s[2].y + 190),
       tag("工作状态", "底栏一点，换整套窗口", 40, 905),
     ].filter(Boolean);
-    $$(".n", $(".trail")).forEach((n, i) => hasGsap && !still && gsap.from(n, { opacity: .1, y: 6, duration: .4, delay: 1.1 + i * .2 }));
-    if (!hasGsap || still) { tags.forEach((t) => (t.style.opacity = 1)); return; }
-    // It lies back in the bottom third of the first screen and comes upright as that screen scrolls away.
+    if (!hasGsap || still) { win.style.transform = "none"; tags.forEach((t) => (t.style.opacity = 1)); return; }
+    // It lies back in the bottom of the first screen (site.css tilts it before anything loads) and comes upright as that screen scrolls away.
     gsap.set(win, { rotateX: 38, scale: .9, transformOrigin: "50% 0%" });
     const tl = gsap.timeline({ scrollTrigger: { trigger: win, start: 0, end: "top 9%", scrub: .8 } });
     tl.to(win, { rotateX: 0, scale: 1, ease: "none", duration: 1 })

@@ -77,10 +77,10 @@ h1,h2,h3,p{margin:0}
 /* ---------- hero ---------- */
 .hero{position:relative;padding-bottom:40px;overflow-x:clip}
 /* The words fill the top two thirds of the first screen; the window starts lying back in the bottom third. */
-.hero-head{min-height:66.6svh;display:flex;flex-direction:column;justify-content:flex-end;padding-top:96px;padding-bottom:clamp(28px,5svh,56px)}
+.hero-head{min-height:60svh;display:flex;flex-direction:column;justify-content:flex-end;padding-top:96px;padding-bottom:clamp(20px,3.5svh,40px)}
 .hero-net{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:-1}
 .hero-grid{position:relative;display:grid;grid-template-columns:minmax(0,1fr);justify-items:center;text-align:center}
-.hero-grid .ctas,.hero-head .trail{justify-content:center}
+.hero-grid .ctas{justify-content:center}
 .hero .wordmark{font-size:clamp(64px,12.5vw,200px);line-height:.9;letter-spacing:-.035em;margin-top:18px}
 .hero .slogan{font-size:clamp(24px,3.3vw,52px);line-height:1.25;margin-top:clamp(14px,2.4svh,26px);letter-spacing:.02em}
 .hero-side{position:absolute;right:0;top:0;writing-mode:vertical-rl;font:400 15px/1.9 var(--sans);color:var(--muted);letter-spacing:.32em;border-right:1px solid var(--rule);padding-right:14px;height:fit-content;margin-top:12px}
@@ -95,11 +95,8 @@ h1,h2,h3,p{margin:0}
 .btn.line:hover{border-color:var(--ink)}
 .meta{font:400 13px/1.5 var(--mono);color:var(--faint);margin-left:6px}
 .hero-stage{perspective:1600px}
-.hero-stage .win{transform-origin:50% 0}
-.trail{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline;font:400 13.5px/1.6 var(--mono);color:var(--faint);margin-top:28px;font-variant-numeric:tabular-nums}
-.trail code{font:inherit;color:var(--ink)}
-.trail .n{min-width:3.4ch;text-align:right}
-.trail .n.hit{color:var(--teal);font-weight:500}
+.hero-stage .win{transform-origin:50% 0;transform:rotateX(38deg) scale(.9)}
+@media (prefers-reduced-motion:reduce){.hero-stage .win{transform:none}}
 
 /* ---------- chapters ---------- */
 .chapter{position:relative;padding-top:clamp(90px,14vh,160px)}
