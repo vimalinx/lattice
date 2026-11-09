@@ -1,9 +1,10 @@
 /* In place of Qt's web channel: this page's backend is the demo's (backend.js). Inside the site it is the page's one
    shared demo, so every window sees the same files and conversations; opened on its own, it brings its own.
-   ?space= picks the working state the window opens in, ?theme= its look, ?run= a file it runs once open. */
+   ?space= picks the working state the window opens in, ?theme= its look, ?run= a file it runs once open, ?key= whose
+   work it keeps (the window's; one opened big passes its window's). */
 (() => {
   "use strict";
-  const q = new URLSearchParams(location.search), opts = { space: q.get("space"), theme: q.get("theme") };
+  const q = new URLSearchParams(location.search), opts = { space: q.get("space"), theme: q.get("theme"), key: q.get("key") };
   let host = null;
   try { host = window.parent !== window && window.parent.LatticeDemo ? window.parent : null; } catch (_) {}
   window.qt = { webChannelTransport: {} };

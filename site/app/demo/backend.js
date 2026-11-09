@@ -1,6 +1,7 @@
 /* Lattice's backend, as the site's demo: what the real one answered on the demo vault (fixture.json, recorded by
    tools/demo), plus what the visitor does here — files edited, questions asked, code run. One of it serves every
-   window on the page, so they share it all; the conversation's replies count across all of them. */
+   window on the page. What a visitor does stays in the window they did it in (its key; a window opened big shares its
+   window's), so each window's story stays as it is told; only the count of questions asked runs across all of them. */
 (() => {
   "use strict";
   if (window.LatticeDemo) return;
@@ -19,14 +20,16 @@
   let fixture = null;
   const loaded = fetch(base + "fixture.json").then((r) => r.json()).then((d) => { fixture = d; });
 
-  // what the visitor changed or added, on top of the recording
-  const files = {}, threads = {}, busy = new Set();
-  let asked = 0, mid = 100000, stamp = 0;
+  // what the visitor changed or added, on top of the recording, kept per window
+  const kept = {};
+  const own = (key) => (kept[key] ||= { files: {}, threads: {}, busy: new Set() });
+  let asked = 0, mid = 100000, stamp = 0, keys = 0;
   const listeners = new Set();
 
-  function emit(evt) {
+  function emit(evt, key) {
     const raw = JSON.stringify(evt);
     for (const l of [...listeners]) {
+      if (l.key !== key) continue;
       try { if (l.win.closed) { listeners.delete(l); continue; } l.fn(raw); } catch (_) { listeners.delete(l); }
     }
   }
@@ -45,20 +48,21 @@
   }
 
   function threadOf(data) { return data && (data.thread || data.head?.id); }
-  function withLocal(data) {
+  function withLocal(data, { threads, busy }) {
     const t = threadOf(data);
     if (t && threads[t]) data.messages = [...(data.messages || []), ...threads[t]];
     if (t) data.busy = busy.has(t);
     return data;
   }
 
-  function reply(a) {
+  function reply(a, o) {
+    const { threads, busy } = own(o.key);
     const thread = a.thread || "demo-" + Math.random().toString(36).slice(2, 10), agent = a.agent || "tutor";
     const question = ++mid, text = REPLIES[Math.min(asked++, REPLIES.length - 1)];
     const meta = { agent, ...(a.selection ? { selection: a.selection } : {}), ...(a.anchor ? { anchor: a.anchor } : {}) };
     (threads[thread] ||= []).push({ id: question, role: "user", content: a.message || "", meta, at: now() });
     busy.add(thread);
-    const ev = (kind, extra) => emit({ type: "agent", kind, agent, thread, run: thread, question, ...extra });
+    const ev = (kind, extra) => emit({ type: "agent", kind, agent, thread, run: thread, question, ...extra }, o.key);
     later(60, () => ev("status", { state: "thinking" }));
     // streamed in a few characters at a time, as a reply arrives
     const parts = text.match(/[\s\S]{1,3}/g) || [];
@@ -72,23 +76,23 @@
     return { thread, state: "queued", run: thread, question };
   }
 
-  function run(a) {
+  function run(a, o) {
     const id = "demo" + Math.random().toString(36).slice(2, 10), path = a.path;
     const rec = fixture.events.run.filter((e) => e.path === path);
     if (rec.length) {
-      rec.forEach((e, i) => later(150 + i * 220, () => emit({ ...clone(e), run: id })));
+      rec.forEach((e, i) => later(150 + i * 220, () => emit({ ...clone(e), run: id }, o.key)));
     } else {
       // only the recorded program has an output to show; anything else says where it would really run
       const note = [{ name: "stdout", output_type: "stream", text: "演示版里没有真的 Python。下载 Lattice，代码在你自己电脑上跑：" + DOWNLOAD + "\n" }];
-      later(150, () => emit({ type: "run", run: id, path, kind: "started", by: "me", sandbox: false }));
-      later(500, () => emit({ type: "run", run: id, path, kind: "finished", state: "completed", exit_code: 0, seconds: 0.01, outputs: note }));
+      later(150, () => emit({ type: "run", run: id, path, kind: "started", by: "me", sandbox: false }, o.key));
+      later(500, () => emit({ type: "run", run: id, path, kind: "finished", state: "completed", exit_code: 0, seconds: 0.01, outputs: note }, o.key));
     }
     return { run: id };
   }
 
-  function fileRead(a) {
+  function fileRead(a, o) {
     const rec = recorded("file_read", a);
-    const mine = files[a.path];
+    const mine = own(o.key).files[a.path];
     if (!rec && !mine) throw new Error("文件不存在：" + a.path);
     const d = rec || { path: a.path, name: a.path.split("/").pop(), ext: "." + a.path.split(".").pop(), kind: "file", readonly: false, external: false, truncated: false };
     if (mine) {
@@ -98,10 +102,10 @@
     }
     return d;
   }
-  function saved(path, change) {
-    const f = (files[path] ||= {});
+  function saved(path, change, o) {
+    const files = own(o.key).files, f = (files[path] ||= {});
     Object.assign(f, change, { mtime: String(Date.now()) + String(++stamp).padStart(6, "0") });
-    later(30, () => emit({ type: "changed", paths: [path] }));
+    later(30, () => emit({ type: "changed", paths: [path] }, o.key));
     return { path, mtime: f.mtime };
   }
 
@@ -123,15 +127,15 @@
       if (o.theme) d.config.ui.theme = o.theme;
       return d;
     },
-    chat: (a) => { const d = recorded("chat", a); if (!d) throw new Error("会话不存在"); return withLocal(d); },
+    chat: (a, o) => { const d = recorded("chat", a); if (!d) throw new Error("会话不存在"); return withLocal(d, own(o.key)); },
     send: reply,
     cancel: () => true,
-    retry: (a) => reply({ ...a, message: "" }),
+    retry: (a, o) => reply({ ...a, message: "" }, o),
     run,
     run_stop: () => true,
     file_read: fileRead,
-    file_write: (a) => saved(a.path, { content: a.content }),
-    doc_save: (a) => { const { path, mtime, ...fields } = a; return saved(path, { doc: fields, ...(fields.body != null ? { content: fields.body } : {}) }); },
+    file_write: (a, o) => saved(a.path, { content: a.content }, o),
+    doc_save: (a, o) => { const { path, mtime, ...fields } = a; return saved(path, { doc: fields, ...(fields.body != null ? { content: fields.body } : {}) }, o); },
     search,
     open_url: (a) => { try { window.open(a.url, "_blank", "noopener"); } catch (_) {} return true; },
     typing: () => true, viewed: () => true, screen: () => true, topic_here: () => true, window_held: () => ({}),
@@ -155,11 +159,13 @@
   }
 
   window.LatticeDemo = {
-    // what one window's page talks to: the shared backend, told which working state and look that window opens in
+    // what one window's page talks to: the shared backend, told which working state and look that window opens in,
+    // and whose work it keeps (its key)
     connect(win, o = {}) {
+      o = { ...o, key: o.key || "page" + ++keys };
       return {
         request: (payload, cb) => request(payload, cb, o),
-        event: { connect: (fn) => listeners.add({ win, fn }) },
+        event: { connect: (fn) => listeners.add({ win, fn, key: o.key }) },
       };
     },
     replies: () => asked,

@@ -33,7 +33,9 @@
   const fragment = (name) => (cache[name] ||= fetch("ui/" + name + ".htm").then((r) => (r.ok ? r.text() : "")).catch(() => ""));
   const fit = (win) => win.style.setProperty("--k", win.clientWidth / 1600);
   const ro = new ResizeObserver((es) => es.forEach((e) => fit(e.target)));
-  const appUrl = (space, o = {}) => "app/index.html?space=" + encodeURIComponent(space) + (o.dark ? "&theme=dark" : "") + (o.run ? "&run=" + encodeURIComponent(o.run) : "");
+  // key: whose work the demo keeps; every window keeps its own (its copy opened big shares it), so a question asked in
+  // one does not turn up in the next one's story. Only the count of questions runs across the page.
+  const appUrl = (space, o = {}) => "app/index.html?space=" + encodeURIComponent(space) + (o.dark ? "&theme=dark" : "") + (o.run ? "&run=" + encodeURIComponent(o.run) : "") + (o.key ? "&key=" + encodeURIComponent(o.key) : "");
   function liveApp(win, space, o = {}) {
     const frame = el("iframe", "live-app" + (o.cls ? " " + o.cls : ""));
     $(".scale", win).insertBefore(frame, $(".ov", win));
@@ -150,8 +152,8 @@
   const APPS = {};
   wins.forEach((win) => {
     fit(win); ro.observe(win);
-    APPS[win.id] = liveApp(win, win.dataset.space, { run: win.dataset.run });
-    if (win.id === "theme-win") APPS["theme-dark"] = liveApp(win, win.dataset.space, { dark: true, cls: "dark-app" });
+    APPS[win.id] = liveApp(win, win.dataset.space, { run: win.dataset.run, key: win.id });
+    if (win.id === "theme-win") APPS["theme-dark"] = liveApp(win, win.dataset.space, { dark: true, cls: "dark-app", key: win.id });
   });
   const apps = Object.values(APPS);
   apps.forEach((a) => a.ready.then(() => pose(a)));
@@ -915,7 +917,7 @@
         const c = el("div", "win zoom-live", '<div class="scale"></div>');
         const f = el("iframe", "live-app", "", $(".scale", c));
         f.title = "Lattice（可以直接用的演示）";
-        f.src = appUrl(space, { dark: w.classList.contains("is-dark") });
+        f.src = appUrl(space, { dark: w.classList.contains("is-dark"), key: w.id });
         f.addEventListener("load", () => { const t = setInterval(() => { if (f.contentDocument?.querySelector("#status .st-tab")) { clearInterval(t); f.classList.add("up"); } }, 80); }, { once: true });
         dlg.replaceChildren(c);
         dlg.showModal && dlg.showModal();
