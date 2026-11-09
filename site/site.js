@@ -627,16 +627,14 @@
     mask.id = "detour-mask";
     Object.entries({ d: det.getAttribute("d"), stroke: "#fff", "stroke-width": 12, fill: "none", "stroke-dasharray": dn, "stroke-dashoffset": dn }).forEach(([k, v]) => mp.setAttribute(k, v));
     mask.appendChild(mp); svg.insertBefore(mask, svg.firstChild); det.setAttribute("mask", "url(#detour-mask)");
-    // it plays by itself once it is in view, quick enough to finish before the reader scrolls on
-    const tl = gsap.timeline({ scrollTrigger: { trigger: "#route-wrap", start: "top 70%", toggleActions: "play none none none" } });
-    tl.to(done, { strokeDashoffset: 0, duration: 1, ease: "none" }, 0)
+    // like the other scenes: the page stops on the route while the scroll draws it, then moves on
+    scene($("#route-scene"), (tl) => tl.to(done, { strokeDashoffset: 0, duration: 1, ease: "none" }, 0)
       .from(dots.slice(0, 3), { opacity: 0, scale: .4, transformOrigin: "center", stagger: .3, duration: .3 }, 0)
       .to(rest, { strokeDashoffset: 0, duration: 1, ease: "none" }, 1)
       .from(dots.slice(3), { opacity: 0, scale: .4, transformOrigin: "center", stagger: .3, duration: .3 }, 1.2)
       .to(mp, { attr: { "stroke-dashoffset": 0 }, duration: 1.1, ease: "power1.inOut" }, 2.1)
       .from(fg, { opacity: 0, y: 26, duration: .5, ease: "back.out(2)" }, 2.7)
-      .from(".route-notes div", { opacity: 0, y: 20, stagger: .3, duration: .4 }, 1.6);
-    tl.timeScale(1.35);
+      .from(".route-notes div", { opacity: 0, y: 20, stagger: .3, duration: .4 }, 1.6), "+=" + 240 + "%");
     gsap.to(pulse, { attr: { r: 34 }, opacity: 0, duration: 1.6, repeat: -1, ease: "power1.out" });
   }
 
