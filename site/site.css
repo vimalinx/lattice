@@ -146,6 +146,7 @@ h1,h2,h3,p{margin:0}
 .wslist button:focus-visible{outline:2px solid var(--teal)}
 
 /* ---------- dock playground ---------- */
+#play-scene .play{width:100%;margin-top:0}
 .play{margin-top:clamp(40px,6vh,72px);display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:32px;align-items:stretch;max-width:1360px;margin-left:auto;margin-right:auto}
 .play-board{height:min(560px,64vh);min-height:380px;border-radius:14px;box-shadow:var(--shadow-win);overflow:hidden;position:relative;touch-action:none}
 .play-board .dock-root{position:absolute;inset:0;display:flex;padding:6px;gap:6px;background:var(--bg)}

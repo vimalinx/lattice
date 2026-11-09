@@ -163,6 +163,7 @@
     words();
     hero();
     tabsScene();
+    playScene();
     contextScene();
     flashScene();
     lab();
@@ -322,6 +323,7 @@
   }
 
   /* ---------------- playground: real tabs you can drag ---------------- */
+  let playScene = () => {};
   const ICON = {
     bot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4M9 13h.01M15 13h.01"/></svg>',
     spark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M12 8l1.5 2.5L16 12l-2.5 1.5L12 16l-1.5-2.5L8 12l2.5-1.5Z"/></svg>',
@@ -421,37 +423,58 @@
     board.addEventListener("pointerup", end);
     board.addEventListener("pointercancel", end);
 
-    // the first time it comes into view, a pointer shows what to do: it drags the code tab to the main session's right edge, which splits off a column
-    let show = null;
+    // Like the other scenes, the page stops on the board while a pointer shows what to do, played by the scroll: it
+    // drags the code tab to the main session's right edge, and lets go, which splits off a column. Scrolling back takes
+    // it back. Once the visitor takes a tab themselves, the board is theirs.
     const cursor = el("div", "pl-cursor", '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3l14 8.5-6.2 1.3 3.6 6.6-2.6 1.4-3.6-6.6L5 18.5z"/></svg>', document.body);
+    let theirs = false, pts = null, made = false;
     function stopDemo() {
-      if (!show) return;
-      show.kill(); show = null;
+      theirs = true;
       gsap.set(cursor, { opacity: 0 });
-      if (drag && drag.demo) { drag.ghost && drag.ghost.remove(); drag = null; render(); }
+      if (drag && drag.demo) { drag.ghost && drag.ghost.remove(); drag = null; $(".pl-drop", board).style.opacity = 0; }
     }
-    function demo() {
-      const tab = $('.pl-tab[data-k="code"]', board), from = tab && tab.closest(".pl-stack");
-      if (!from || drag) return;
-      // points kept relative to the board, so they hold while the page is still gliding
-      const b0 = board.getBoundingClientRect(), t = tab.getBoundingClientRect(), f = from.getBoundingClientRect();
-      const rel = (x, y) => [x - b0.left, y - b0.top];
-      const P = { x: 0, y: 0 }, A = rel(b0.left + b0.width * .5, b0.top + b0.height * .8), B = rel(t.left + t.width / 2, t.top + t.height / 2), C = rel(f.right - f.width * .1, f.top + f.height * .55);
-      const put = () => { const b = board.getBoundingClientRect(); gsap.set(cursor, { x: b.left + P.x, y: b.top + P.y }); if (drag && drag.demo) over(b.left + P.x, b.top + P.y); };
-      [P.x, P.y] = A; put();
-      show = gsap.timeline({ onComplete: () => { show = null; } })
-        .to(cursor, { opacity: 1, duration: .3 })
-        .to(P, { x: B[0], y: B[1], duration: .8, ease: "power2.inOut", onUpdate: put })
-        .to(cursor, { scale: .82, duration: .12 })
-        .add(() => { drag = { k: "code", from: from.dataset.s, demo: true, moving: false, ghost: null, hit: null }; })
-        .to(P, { x: C[0], y: C[1], duration: 1.1, ease: "power2.inOut", onUpdate: put })
-        .to({}, { duration: .35 })
-        .add(() => { end(); })
-        .to(cursor, { scale: 1, duration: .12 })
-        .to(cursor, { opacity: 0, duration: .4 }, "+=.7");
+    const lerp = (p, q, k) => [p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k];
+    const ease = (k) => (k < .5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2);
+    const span = (t, a, b) => Math.min(1, Math.max(0, (t - a) / (b - a)));
+    const D = { t: 0 };
+    function frame() {
+      if (theirs || ScrollTrigger.isRefreshing) return;
+      const b = board.getBoundingClientRect(), t = D.t;
+      if (!pts) {
+        // where things are while the board is as it starts
+        const tab = $('.pl-tab[data-k="code"]', board), from = tab && tab.closest(".pl-stack");
+        if (!from) return;
+        const tr = tab.getBoundingClientRect(), f = from.getBoundingClientRect(), rel = (x, y) => [x - b.left, y - b.top];
+        pts = { from: from.dataset.s, A: rel(b.left + b.width * .5, b.top + b.height * .8), B: rel(tr.left + tr.width / 2, tr.top + tr.height / 2), C: rel(f.right - f.width * .1, f.top + f.height * .55) };
+      }
+      // let go at .82: the column is split off; before it, the board as it started
+      if (t >= .82 && !made) {
+        if (!drag) drag = { k: "code", from: pts.from, demo: true, moving: false, ghost: null, hit: null };
+        over(b.left + pts.C[0], b.top + pts.C[1]);
+        end(); made = true;
+      } else if (t < .82 && made) {
+        root = start(); fresh = null; render(); made = false;
+        const tab = $('.pl-tab[data-k="code"]', board);
+        pts.from = tab.closest(".pl-stack").dataset.s;
+      }
+      const at = t < .4 ? lerp(pts.A, pts.B, ease(span(t, .1, .35))) : lerp(pts.B, pts.C, ease(span(t, .4, .75)));
+      const x = b.left + at[0], y = b.top + at[1];
+      gsap.set(cursor, { x, y, opacity: t < .1 ? t / .1 : t > .88 ? Math.max(0, 1 - (t - .88) / .1) : 1, scale: t >= .35 && t < .84 ? .82 : 1 });
+      if (t >= .4 && t < .82) {
+        if (!drag) drag = { k: "code", from: pts.from, demo: true, moving: false, ghost: null, hit: null };
+        over(x, y);
+      } else if (drag && drag.demo) {
+        drag.ghost && drag.ghost.remove(); drag = null;
+        $(".pl-drop", board).style.opacity = 0;
+      }
     }
-    // made before the pinned scenes above it, so it measures after them (their pins move it down the page)
-    if (hasGsap && !still) ScrollTrigger.create({ trigger: board, start: "top 60%", once: true, onEnter: demo, refreshPriority: -1 });
+    playScene = () => {
+      if (!hasGsap || still) return;
+      scene($("#play-scene"), (tl) => {
+        tl.to(D, { t: 1, duration: 3.2, ease: "none", onUpdate: frame }, 0);
+        tl.to({}, { duration: .3 });
+      }, "+=" + 180 + "%");
+    };
 
     $("#play-reset").addEventListener("click", () => { stopDemo(); root = start(); fresh = null; render(); if (hasGsap) gsap.from(".pl-stack", { opacity: 0, y: 10, stagger: .06, duration: .35 }); });
   }
@@ -512,7 +535,10 @@
       apply();
     });
     // The end, played in the app: question, then the read, then the answer. The quick answer scrolls up to make room,
-    // the line flies in and becomes a line of that conversation, under the question, and the answer comes in below it.
+    // the line flies in and becomes a line of that conversation under the question, and the answer comes in below it.
+    // That line is in the conversation (unseen) for the whole flight, and the flight aims at it, at its size, each frame:
+    // where it lands is exactly where it then is.
+    const S = .7;
     let geo = null, chip = null;
     const parts = () => {
       const q = findMsg(a, "from-me", "lr 为什么大于 2");
@@ -520,33 +546,38 @@
       if (ans?.classList.contains("demo-read")) ans = ans.nextElementSibling;
       return { q, ans: ans?.classList.contains("from-ai") ? ans : null, sc: q?.closest(".chat-scroll") };
     };
-    const measure = (p) => {
-      const q = box(p.q), sc = p.sc, scb = box(sc), comp = flash && $(".composer", flash) || flash?.querySelector(".composer");
-      const cb = comp ? box(comp) : { y: scb.y + scb.h };
-      const ab = p.ans ? box(p.ans) : { y: q.y + q.h, h: 0 };
-      const room = Math.max(0, ab.y + ab.h + 56 - Math.min(cb.y, scb.y + scb.h));
-      const lift = Math.min(room, sc.scrollHeight - sc.clientHeight - sc.scrollTop + 56);
-      geo = { base: sc.scrollTop, lift, x: box(flash).x + 22 - from.x, y: q.y + q.h - lift + 10 - from.y };
+    const makeChip = () => {
+      const fs = getComputedStyle(flyer), w = flyer.offsetWidth;
+      chip = a.doc.createElement("div");
+      chip.className = "demo-read";
+      chip.innerHTML = tool.innerHTML;
+      Object.assign(chip.style, { display: "none", boxSizing: "border-box", width: w * S + "px", alignItems: "center", gap: 10 * S + "px", margin: "6px 0 14px", padding: `${12 * S}px ${16 * S}px`,
+        borderRadius: 12 * S + "px", font: `500 ${21 * S}px/1.3 ${fs.fontFamily}`, color: fs.color, background: fs.backgroundColor, boxShadow: `0 0 0 ${2 * S}px #6b57b8`, whiteSpace: "nowrap" });
+      chip.querySelector("svg")?.setAttribute("style", `width:${22 * S}px;height:${22 * S}px;flex:none`);
     };
     const fly = { p: 0, lift: 0, a: 0 };
     function apply() {
       if (ScrollTrigger.isRefreshing || !a.doc || !from) return;
       const p = parts();
       if (!p.q || !p.sc) return;
-      if (!geo || !p.q.isConnected) measure(p);
-      if (!chip || !chip.isConnected) {
-        chip = a.doc.createElement("div");
-        chip.className = "demo-read";
-        chip.innerHTML = tool.innerHTML;
-        Object.assign(chip.style, { display: "none", alignItems: "center", gap: "7px", margin: "4px 0 14px", padding: "8px 11px", borderRadius: "8px", font: "500 14.7px/1.3 var(--sans, sans-serif)", color: "var(--muted, #5b6b70)", background: "var(--hover, rgba(22,38,43,.05))", boxShadow: "0 0 0 1.5px #6b57b8", width: "fit-content" });
-        chip.querySelector("svg")?.setAttribute("style", "width:15px;height:15px;flex:none");
-        p.q.after(chip);
+      if (!chip) makeChip();
+      if (p.q.nextElementSibling !== chip) p.q.after(chip);
+      const on = fly.p > 0 || fly.lift > 0;
+      chip.style.display = on ? "flex" : "none";
+      chip.style.visibility = fly.p > .999 ? "visible" : "hidden";
+      if (on && (!geo || !p.q.isConnected || geo.q !== p.q)) {
+        // how far the conversation goes up: enough for the line and the answer above the composer, as far as it can
+        const sc = p.sc, base = sc.scrollTop - (geo ? geo.lift * fly.lift : 0);
+        const comp = flash?.querySelector(".composer"), bottom = Math.min(comp ? box(comp).y : Infinity, box(sc).y + box(sc).h);
+        const ab = p.ans ? box(p.ans) : box(chip), need = ab.y + ab.h + 12 - bottom;
+        geo = { q: p.q, base, lift: Math.max(0, Math.min(need + (sc.scrollTop - base), sc.scrollHeight - sc.clientHeight - base)) };
       }
-      p.sc.scrollTop = geo.base + geo.lift * fly.lift;
-      const landed = fly.p > .999;
-      chip.style.display = landed ? "flex" : "none";
-      flyer.style.visibility = landed ? "hidden" : "";
-      gsap.set(flyer, { x: geo.x * fly.p, y: geo.y * fly.p, scale: 1 - .3 * fly.p });
+      if (geo) p.sc.scrollTop = geo.base + geo.lift * fly.lift;
+      if (on) {
+        const t = box(chip), w = flyer.offsetWidth;
+        gsap.set(flyer, { x: (t.x - from.x) * fly.p, y: (t.y - from.y) * fly.p, scale: 1 + (t.w / w - 1) * fly.p });
+      } else gsap.set(flyer, { x: 0, y: 0, scale: 1 });
+      flyer.style.visibility = fly.p > .999 ? "hidden" : "";
       if (p.ans) Object.assign(p.ans.style, { opacity: fly.a, transform: fly.a < 1 ? `translateY(${(1 - fly.a) * 16}px)` : "" });
     }
     scene($("#ctx-scene"), (tl) => {
