@@ -9,3 +9,7 @@ runtime/node_modules/
 packaging/build/
 packaging/windows/ChineseSimplified.isl
 dist/
+
+# The site's live demo: a copy of ui/ made by site/tools/app.py; only its demo backend is kept here
+/site/app/*
+!/site/app/demo/

@@ -200,6 +200,7 @@
       gsap.to("#progress", { scaleX: 1, ease: "none", scrollTrigger: { start: 0, end: "max", scrub: .3 } });
       ScrollTrigger.refresh();
     }
+    live();
     // pinning moves sections into a wrapper, and a moved node forgets where its panels were scrolled
     wins.forEach(restoreScroll);
   }
@@ -789,17 +790,58 @@
     const label = () => { btn.querySelector("span").textContent = isDark ? "换回白天" : "换成夜里"; btn.setAttribute("aria-pressed", isDark); };
     if (hasGsap && !still) {
       const o = { r: 0 };
-      st = ScrollTrigger.create({ trigger: win, start: "top 70%", end: "bottom 35%", scrub: 1, onUpdate: (s) => {
+      st = ScrollTrigger.create({ trigger: win, start: "top 70%", end: "center 50%", scrub: 1, onUpdate: (s) => {
         o.r = s.progress * 150; dark.style.clipPath = clip(o.r); isDark = s.progress > .5; label();
       } });
     }
     btn.addEventListener("click", () => {
+      const app = win.classList.contains("is-live") && $("iframe.live-app", win);
+      if (app) {
+        try { app.contentDocument.querySelector('[data-action="theme"]')?.click(); } catch (_) {}
+        isDark = !isDark; label();
+        return;
+      }
       if (st) { st.kill(); st = null; }
       isDark = !isDark; label();
       const from = parseFloat((dark.style.clipPath.match(/circle\(([\d.]+)%/) || [0, 0])[1]);
       if (hasGsap) { const o = { r: from }; gsap.to(o, { r: isDark ? 150 : 0, duration: 1.1, ease: "power3.inOut", onUpdate: () => (dark.style.clipPath = clip(o.r)) }); }
       else dark.style.clipPath = clip(isDark ? 150 : 0);
     });
+  }
+
+  /* ---------------- the windows, live: the real interface on the demo's backend ---------------- */
+  // Each window plays its part of the story as a picture; once that is done and it is at rest, the real Lattice takes
+  // its place (app/, answering from app/demo), in the working state it showed. All of them share one backend.
+  const LIVE = { "hero-win": "学习", "tabs-win": "定制", "ctx-win": "学习", "flash-win": "动手", "run-win": "动手", "theme-win": "学习" };
+  const liveUrl = (space, dark) => "app/index.html?space=" + encodeURIComponent(space) + (dark ? "&theme=dark" : "") + (space === "动手" ? "&run=" + encodeURIComponent("code/学习率扫描.py") : "");
+  function live() {
+    if (!window.LatticeDemo || !matchMedia("(min-width: 900px) and (pointer: fine)").matches) return;
+    LatticeDemo.wheel = (dy) => (lenis ? lenis.scrollTo(lenis.targetScroll + dy * .85) : scrollBy(0, dy));
+    LatticeDemo.engaged = (inner, on) => { const w = all.find((x) => x.frame && x.frame.contentWindow === inner); if (w) w.win.classList.toggle("engaged", on); };
+    const all = wins.filter((w) => LIVE[w.id]).map((win) => {
+      // what has to be finished first: the scroll animations this window is part of
+      const sts = hasGsap ? ScrollTrigger.getAll().filter((s) => s.trigger && (s.trigger === win || (s.pin && s.trigger.contains(win)))) : [];
+      return { win, sts, frame: null };
+    });
+    const load = (w) => {
+      if (w.frame) return;
+      w.frame = el("iframe", "live-app", "", $(".scale", w.win));
+      Object.assign(w.frame, { title: "Lattice（可以直接用的演示）", loading: "eager", src: liveUrl(LIVE[w.win.id], w.win.id === "theme-win") });
+      w.frame.addEventListener("load", () => { w.ready = true; check(); });
+    };
+    const io = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && load(all.find((w) => w.win === e.target))), { rootMargin: "120% 0px" });
+    // the page's own pictures and scripts first; the windows' programs after
+    const watch = () => setTimeout(() => all.forEach((w) => io.observe(w.win)), 1200);
+    if (document.readyState === "complete") watch(); else addEventListener("load", watch, { once: true });
+    const rest = (w) => w.sts.every((s) => s.progress > .995 && (!s.animation || s.animation.progress() > .995));
+    let queued = false;
+    function check() {
+      queued = false;
+      all.forEach((w) => w.win.classList.toggle("is-live", !!w.ready && rest(w)));
+    }
+    const soon = () => { if (!queued) { queued = true; requestAnimationFrame(check); } };
+    addEventListener("scroll", soon, { passive: true });
+    if (hasGsap) gsap.ticker.add(soon);
   }
 
   /* ---------------- download ---------------- */
@@ -836,6 +878,15 @@
       b.type = "button"; b.title = "放大看"; b.setAttribute("aria-label", "放大看");
       b.addEventListener("click", (e) => {
         e.stopPropagation();
+        if (w.classList.contains("is-live") && LIVE[w.id]) {
+          const c = el("div", "win zoom-live", '<div class="scale"></div>');
+          const f = el("iframe", "live-app", "", $(".scale", c));
+          f.title = "Lattice（可以直接用的演示）"; f.src = liveUrl(LIVE[w.id], w.id === "theme-win");
+          dlg.replaceChildren(c);
+          dlg.showModal && dlg.showModal();
+          requestAnimationFrame(() => fit(c));
+          return;
+        }
         const c = w.cloneNode(true);
         c.removeAttribute("id"); c.style.transform = "none";
         $(".win-max", c)?.remove();
@@ -844,6 +895,6 @@
         requestAnimationFrame(() => { fit(c); restoreScroll(c); });
       });
     });
-    dlg.addEventListener("click", () => dlg.close());
+    dlg.addEventListener("click", (e) => { if (e.target === dlg || !e.target.closest(".zoom-live")) dlg.close(); });
   }
 })();

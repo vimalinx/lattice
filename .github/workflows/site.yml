@@ -1,10 +1,11 @@
-# The site that introduces Lattice: the site folder as it is, put on GitHub Pages whenever it changes on main.
+# The site that introduces Lattice: the site folder, with the interface copied into site/app for its live demo, put on
+# GitHub Pages whenever either changes on main.
 name: Site
 
 on:
   push:
     branches: [main]
-    paths: ["site/**", ".github/workflows/site.yml"]
+    paths: ["site/**", "ui/**", ".github/workflows/site.yml"]
   workflow_dispatch:
 
 permissions:
@@ -25,6 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - run: python3 site/tools/app.py
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
