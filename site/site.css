@@ -49,6 +49,9 @@ h1,h2,h3,p{margin:0}
 .win .scale{position:absolute;left:0;top:0;width:1600px;height:1000px;transform-origin:0 0;transform:scale(var(--k,.5))}
 /* the window is Lattice itself (app/), over which the scenes draw; a window clicked into keeps its marks out of the way */
 .win iframe.live-app{position:absolute;left:0;top:0;width:1600px;height:1000px;border:0;background:transparent;color-scheme:normal}
+/* not its loading screen: the app shows once it is up */
+.win iframe.live-app{opacity:0;transition:opacity .3s}
+.win iframe.live-app.up{opacity:1}
 .win .ov{transition:opacity .35s}
 .win.engaged .ov{opacity:0}
 /* on a touch screen the page scrolls over the windows; the corner piece opens one to use */

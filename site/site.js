@@ -9,7 +9,7 @@
 
   // the wheel glides instead of stepping, and always moves the page, over the windows too; touch keeps the phone's own scrolling
   const lenis = hasGsap && !still && typeof Lenis !== "undefined"
-    ? new Lenis({ lerp: .08, wheelMultiplier: .85, anchors: true, autoRaf: false })
+    ? new Lenis({ lerp: .1, wheelMultiplier: 1, anchors: true, autoRaf: false })
     : null;
   // a window clicked into keeps the wheel for itself until the pointer leaves it
   document.addEventListener("pointerdown", (e) => {
@@ -45,6 +45,7 @@
         const d = frame.contentDocument;
         if (!d?.querySelector("#status .st-tab") || !d.querySelector("#dock .stack")) return;
         clearInterval(t);
+        frame.classList.add("up");
         setTimeout(() => { a.doc = d; done(a); }, 900);
       }, 100);
     }, { once: true }));
@@ -286,7 +287,7 @@
       tl.to(win, { backgroundColor: "rgba(253,253,249,1)", boxShadow: "0 30px 80px -30px rgba(22,38,43,.38)", duration: .4 }, 1.35);
       steps(tl, $("#tabs-steps"), [1.5]);
       tl.to({}, { duration: .5 }, T0 + 6 * STEP);
-    }, "+=" + 630 + "%");
+    }, "+=" + 420 + "%");
     // the working state the scroll has reached, switched in the app itself (the list beside it says which)
     let want = 0;
     const show = (i) => {
@@ -576,7 +577,7 @@
       tl.to(paneRing, { opacity: 1, duration: .15 }, t3 + .8).to(paneRing, { opacity: 0, duration: .4 }, t3 + 1.15);
       tl.to(fly, { a: 1, duration: .35, onUpdate: apply }, t3 + 1.05);
       tl.to({}, { duration: .4 }, t3 + 1.55);
-    }, "+=" + 660 + "%");
+    }, "+=" + 440 + "%");
   }
 
   /* ---------------- 叁: select, ask, and what stays ---------------- */
@@ -619,7 +620,7 @@
       tl.to(ring, { scale: 1.08, opacity: 0, duration: .3 }, 2.65);
       tl.to(R, { open: 1, duration: .05, onUpdate: reveal }, 2.8);
       tl.to({}, { duration: .5 }, 3.2);
-    }, "+=" + 450 + "%");
+    }, "+=" + 300 + "%");
   }
 
   /* ---------------- 肆: an experiment that works ---------------- */
@@ -704,7 +705,7 @@
       .from(dots.slice(3), { opacity: 0, scale: .4, transformOrigin: "center", stagger: .3, duration: .3 }, 1.2)
       .to(mp, { attr: { "stroke-dashoffset": 0 }, duration: 1.1, ease: "power1.inOut" }, 2.1)
       .from(fg, { opacity: 0, y: 26, duration: .5, ease: "back.out(2)" }, 2.7)
-      .from(".route-notes div", { opacity: 0, y: 20, stagger: .3, duration: .4 }, 1.6), "+=" + 240 + "%");
+      .from(".route-notes div", { opacity: 0, y: 20, stagger: .3, duration: .4 }, 1.6), "+=" + 160 + "%");
     gsap.to(pulse, { attr: { r: 34 }, opacity: 0, duration: 1.6, repeat: -1, ease: "power1.out" });
   }
 
@@ -768,7 +769,7 @@
       tl.from(".rings > div", { opacity: 0, scale: .86, stagger: .15, duration: .35, ease: "back.out(1.6)" }, 2.0);
       tl.from(".rings > span", { opacity: 0, y: 8, stagger: .1, duration: .2 }, 2.5);
       tl.to({}, { duration: .4 }, 3.0);
-    }, "+=" + 390 + "%");
+    }, "+=" + 260 + "%");
   }
 
   /* ---------------- 捌: the history, ticking by ---------------- */
@@ -839,7 +840,7 @@
   function live() {
     if (!window.LatticeDemo) return;
     // over a window the wheel still moves the page, until the window is clicked into
-    LatticeDemo.wheel = (dy) => (lenis ? lenis.scrollTo(lenis.targetScroll + dy * .85) : scrollBy(0, dy));
+    LatticeDemo.wheel = (dy) => (lenis ? lenis.scrollTo(lenis.targetScroll + dy) : scrollBy(0, dy));
     LatticeDemo.engaged = (inner, on) => apps.filter((x) => x.frame.contentWindow === inner).forEach((x) => x.win.classList.toggle("engaged", on));
     const io = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && apps.filter((x) => x.win === e.target).forEach((x) => x.load())), { rootMargin: "150% 0px" });
     wins.forEach((w) => io.observe(w));
@@ -884,6 +885,7 @@
         const f = el("iframe", "live-app", "", $(".scale", c));
         f.title = "Lattice（可以直接用的演示）";
         f.src = appUrl(space, { dark: w.classList.contains("is-dark") });
+        f.addEventListener("load", () => { const t = setInterval(() => { if (f.contentDocument?.querySelector("#status .st-tab")) { clearInterval(t); f.classList.add("up"); } }, 80); }, { once: true });
         dlg.replaceChildren(c);
         dlg.showModal && dlg.showModal();
         requestAnimationFrame(() => fit(c));
