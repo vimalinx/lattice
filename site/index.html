@@ -14,7 +14,7 @@
 <link rel="preload" href="fonts/serif-black.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="vendor/katex/katex.min.css">
 <link rel="stylesheet" href="ui/lattice-ui.css?v=3ed10b9f">
-<link rel="stylesheet" href="site.css?v=4e08afde">
+<link rel="stylesheet" href="site.css?v=c308c203">
 </head>
 <body>
 
@@ -53,7 +53,7 @@
     </div>
     </div>
     <div class="hero-stage">
-      <div class="win zoomable" id="hero-win" data-layers="hero" role="img" aria-label="Lattice 的学习工作状态：左栏是按主题和会话排的文件，中间主会话画关系图、出小实验，右上快答回答选中的代码，右下是卡片库">
+      <div class="win" id="hero-win" data-layers="hero" role="img" aria-label="Lattice 的学习工作状态：左栏是按主题和会话排的文件，中间主会话画关系图、出小实验，右上快答回答选中的代码，右下是卡片库">
         <div class="scale"><div class="ov" id="hero-ov"></div></div>
       </div>
     </div>
@@ -84,7 +84,7 @@
         <div class="wslist" id="wslist"></div>
       </div>
     </div>
-    <div class="win zoomable" id="tabs-win" data-layers="hero ws_write ws_cards ws_read ws_work ws_map ws_skills" role="img" aria-label="Lattice 窗口，随着滚动拆开成几块，再依次换成写作、复习、阅读、动手、梳理、定制几个工作状态">
+    <div class="win" id="tabs-win" data-layers="hero ws_write ws_cards ws_read ws_work ws_map ws_skills" role="img" aria-label="Lattice 窗口，随着滚动拆开成几块，再依次换成写作、复习、阅读、动手、梳理、定制几个工作状态">
       <div class="scale"><div class="ov" id="tabs-ov"></div></div>
     </div>
   </div>
@@ -118,7 +118,7 @@
 </section>
 <section class="scene band" id="ctx-scene" aria-label="快答拿到界面上开着的标签目录，再自己去读一个标签">
   <div class="scene-grid flip">
-    <div class="win zoomable" id="ctx-win" data-layers="hero" role="img" aria-label="快答收到一份标签目录：每个开着的标签的编号、种类和标题，前台的、正在用的、选中的文字；然后它读了代码标签">
+    <div class="win" id="ctx-win" data-layers="hero" role="img" aria-label="快答收到一份标签目录：每个开着的标签的编号、种类和标题，前台的、正在用的、选中的文字；然后它读了代码标签">
       <div class="scale"><div class="ov" id="ctx-ov"></div></div>
     </div>
     <div class="steps" id="ctx-steps">
@@ -170,7 +170,7 @@
         <p>快答关了也还在。过几天点那条下划线，在那儿问过的每个问题和回答一起展开，可以接着问，或者交给主会话深入讲。</p>
       </div>
     </div>
-    <div class="win zoomable" id="flash-win" data-layers="ws_work asked" role="img" aria-label="动手工作状态：选中代码第 9 行问快答，快答回答；之后点那条下划线，弹出在这一行问过的两个问题">
+    <div class="win" id="flash-win" data-layers="ws_work asked" role="img" aria-label="动手工作状态：选中代码第 9 行问快答，快答回答；之后点那条下划线，弹出在这一行问过的两个问题">
       <div class="scale"><div class="ov" id="flash-ov"></div></div>
     </div>
   </div>
@@ -256,7 +256,7 @@
 </section>
 <section class="scene band" id="run-scene" aria-label="运行代码，输出一行行出来；AI 的命令在沙箱里">
   <div class="scene-grid flip">
-    <div class="win zoomable" id="run-win" data-layers="ws_work" role="img" aria-label="代码和它的运行输出，旁边是快答">
+    <div class="win" id="run-win" data-layers="ws_work" role="img" aria-label="代码和它的运行输出，旁边是快答">
       <div class="scale"><div class="ov" id="run-ov"></div></div>
     </div>
     <div class="steps" id="run-steps">
@@ -391,6 +391,6 @@
 <script src="vendor/gsap/gsap.min.js"></script>
 <script src="vendor/gsap/ScrollTrigger.min.js"></script>
 <script src="vendor/lenis/lenis.min.js"></script>
-<script src="site.js?v=d0324550"></script>
+<script src="site.js?v=b766f8c3"></script>
 </body>
 </html>

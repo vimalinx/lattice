@@ -783,16 +783,22 @@
   }
 
   /* ---------------- any app frame opens large ---------------- */
+  // A click inside a window stays in it; the corner piece at its top right is what enlarges it.
   function zoom() {
     const dlg = $("#zoom");
-    $$(".zoomable").forEach((w) => w.addEventListener("click", () => {
-      const c = w.cloneNode(true);
-      c.removeAttribute("id"); c.classList.remove("zoomable");
-      c.style.transform = "none";
-      dlg.replaceChildren(c);
-      dlg.showModal && dlg.showModal();
-      requestAnimationFrame(() => { fit(c); restoreScroll(c); });
-    }));
+    $$(".win[data-layers]").forEach((w) => {
+      const b = el("button", "win-max", '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>', w);
+      b.type = "button"; b.title = "放大看"; b.setAttribute("aria-label", "放大看");
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const c = w.cloneNode(true);
+        c.removeAttribute("id"); c.style.transform = "none";
+        $(".win-max", c)?.remove();
+        dlg.replaceChildren(c);
+        dlg.showModal && dlg.showModal();
+        requestAnimationFrame(() => { fit(c); restoreScroll(c); });
+      });
+    });
     dlg.addEventListener("click", () => dlg.close());
   }
 })();

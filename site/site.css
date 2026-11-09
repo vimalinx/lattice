@@ -333,7 +333,15 @@ footer a{color:#97a3b0}
 dialog.zoom{border:0;padding:0;background:transparent;width:min(96vw,1700px);max-height:94vh;overflow:visible}
 dialog.zoom::backdrop{background:rgba(10,14,18,.8)}
 dialog.zoom .win{cursor:zoom-out}
-.zoomable{cursor:zoom-in}
+/* the corner piece that enlarges a window: tucked into its top-right corner, the joins on either side curved in */
+.win button.win-max{position:absolute;top:0;right:0;z-index:30;width:46px;height:42px;padding:0 0 3px 3px;border:0;display:grid;place-items:center;background:var(--paper);color:var(--ink);border-bottom-left-radius:16px;cursor:zoom-in;pointer-events:auto;transition:color .15s}
+.win button.win-max::before,.win button.win-max::after{content:"";position:absolute;width:16px;height:16px;background:radial-gradient(circle at 0 100%,transparent 15.5px,var(--paper) 16px)}
+.win button.win-max::before{top:0;left:-16px}
+.win button.win-max::after{right:0;bottom:-16px}
+.win button.win-max svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transition:transform .2s}
+.win button.win-max:hover{color:var(--teal)}
+.win button.win-max:hover svg{transform:scale(1.15)}
+.win button.win-max:focus-visible{outline:2px solid var(--teal);outline-offset:-4px}
 
 /* narrow screens: nothing is pinned; scenes stack and play as they come in */
 @media (max-width:899px){
