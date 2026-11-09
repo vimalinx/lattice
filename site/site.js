@@ -7,10 +7,19 @@
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (hasGsap) gsap.registerPlugin(ScrollTrigger);
 
-  // the wheel glides instead of stepping; touch keeps the phone's own scrolling, and panels inside the app scroll as usual
+  // the wheel glides instead of stepping, and always moves the page, over the windows too; touch keeps the phone's own scrolling
   const lenis = hasGsap && !still && typeof Lenis !== "undefined"
-    ? new Lenis({ lerp: .08, wheelMultiplier: .85, anchors: true, allowNestedScroll: true, autoRaf: false })
+    ? new Lenis({ lerp: .08, wheelMultiplier: .85, anchors: true, autoRaf: false })
     : null;
+  // a window clicked into keeps the wheel for itself until the pointer leaves it
+  document.addEventListener("pointerdown", (e) => {
+    const w = e.target.closest?.(".win, .play-board");
+    if (w && !w.closest("dialog")) w.setAttribute("data-lenis-prevent", "");
+  });
+  document.addEventListener("pointerout", (e) => {
+    const w = e.target.closest?.("[data-lenis-prevent]");
+    if (w && !w.contains(e.relatedTarget)) w.removeAttribute("data-lenis-prevent");
+  });
   if (lenis) {
     lenis.on("scroll", ScrollTrigger.update);
     gsap.ticker.add((t) => lenis.raf(t * 1000));
