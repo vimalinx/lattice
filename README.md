@@ -383,3 +383,5 @@ npx eslint@9 --no-config-lookup -c eslint.config.mjs "ui/*.js"   # 检查界面�
 ## 许可
 
 MIT，见 [`LICENSE`](LICENSE)。界面里打包的第三方组件（CodeMirror、KaTeX、marked、DOMPurify、Cytoscape.js、Mermaid）各自的版本和许可证见 [`ui/vendor/THIRD_PARTY.md`](ui/vendor/THIRD_PARTY.md)。
+
+感谢 Linux do 社区支持 https://linux.do
