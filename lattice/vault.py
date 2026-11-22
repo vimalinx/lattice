@@ -313,7 +313,7 @@ class Vault:
         # windows): it goes into the history on its own.
         self.commit_only(STATES, "工作状态")
         self.git("add", "-A")
-        if not self.git("status", "--porcelain").strip():
+        if not self.git("diff", "--cached", "--name-only", "--ignore-submodules=none", "-z"):
             self.pending.clear()
             return None
         name, email = ("我", "me@lattice.local") if actor == "me" else (f"Lattice · {actor}", f"{actor}@lattice.local")

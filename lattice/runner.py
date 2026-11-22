@@ -113,7 +113,7 @@ class RunWorker(QThread):
             started = time.monotonic()
             self.figures.mkdir(parents=True, exist_ok=True)
             self.emit("status", message="")
-            self.proc = subprocess.Popen(self.argv, cwd=self.cwd, env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            self.proc = subprocess.Popen(host.runner_popen_args(self.argv), cwd=self.cwd, env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                          stderr=subprocess.PIPE, **host.GROUP)
             pieces = queue.Queue()
 

@@ -100,11 +100,22 @@ def shell_argv(command):
             "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $OutputEncoding=[Text.Encoding]::UTF8; " + command]
 
 
+_CMD_RUNNER = ["cmd.exe", "/d", "/s", "/c"]
+
+
 def runner_argv(command):
     """A runner's command line (python file.py, gcc … && ./out) as a program to start: bash on Linux, cmd on Windows."""
     if WINDOWS:
-        return ["cmd.exe", "/d", "/s", "/c", command]
+        return [*_CMD_RUNNER, command]
     return ["bash", "-c", command]
+
+
+def runner_popen_args(argv):
+    if WINDOWS and argv[:-1] == _CMD_RUNNER:
+        # Popen serializes lists with C-runtime quoting. cmd.exe instead strips
+        # one outer pair after /s /c and expects literal quotes around each path.
+        return f'{subprocess.list2cmdline(_CMD_RUNNER)} "{argv[-1]}"'
+    return argv
 
 
 def quote(text):
